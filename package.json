@@ -11,7 +11,7 @@
     "ai",
     "no-virtual-dom"
   ],
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "bin": {
     "plaindev": "./dist/cli/index.js"
   },
