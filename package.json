@@ -1,0 +1,56 @@
+{
+  "name": "plain",
+  "version": "0.3.0",
+  "type": "module",
+  "description": "Plain —— 面向 AI 的编译型前端框架。TSX 视图 + signals 响应式 + 编译期物理剥离的 server() 边界。",
+  "keywords": ["frontend", "framework", "signals", "compiler", "ai", "no-virtual-dom"],
+  "license": "MIT",
+  "bin": {
+    "plaindev": "./src/cli/index.mjs"
+  },
+  "main": "./src/runtime/index.js",
+  "types": "./types/plain.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/plain.d.ts",
+      "default": "./src/runtime/index.js"
+    },
+    "./vite": {
+      "types": "./types/plain.d.ts",
+      "default": "./src/vite/index.mjs"
+    },
+    "./server": {
+      "types": "./types/plain.d.ts",
+      "default": "./src/server/index.mjs"
+    },
+    "./router": {
+      "types": "./types/plain.d.ts",
+      "default": "./src/runtime/router.js"
+    },
+    "./types": "./types/plain.d.ts"
+  },
+  "files": [
+    "src",
+    "types",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test/run.mjs",
+    "test:browser": "node test/browser.mjs",
+    "build:example": "vite build --config examples/todo/vite.config.js",
+    "dev:example": "vite --config examples/todo/vite.config.js",
+    "typecheck:example": "tsc --noEmit -p examples/todo/tsconfig.json",
+    "check": "node src/cli/index.mjs check src"
+  },
+  "dependencies": {
+    "typescript": "^5.6.0"
+  },
+  "peerDependencies": {
+    "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0",
+    "playwright-core": "^1.56.0",
+    "vite": "^7.0.0"
+  }
+}

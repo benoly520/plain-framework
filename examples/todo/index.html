@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plain App</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        --bg: #f5f7fa;
+        --card: #ffffff;
+        --fg: #14181f;
+        --muted: #5b6270;
+        --border: #e2e6ee;
+        --accent: #2563eb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.6;
+        font-size: 15px;
+      }
+      .app { max-width: 760px; margin: 0 auto; padding: 28px 20px 80px; }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+      }
+      .topbar h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+      nav { display: flex; gap: 6px; }
+      .nav {
+        padding: 6px 14px;
+        border-radius: 999px;
+        text-decoration: none;
+        color: var(--muted);
+        font-size: 14px;
+        border: 1px solid transparent;
+      }
+      .nav.on {
+        background: #e8effd;
+        color: var(--accent);
+        border-color: #c9dbfd;
+        font-weight: 600;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px 20px;
+        margin-bottom: 18px;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+      }
+      .card-head {
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+      .card-title { font-size: 17px; margin: 0 0 12px; }
+      .muted { color: var(--muted); font-size: 14px; }
+      .row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+      .row.small { font-size: 13px; }
+      .spacer { flex: 1; }
+      .input, .btn {
+        border-radius: 8px;
+        font-size: 14px;
+        font-family: inherit;
+      }
+      .input {
+        flex: 1;
+        border: 1px solid #cfd5df;
+        padding: 8px 10px;
+        background: #fff;
+        color: var(--fg);
+      }
+      .input:focus { outline: 2px solid #c9dbfd; border-color: var(--accent); }
+      .btn {
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        padding: 8px 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .btn.ghost {
+        background: transparent;
+        color: var(--accent);
+        border: 1px solid #c9dbfd;
+        padding: 5px 12px;
+        font-size: 13px;
+      }
+      .chip {
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--muted);
+        border-radius: 999px;
+        padding: 3px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .chip.on { background: #e8effd; color: var(--accent); border-color: #c9dbfd; font-weight: 600; }
+      .todos { list-style: none; padding: 0; margin: 0; }
+      .todo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .todo:last-child { border-bottom: 0; }
+      .todo.done span { text-decoration: line-through; color: var(--muted); }
+      .todo span { flex: 1; }
+      .del, .detail { font-size: 12px; color: var(--muted); text-decoration: none; }
+      .del:hover { color: #dc2626; }
+      .detail:hover { color: var(--accent); }
+      .ok { color: #16a34a; font-weight: 600; margin: 0; }
+      .warn { color: #d97706; font-weight: 600; }
+      .big { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+      .link { color: var(--accent); text-decoration: none; font-weight: 600; margin-left: 10px; }
+      .stats { display: flex; gap: 12px; margin-bottom: 12px; }
+      .stat {
+        flex: 1;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 12px;
+        background: #fbfcfe;
+      }
+      .stat-label { color: var(--muted); font-size: 13px; }
+      .stat-value { font-size: 22px; font-weight: 700; color: var(--accent); }
+      .error-box {
+        border: 1px solid #fecaca;
+        background: #fef2f2;
+        color: #b91c1c;
+        border-radius: 8px;
+        padding: 10px 12px;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
