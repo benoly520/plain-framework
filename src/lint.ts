@@ -5,11 +5,24 @@
 
 import ts from "typescript";
 
+export interface LintIssue {
+  line: number;
+  column: number;
+  level: "error" | "warn";
+  code: string;
+  message: string;
+  fix?: { start: number; end: number; text: string };
+}
+
 /**
  * check(source, fileName) -> [{ line, level, code, message, fix? }]
  * fix: { start, end, text } —— 可直接作用于源码的替换
  */
-export function check(source, fileName = "module.tsx", kind = isTsx(fileName)) {
+export function check(
+  source: string,
+  fileName = "module.tsx",
+  kind: ts.ScriptKind = isTsx(fileName)
+): LintIssue[] {
   const sf = ts.createSourceFile(
     fileName,
     source,
@@ -17,9 +30,9 @@ export function check(source, fileName = "module.tsx", kind = isTsx(fileName)) {
     true,
     kind
   );
-  const issues = [];
+  const issues: LintIssue[] = [];
   const signals = collectSignals(sf);
-  const add = (node, level, code, message, fix) => {
+  const add = (node: ts.Node, level: "error" | "warn", code: string, message: string, fix?: { start: number; end: number; text: string }) => {
     const { line, character } = sf.getLineAndCharacterOfPosition(
       node.getStart(sf)
     );
@@ -33,7 +46,7 @@ export function check(source, fileName = "module.tsx", kind = isTsx(fileName)) {
     });
   };
 
-  const visit = (node) => {
+  const visit = (node: ts.Node) => {
     // 1) 给 signal 变量直接赋值：count = count() + 1
     if (
       ts.isBinaryExpression(node) &&
@@ -139,8 +152,8 @@ export function check(source, fileName = "module.tsx", kind = isTsx(fileName)) {
 }
 
 /** 应用所有可自动修复的问题 */
-export function autofix(source, issues) {
-  const fixes = issues.filter((i) => i.fix).map((i) => i.fix);
+export function autofix(source: string, issues: LintIssue[]): string {
+  const fixes = issues.filter((i) => i.fix).map((i) => i.fix!);
   if (!fixes.length) return source;
   const sorted = [...fixes].sort((a, b) => b.start - a.start);
   let out = source;
@@ -148,7 +161,7 @@ export function autofix(source, issues) {
   return out;
 }
 
-export function formatIssues(issues, fileName) {
+export function formatIssues(issues: LintIssue[], fileName: string): string {
   const icon = { error: "x", warn: "!" };
   return issues
     .map(
@@ -160,7 +173,7 @@ export function formatIssues(issues, fileName) {
 
 // ---------------------------------------------------------------------------
 
-function isTsx(name) {
+function isTsx(name: string): ts.ScriptKind {
   return /\.tsx$/.test(name)
     ? ts.ScriptKind.TSX
     : /\.jsx$/.test(name)
@@ -170,9 +183,9 @@ function isTsx(name) {
     : ts.ScriptKind.JS;
 }
 
-function collectSignals(sf) {
-  const names = new Set();
-  const visit = (node) => {
+function collectSignals(sf: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: ts.Node) => {
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
@@ -204,8 +217,8 @@ function collectSignals(sf) {
   return names;
 }
 
-function isDeclarationName(id) {
-  let cur = id.parent;
+function isDeclarationName(id: ts.Identifier): boolean {
+  let cur: ts.Node | undefined = id.parent;
   while (cur) {
     if (ts.isVariableDeclaration(cur) && cur.name === id) return true;
     if (
@@ -221,6 +234,6 @@ function isDeclarationName(id) {
   return false;
 }
 
-function isPropertyAccessTarget(id) {
+function isPropertyAccessTarget(id: ts.Identifier): boolean {
   return id.parent && ts.isPropertyAccessExpression(id.parent) && id.parent.expression === id;
 }

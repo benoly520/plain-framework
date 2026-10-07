@@ -6,18 +6,26 @@
 //   3) 把 server() 函数物理写进 .plain/server.mjs，客户端只留 rpc 桩
 //   4) dev 模式下提供 /_plain/rpc 中间件
 
-import { compile } from "../compiler/index.mjs";
-import { updateServerManifest, writeServerManifest } from "../compiler/manifest.mjs";
+import type { Plugin } from "vite";
+import { compile } from "../compiler/index.js";
+import {
+  updateServerManifest,
+  writeServerManifest,
+} from "../compiler/manifest.js";
 import { transformWithEsbuild } from "vite";
 import path from "node:path";
 
-export default function plainPlugin(options = {}) {
+export default function plainPlugin(options: {
+  serverEntry?: string;
+  include?: RegExp;
+  rpc?: boolean;
+} = {}): Plugin {
   const { serverEntry = ".plain/server.mjs", include = /\.(tsx|jsx)$/ } = options;
-  const registry = new Map(); // name -> 可执行的 server 函数
+  const registry = new Map<string, any>(); // name -> 可执行的 server 函数
   let root = process.cwd();
 
   // dev 下每次只合并「本文件新识别到的」函数，避免把别的模块挤掉
-  const flushIncremental = (entries) => {
+  const flushIncremental = (entries: any[]) => {
     if (!entries.length) return;
     updateServerManifest(entries, path.join(root, serverEntry));
   };
@@ -35,11 +43,11 @@ export default function plainPlugin(options = {}) {
     name: "plain",
     enforce: "pre",
 
-    configResolved(cfg) {
+    configResolved(cfg: any) {
       root = cfg.root || process.cwd();
     },
 
-    configureServer(server) {
+    configureServer(server: any) {
       if (options.rpc === false) return;
       const handler = makeRpcHandler(registry);
       // 返回函数 => 中间件会被插到 Vite 内部中间件之前，避免被 SPA 兜底吞掉
@@ -48,7 +56,7 @@ export default function plainPlugin(options = {}) {
       };
     },
 
-    async transform(code, id) {
+    async transform(code: string, id: string) {
       if (id.includes("node_modules")) return null;
       if (!include.test(id)) return null;
 
@@ -64,14 +72,14 @@ export default function plainPlugin(options = {}) {
 
       // 3) 登记 server 函数（物理剥离）
       if (result.serverFunctions.length) {
-        const fresh = [];
+        const freshEntries: any[] = [];
         for (const fn of result.serverFunctions) {
           const f = evalFn(fn.body, fn.name);
           f.__plainBody = fn.body;
           registry.set(fn.name, f);
-          fresh.push({ name: fn.name, body: fn.body });
+          freshEntries.push({ name: fn.name, body: fn.body });
         }
-        flushIncremental(fresh);
+        flushIncremental(freshEntries);
       }
 
       return { code: result.code, map: null };
@@ -84,14 +92,14 @@ export default function plainPlugin(options = {}) {
 }
 
 /** dev 模式下的 /_plain/rpc 处理器 */
-function makeRpcHandler(registry) {
-  return function plainRpc(req, res, next) {
+function makeRpcHandler(registry: Map<string, any>) {
+  return function plainRpc(req: any, res: any, next: any) {
     if (req.method !== "POST") {
       res.statusCode = 405;
       return res.end("Method Not Allowed");
     }
     let raw = "";
-    req.on("data", (c) => (raw += c));
+    req.on("data", (c: any) => (raw += c));
     req.on("end", async () => {
       try {
         const { name, args } = JSON.parse(raw || "{}");
@@ -111,18 +119,18 @@ function makeRpcHandler(registry) {
       } catch (e) {
         res.statusCode = 500;
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ error: String((e && e.message) || e) }));
+        res.end(JSON.stringify({ error: String((e && (e as any).message) || e) }));
       }
     });
   };
 }
 
-function evalFn(body, name) {
+function evalFn(body: string, name: string): any {
   try {
     // eslint-disable-next-line no-new-func
     return new Function(`return (${body});`)();
   } catch (e) {
-    console.warn(`[plain] server 函数 ${name} 无法解析: ${e.message}`);
+    console.warn(`[plain] server 函数 ${name} 无法解析: ${(e as Error).message}`);
     return () => {
       throw new Error(`server fn ${name} unavailable`);
     };

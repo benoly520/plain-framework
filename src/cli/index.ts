@@ -31,16 +31,16 @@ plaindev v${PKG.version} —— Plain 框架命令行
 提示：dev / build 需要项目里安装了 vite。
 `;
 
-function load(file, name) {
-  return import(new URL(file, import.meta.url).href).catch((e) => {
+function load(file: string, name: string): Promise<any> {
+  return import(new URL(file, import.meta.url).href).catch((e: any) => {
     console.error(`[plaindev] 加载 ${name} 失败：${e.message}`);
     process.exit(1);
   });
 }
 
-function walkFiles(dir, exts, ignore = /node_modules|\.plain|dist|\.git/) {
-  const out = [];
-  const rec = (d) => {
+function walkFiles(dir: string, exts: RegExp, ignore = /node_modules|\.plain|dist|\.git/): string[] {
+  const out: string[] = [];
+  const rec = (d: string) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
       if (ignore.test(p)) continue;
@@ -52,8 +52,8 @@ function walkFiles(dir, exts, ignore = /node_modules|\.plain|dist|\.git/) {
   return out;
 }
 
-async function cmdCheck() {
-  const { check, autofix, formatIssues } = await load("../lint.mjs", "lint");
+async function cmdCheck(): Promise<number> {
+  const { check, autofix, formatIssues } = await load("../lint.js", "lint");
   const dir = args[0] || "src";
   const target = path.resolve(dir);
   const files = fs.statSync(target).isDirectory()
@@ -71,7 +71,7 @@ async function cmdCheck() {
     total += issues.length;
     console.log(`\n${rel}`);
     console.log(formatIssues(issues, rel));
-    if (autoFix && issues.some((i) => i.fix)) {
+    if (autoFix && issues.some((i: any) => i.fix)) {
       const next = autofix(src, issues);
       if (next !== src) {
         fs.writeFileSync(f, next);
@@ -90,8 +90,8 @@ async function cmdCheck() {
   return flags.has("--warn-only") ? 0 : 1;
 }
 
-async function cmdSchema() {
-  const { scanProject } = await load("../compiler/schema.mjs", "schema");
+async function cmdSchema(): Promise<number> {
+  const { scanProject } = await load("../compiler/schema.js", "schema");
   const dir = args[0] || "src";
   const schema = scanProject(path.resolve(dir));
   const json = JSON.stringify(schema, null, 2);
@@ -108,9 +108,9 @@ async function cmdSchema() {
   return 0;
 }
 
-async function withVite() {
-  const plugin = (await load("../vite/index.mjs", "vite plugin")).default;
-  let vite;
+async function withVite(): Promise<{ plugin: any; vite: any }> {
+  const plugin = (await load("../vite/index.js", "vite plugin")).default;
+  let vite: any;
   try {
     vite = await import("vite");
   } catch {
@@ -120,7 +120,7 @@ async function withVite() {
   return { plugin, vite };
 }
 
-async function cmdDev() {
+async function cmdDev(): Promise<number> {
   const { plugin, vite } = await withVite();
   const root = path.resolve(args[0] || ".");
   const port = Number((() => {
@@ -139,7 +139,7 @@ async function cmdDev() {
   return 0;
 }
 
-async function cmdBuild() {
+async function cmdBuild(): Promise<number> {
   const { plugin, vite } = await withVite();
   const root = path.resolve(args[0] || ".");
   await vite.build({
@@ -158,8 +158,8 @@ async function cmdBuild() {
   return 0;
 }
 
-async function cmdServe() {
-  const { serve } = await load("../server/index.mjs", "server");
+async function cmdServe(): Promise<number> {
+  const { serve } = await load("../server/index.js", "server");
   const dist = args[0] || "dist";
   const portIdx = rest.indexOf("--port");
   const port = portIdx >= 0 ? Number(rest[portIdx + 1]) : undefined;
@@ -167,7 +167,7 @@ async function cmdServe() {
   return 0;
 }
 
-const map = {
+const map: Record<string, () => Promise<number>> = {
   check: cmdCheck,
   schema: cmdSchema,
   dev: cmdDev,

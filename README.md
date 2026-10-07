@@ -111,7 +111,7 @@ export default defineConfig({
     "moduleResolution": "bundler",
     "strict": true,
     "baseUrl": ".",
-    "paths": { "plain": ["node_modules/plain/types/plain.d.ts"] }
+    "paths": { "plain": ["node_modules/plain/dist/index.d.ts"] }
   }
 }
 ```
@@ -257,7 +257,7 @@ app.use(rpcMiddleware({ manifest: ".plain/server.mjs" }));
 ## SSR
 
 Plain 编译产物是「直接建 DOM + effect 首次同步执行」，所以 SSR 不需要独立渲染器 ——
-**换一个 `document` 实现即可**（`src/server/dom-shim.mjs`，零依赖）。
+**换一个 `document` 实现即可**（`src/server/dom-shim.ts`，零依赖）。
 
 ```js
 import { renderToString, renderToStringSync } from "plain/server";
@@ -403,7 +403,7 @@ $ node test/browser.mjs
 完整示例在 [`examples/todo/`](examples/todo/)：待办列表 + 详情路由 + 统计页（服务端数据）+ 错误边界，覆盖全部核心能力。
 
 ```bash
-node src/cli/index.mjs dev examples/todo     # 打开 http://localhost:5173
+node dist/cli/index.js dev examples/todo     # 打开 http://localhost:5173
 ```
 
 ---
@@ -413,22 +413,23 @@ node src/cli/index.mjs dev examples/todo     # 打开 http://localhost:5173
 ```
 src/
   runtime/
-    signal.js    响应式内核：signal / computed / effect / batch / 作用域回收 / rowProxy
-    dom.js       建 DOM：insert / when / each / Slot 锚点 / 最小重排
-    async.js     resource（竞态安全）/ rpc / server
-    router.js    路由（history / hash / :param / *）
-    error.js     ErrorBoundary
-    index.js     唯一对外入口
+    signal.ts    响应式内核：signal / computed / effect / batch / 作用域回收 / rowProxy
+    dom.ts       建 DOM：insert / when / each / Slot 锚点 / 最小重排
+    async.ts     resource（竞态安全）/ rpc / server
+    router.ts    路由（history / hash / :param / *）
+    error.ts     ErrorBoundary
+    index.ts     唯一对外入口
   compiler/
-    index.mjs    TSX -> 建 DOM 代码（TS 解析 + 源码切片 + 产物自检）
-    manifest.mjs 服务端清单生成（dev 增量 / build 全量）
-    schema.mjs   组件契约提取
-  vite/index.mjs Vite 插件（类型剥离 -> 编译 -> 服务端剥离 -> RPC 中间件）
+    index.ts     TSX -> 建 DOM 代码（TS 解析 + 源码切片 + 产物自检）
+    manifest.ts  服务端清单生成（dev 增量 / build 全量）
+    schema.ts    组件契约提取
+  vite/index.ts  Vite 插件（类型剥离 -> 编译 -> 服务端剥离 -> RPC 中间件）
   server/
-    index.mjs    rpcMiddleware / staticMiddleware / serve
-    render.mjs   renderToString（SSR）
-    dom-shim.mjs 零依赖的服务端 DOM
-  cli/index.mjs  plaindev
-  lint.mjs       契约检查与自动修复
-types/plain.d.ts 全部类型 + JSX 类型
+    index.ts     rpcMiddleware / staticMiddleware / serve
+    render.ts    renderToString（SSR）
+    dom-shim.ts  零依赖的服务端 DOM
+  cli/index.ts   plaindev
+  lint.ts        契约检查与自动修复
+  index.ts       汇总导出（产出 dist/index.d.ts 作为包类型入口）
+types/           历史手写 .d.ts 已删除，类型由 tsc 自动从源码产出到 dist/
 ```

@@ -10,12 +10,12 @@ import http from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
 import * as esbuild from "esbuild";
-import { compile } from "../src/compiler/index.mjs";
-import { writeServerManifest } from "../src/compiler/manifest.mjs";
+import { compile } from "../dist/compiler/index.js";
+import { writeServerManifest } from "../dist/compiler/manifest.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
-const RUNTIME_URL = pathToFileURL(path.join(ROOT, "src/runtime/index.js")).href;
+const RUNTIME_URL = pathToFileURL(path.join(ROOT, "dist/runtime/index.js")).href;
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "plain-test-"));
 
 // ---------------------------------------------------------------------------
@@ -510,7 +510,7 @@ test("server() 真实 HTTP 往返（rpc 桩 -> 服务端清单 -> 回值）", as
   );
 
   const { rpcMiddleware } = await import(
-    pathToFileURL(path.join(ROOT, "src/server/index.mjs")).href
+    pathToFileURL(path.join(ROOT, "dist/server/index.js")).href
   );
   const mw = rpcMiddleware({ manifest });
   const server = http.createServer((req, res) =>
@@ -545,11 +545,11 @@ test("server() 真实 HTTP 往返（rpc 桩 -> 服务端清单 -> 回值）", as
 // ---------------------------------------------------------------------------
 test("运行时与编译产物均不得出现 innerHTML（XSS 面）", async () => {
   const files = [
-    "src/runtime/signal.js",
-    "src/runtime/dom.js",
-    "src/runtime/async.js",
-    "src/runtime/router.js",
-    "src/runtime/error.js",
+    "dist/runtime/signal.js",
+    "dist/runtime/dom.js",
+    "dist/runtime/async.js",
+    "dist/runtime/router.js",
+    "dist/runtime/error.js",
   ];
   for (const f of files) {
     const src = fs.readFileSync(path.join(ROOT, f), "utf8");
@@ -610,7 +610,7 @@ test("SSR：同一份组件在 Node 里渲染出 HTML 字符串", async () => {
     "ssr1"
   );
   const { renderToStringSync } = await import(
-    pathToFileURL(path.join(ROOT, "src/server/render.mjs")).href
+    pathToFileURL(path.join(ROOT, "dist/server/render.js")).href
   );
   const html = renderToStringSync(mod.App);
   ok(html.includes('<section class="page">'), "SSR 应输出 section：" + html);

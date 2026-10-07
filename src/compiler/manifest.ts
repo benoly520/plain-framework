@@ -3,11 +3,16 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export interface ManifestEntry {
+  name: string;
+  body: string;
+}
+
 /**
  * entries: [{ name, body }] —— body 是函数源码，形如 `async () => {...}`
  */
-export function renderServerManifest(entries) {
-  const lines = [];
+export function renderServerManifest(entries: ManifestEntry[]): string {
+  const lines: string[] = [];
   lines.push("// 由 plain 编译器自动生成：不要手工编辑。");
   lines.push(
     "// 这些函数只在服务端执行；客户端 bundle 里只有 rpc(name, args) 调用桩。"
@@ -30,7 +35,7 @@ export function renderServerManifest(entries) {
   return lines.join("\n");
 }
 
-export function writeServerManifest(entries, target) {
+export function writeServerManifest(entries: ManifestEntry[], target: string): string {
   const abs = path.resolve(target);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, renderServerManifest(entries));
@@ -38,9 +43,9 @@ export function writeServerManifest(entries, target) {
 }
 
 /** 渐进式构建：每个源文件只追加/更新自己的 server 函数，不清空整个清单 */
-export function updateServerManifest(entries, target) {
+export function updateServerManifest(entries: ManifestEntry[], target: string): string {
   const abs = path.resolve(target);
-  const map = new Map();
+  const map = new Map<string, string>();
   if (fs.existsSync(abs)) {
     const prev = readManifestEntries(fs.readFileSync(abs, "utf8"));
     prev.forEach((e) => map.set(e.name, e.body));
@@ -53,10 +58,10 @@ export function updateServerManifest(entries, target) {
 }
 
 /** 从 manifest 源码里还原 entries（用于增量更新） */
-function readManifestEntries(src) {
-  const out = [];
+function readManifestEntries(src: string): ManifestEntry[] {
+  const out: ManifestEntry[] = [];
   const re = /^export const ([A-Za-z_$][\w$]*) = ([\s\S]*?);\n(?=export |$)/gm;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = re.exec(src))) out.push({ name: m[1], body: m[2] });
   return out;
 }

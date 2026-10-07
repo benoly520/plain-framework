@@ -5,25 +5,27 @@
 //   2. 依赖自动收集，没有 deps 数组、没有 hook 顺序要求。
 //   3. 每个 effect 都可回收（dispose），由 owner 作用域统一管理，杜绝泄漏。
 
-let activeEffect = null;
-const effectStack = [];
-let activeOwner = null; // Set<dispose fn>：当前所属作用域
-const ownerStack = []; // withOwner 的嵌套栈，用于向上查找错误处理器
+import type { Signal, Effect, Owner } from "../types.js";
+
+let activeEffect: any = null;
+const effectStack: any[] = [];
+let activeOwner: any = null; // Set<dispose fn>：当前所属作用域
+const ownerStack: any[] = []; // withOwner 的嵌套栈，用于向上查找错误处理器
 
 /** 挂在 owner Set 上的错误处理器标记 */
-export const ERROR_HANDLER = Symbol("plain.errorHandler");
+export const ERROR_HANDLER: unique symbol = Symbol("plain.errorHandler");
 
 /** 在最近的 ErrorBoundary 里注册错误处理回调 */
-export function onError(handler) {
-  if (activeOwner) activeOwner[ERROR_HANDLER] = handler;
+export function onError(handler: (err: unknown) => void): void {
+  if (activeOwner) (activeOwner as any)[ERROR_HANDLER] = handler;
 }
 
-export function getCurrentEffect() {
+export function getCurrentEffect(): any {
   return activeEffect;
 }
 
-export function cleanup(effect) {
-  effect.deps.forEach((s) => s.subs.delete(effect));
+export function cleanup(effect: any): void {
+  effect.deps.forEach((s: any) => s.subs.delete(effect));
   effect.deps.clear();
 }
 
@@ -31,8 +33,8 @@ export function cleanup(effect) {
  * effect(fn, owner?)
  * 返回值本身就是该 effect 对象，e.dispose() 可回收。
  */
-export function effect(fn, owner) {
-  const e = {
+export function effect(fn: () => unknown, owner?: Owner): Effect {
+  const e: any = {
     deps: new Set(),
     fn,
     disposed: false,
@@ -74,18 +76,18 @@ export function effect(fn, owner) {
       queue.delete(e);
     },
   };
-  if (owner) owner.add(e.dispose);
+  if (owner) (owner as any).add(e.dispose);
   else if (activeOwner) activeOwner.add(e.dispose);
   e.run();
   if (e.disposed) return e; // 运行中 Dispose 了自己（例如 ErrorBoundary 回收旧分支）
-  return e;
+  return e as Effect;
 }
 
 /** 批处理：batch(() => { a.set(1); b.set(2); }) 内的多次写入只触发一轮 effect */
 let batchDepth = 0;
-const queue = new Set();
+const queue = new Set<any>();
 
-export function batch(fn) {
+export function batch<T>(fn: () => T): T {
   batchDepth++;
   try {
     return fn();
@@ -95,7 +97,7 @@ export function batch(fn) {
   }
 }
 
-function flush() {
+function flush(): void {
   let guard = 0;
   while (queue.size) {
     if (++guard > 10000) {
@@ -104,15 +106,18 @@ function flush() {
     }
     const effects = Array.from(queue);
     queue.clear();
-    effects.forEach((e) => {
+    effects.forEach((e: any) => {
       if (!e.disposed) e.run();
     });
   }
 }
 
 /** 创建一个可整体回收的作用域 */
-export function createScope(fn) {
-  const cleanups = new Set();
+export function createScope<T>(fn: (dispose: () => void) => T): {
+  value: T;
+  dispose(): void;
+} {
+  const cleanups = new Set<() => void>();
   const dispose = () => {
     cleanups.forEach((c) => c());
     cleanups.clear();
@@ -128,7 +133,7 @@ export function createScope(fn) {
 }
 
 /** 注册清理回调（组件 / 节点卸载时执行） */
-export function onCleanup(fn) {
+export function onCleanup(fn: () => void): void {
   if (activeOwner) activeOwner.add(fn);
 }
 
@@ -136,9 +141,9 @@ export function onCleanup(fn) {
  * signal —— 唯一状态原语
  * 读取 s()，写入 s.set(x)；也支持 s.set(x => next) 函数式更新。
  */
-export function signal(initial) {
-  const s = { value: initial, subs: new Set() };
-  const read = function () {
+export function signal<T>(initial: T): Signal<T> {
+  const s = { value: initial, subs: new Set<any>() };
+  const read: any = function () {
     if (activeEffect) {
       s.subs.add(activeEffect);
       activeEffect.deps.add(s);
@@ -146,39 +151,40 @@ export function signal(initial) {
     return s.value;
   };
   read.peek = () => s.value;
-  read.set = function (next) {
-    const v = typeof next === "function" ? next(s.value) : next;
+  read.set = function (next: T | ((prev: T) => T)): T {
+    const v =
+      typeof next === "function" ? (next as (prev: T) => T)(s.value) : next;
     if (Object.is(v, s.value)) return v;
     s.value = v;
     const subs = Array.from(s.subs);
     if (batchDepth > 0) {
-      subs.forEach((e) => queue.add(e));
+      subs.forEach((e: any) => queue.add(e));
       return v;
     }
-    subs.forEach((e) => {
+    subs.forEach((e: any) => {
       if (!e.disposed) e.run();
     });
     return v;
   };
   read.subs = s.subs;
-  return read;
+  return read as Signal<T>;
 }
 
 /** computed(fn) —— 派生值，读法与 signal 完全一致 */
-export function computed(fn, owner) {
-  const out = signal(undefined);
+export function computed<T>(fn: () => T, owner?: Owner): Signal<T> {
+  const out = signal<T>(undefined as unknown as T);
   effect(() => out.set(fn()), owner);
   return out;
 }
 
-export function stringify(v) {
+export function stringify(v: unknown): string {
   if (v === null || v === undefined) return "";
   if (typeof v === "boolean") return v ? "true" : "false";
   return String(v);
 }
 
 /** 在指定 owner（Set of dispose fn）下执行，把子树的 effect 归入可回收作用域 */
-export function withOwner(ownerSet, fn) {
+export function withOwner<T>(ownerSet: Owner, fn: () => T): T {
   const prev = activeOwner;
   activeOwner = ownerSet;
   ownerStack.push(ownerSet);
@@ -190,7 +196,7 @@ export function withOwner(ownerSet, fn) {
   }
 }
 
-export function getOwner() {
+export function getOwner(): Owner | null {
   return activeOwner;
 }
 
@@ -198,8 +204,8 @@ export function getOwner() {
  * resolve(v) —— 编译器对动态 props 一律传 getter；组件里统一用 resolve 取值。
  * （on* 开头的事件类 prop 编译器不包 getter，直接使用。）
  */
-export function resolve(v) {
-  return typeof v === "function" ? v() : v;
+export function resolve<T>(v: T | (() => T)): T {
+  return typeof v === "function" ? (v as () => T)() : v;
 }
 
 /**
@@ -207,36 +213,33 @@ export function resolve(v) {
  * 任何属性读取都会先读该行的 signal，从而让行内绑定自动订阅 —— 这是
  * “勾选待办 UI 不更新” 这个致命 bug 的根治手段，也让 AI 不必手写 key / memo。
  */
-export function rowProxy(getRow) {
-  return new Proxy(
-    {},
-    {
-      get(_t, prop) {
-        const row = getRow();
-        if (row === null || row === undefined) return undefined;
-        if (prop === Symbol.toPrimitive || prop === "toString") {
-          return () => String(row);
-        }
-        return row[prop];
-      },
-      set(_t, prop, value) {
-        const row = getRow();
-        if (row) row[prop] = value;
-        return true;
-      },
-      has(_t, prop) {
-        const row = getRow();
-        return row ? prop in row : false;
-      },
-      ownKeys() {
-        const row = getRow();
-        return row ? Reflect.ownKeys(row) : [];
-      },
-      getOwnPropertyDescriptor(_t, prop) {
-        const row = getRow();
-        if (!row) return undefined;
-        return { configurable: true, enumerable: true, value: row[prop] };
-      },
-    }
-  );
+export function rowProxy<T extends object>(getRow: () => T | null | undefined): T {
+  return new Proxy({} as T, {
+    get(_t, prop) {
+      const row = getRow();
+      if (row === null || row === undefined) return undefined;
+      if (prop === Symbol.toPrimitive || prop === "toString") {
+        return () => String(row);
+      }
+      return (row as any)[prop];
+    },
+    set(_t, prop, value) {
+      const row = getRow();
+      if (row) (row as any)[prop] = value;
+      return true;
+    },
+    has(_t, prop) {
+      const row = getRow();
+      return row ? prop in row : false;
+    },
+    ownKeys() {
+      const row = getRow();
+      return row ? Reflect.ownKeys(row) : [];
+    },
+    getOwnPropertyDescriptor(_t, prop) {
+      const row = getRow();
+      if (!row) return undefined;
+      return { configurable: true, enumerable: true, value: (row as any)[prop] };
+    },
+  });
 }

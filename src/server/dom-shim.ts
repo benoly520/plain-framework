@@ -2,22 +2,31 @@
 // 用途：让同一份编译产物能在 Node 里直接跑并序列化成 HTML（SSR），无需 jsdom。
 // 只实现编译器会用到的那部分 API，保持极小。
 
-const TEXT_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
-const VOID_TAGS = new Set([
+const TEXT_ESCAPE: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+};
+const VOID_TAGS = new Set<string>([
   "area", "base", "br", "col", "embed", "hr", "img", "input",
   "link", "meta", "param", "source", "track", "wbr",
 ]);
 
 class SNode {
-  constructor(nodeType) {
+  nodeType: number;
+  childNodes: any[];
+  parentNode: any;
+
+  constructor(nodeType: number) {
     this.nodeType = nodeType;
     this.childNodes = [];
     this.parentNode = null;
   }
-  get firstChild() {
+  get firstChild(): any {
     return this.childNodes[0] || null;
   }
-  appendChild(n) {
+  appendChild(n: any): any {
     if (n.parentNode) n.parentNode.removeChild(n);
     // 文档片段：把子节点搬进来（与浏览器行为一致）
     if (n.nodeType === 11) {
@@ -28,7 +37,7 @@ class SNode {
     this.childNodes.push(n);
     return n;
   }
-  insertBefore(n, ref) {
+  insertBefore(n: any, ref: any): any {
     if (n.parentNode) n.parentNode.removeChild(n);
     if (n.nodeType === 11) {
       for (const c of Array.from(n.childNodes)) this.insertBefore(c, ref);
@@ -40,22 +49,22 @@ class SNode {
     else this.childNodes.splice(i, 0, n);
     return n;
   }
-  removeChild(n) {
+  removeChild(n: any): any {
     const i = this.childNodes.indexOf(n);
     if (i >= 0) this.childNodes.splice(i, 1);
     n.parentNode = null;
     return n;
   }
-  replaceChildren(...nodes) {
+  replaceChildren(...nodes: any[]): void {
     const old = this.childNodes.slice();
     this.childNodes = [];
     old.forEach((c) => (c.parentNode = null));
     nodes.forEach((n) => this.appendChild(n));
   }
-  remove() {
+  remove(): void {
     if (this.parentNode) this.parentNode.removeChild(this);
   }
-  contains(n) {
+  contains(n: any): boolean {
     let cur = n;
     while (cur) {
       if (cur === this) return true;
@@ -66,7 +75,13 @@ class SNode {
 }
 
 class SElement extends SNode {
-  constructor(tag) {
+  tagName: string;
+  localName: string;
+  attributes: Record<string, string>;
+  style: Record<string, string>;
+  _events: Record<string, Function[]>;
+
+  constructor(tag: any) {
     super(1);
     this.tagName = String(tag).toLowerCase();
     this.localName = this.tagName;
@@ -74,43 +89,43 @@ class SElement extends SNode {
     this.style = {};
     this._events = Object.create(null);
   }
-  setAttribute(k, v) {
+  setAttribute(k: string, v: any): void {
     this.attributes[k] = String(v);
   }
-  getAttribute(k) {
+  getAttribute(k: string): string | null {
     return k in this.attributes ? this.attributes[k] : null;
   }
-  removeAttribute(k) {
+  removeAttribute(k: string): void {
     delete this.attributes[k];
   }
-  hasAttribute(k) {
+  hasAttribute(k: string): boolean {
     return k in this.attributes;
   }
-  addEventListener(type, fn) {
+  addEventListener(type: string, fn: Function): void {
     (this._events[type] = this._events[type] || []).push(fn);
   }
-  removeEventListener(type, fn) {
+  removeEventListener(type: string, fn: Function): void {
     const list = this._events[type] || [];
     const i = list.indexOf(fn);
     if (i >= 0) list.splice(i, 1);
   }
-  get children() {
+  get children(): any[] {
     return this.childNodes.filter((c) => c.nodeType === 1);
   }
-  set className(v) {
+  set className(v: any) {
     this.attributes.class = String(v);
   }
-  get className() {
+  get className(): string {
     return this.attributes.class || "";
   }
-  set innerHTML(v) {
+  set innerHTML(_v: any) {
     throw new Error("[plain] 禁止在服务端（以及客户端）使用 innerHTML");
   }
-  set textContent(v) {
+  set textContent(v: any) {
     this.childNodes = [];
     if (v !== "" && v != null) this.appendChild(new SText(String(v)));
   }
-  get textContent() {
+  get textContent(): string {
     return this.childNodes
       .map((c) => (c.nodeType === 3 ? c.nodeValue : serializeNode(c)))
       .join("");
@@ -118,21 +133,23 @@ class SElement extends SNode {
 }
 
 class SText extends SNode {
-  constructor(v) {
+  nodeValue: string;
+  constructor(v: any) {
     super(3);
     this.nodeValue = String(v);
   }
-  get textContent() {
+  get textContent(): string {
     return this.nodeValue;
   }
 }
 
 class SComment extends SNode {
-  constructor(v) {
+  nodeValue: string;
+  constructor(v: any) {
     super(8);
     this.nodeValue = String(v == null ? "" : v);
   }
-  get textContent() {
+  get textContent(): string {
     return "";
   }
 }
@@ -143,15 +160,15 @@ class SFragment extends SNode {
   }
 }
 
-function escapeText(s) {
+function escapeText(s: any): string {
   return String(s).replace(/[&<>"]/g, (c) => TEXT_ESCAPE[c]);
 }
 
-function escapeAttr(s) {
+function escapeAttr(s: any): string {
   return String(s).replace(/[&<>"]/g, (c) => TEXT_ESCAPE[c]);
 }
 
-export function serializeNode(node) {
+export function serializeNode(node: any): string {
   if (!node) return "";
   if (node.nodeType === 3) return escapeText(node.nodeValue);
   if (node.nodeType === 8) return ""; // 锚点注释不输出
@@ -174,7 +191,19 @@ export function serializeNode(node) {
     .join("")}</${el.tagName}>`;
 }
 
-export function createDocument() {
+export interface ServerDocument {
+  nodeType: number;
+  createElement: (tag: any) => SElement;
+  createElementNS: (_ns: any, tag: any) => SElement;
+  createTextNode: (v: any) => SText;
+  createComment: (v: any) => SComment;
+  createDocumentFragment: () => SFragment;
+  querySelector: () => null;
+  getElementById: () => null;
+  body: SElement;
+}
+
+export function createDocument(): ServerDocument {
   return {
     nodeType: 9,
     createElement: (tag) => new SElement(tag),
@@ -189,10 +218,10 @@ export function createDocument() {
 }
 
 /** 安装到 globalThis.document / window，供编译产物在 Node 里直接运行 */
-export function installServerDOM() {
+export function installServerDOM(): ServerDocument {
   const doc = createDocument();
-  globalThis.document = doc;
-  globalThis.Node = SNode;
-  if (!globalThis.window) globalThis.window = undefined;
+  (globalThis as any).document = doc;
+  (globalThis as any).Node = SNode;
+  if (!globalThis.window) (globalThis as any).window = undefined;
   return doc;
 }

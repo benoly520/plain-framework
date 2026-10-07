@@ -8,7 +8,7 @@ import path from "node:path";
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 
-const MIME = {
+const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
@@ -23,7 +23,7 @@ const MIME = {
 };
 
 /** 加载编译器产出的服务端清单 .plain/server.mjs */
-export async function loadHandlers(manifest = ".plain/server.mjs") {
+export async function loadHandlers(manifest = ".plain/server.mjs"): Promise<Record<string, any>> {
   const abs = path.resolve(manifest);
   if (!fs.existsSync(abs)) {
     throw new Error(
@@ -38,16 +38,20 @@ export async function loadHandlers(manifest = ".plain/server.mjs") {
  * 标准 Node (req, res, next) 中间件：处理 POST /_plain/rpc
  * 选项：{ manifest, endpoint, handlers }
  */
-export function rpcMiddleware(options = {}) {
+export function rpcMiddleware(options: {
+  manifest?: string;
+  endpoint?: string;
+  handlers?: Record<string, (...args: any[]) => any>;
+} = {}): (req: any, res: any, next?: () => void) => void {
   const { endpoint = "/_plain/rpc" } = options;
-  let handlersPromise = null;
-  const getHandlers = async () => {
+  let handlersPromise: Promise<Record<string, any>> | null = null;
+  const getHandlers = async (): Promise<Record<string, any>> => {
     if (options.handlers) return options.handlers;
     if (!handlersPromise) handlersPromise = loadHandlers(options.manifest);
     return handlersPromise;
   };
 
-  return async function plainRpc(req, res, next) {
+  return async function plainRpc(req: any, res: any, next?: () => void) {
     const url = (req.url || "").split("?")[0];
     if (url !== endpoint) return next ? next() : undefined;
     if (req.method !== "POST") {
@@ -55,7 +59,7 @@ export function rpcMiddleware(options = {}) {
       return res.end("Method Not Allowed");
     }
     let raw = "";
-    req.on("data", (c) => (raw += c));
+    req.on("data", (c: any) => (raw += c));
     req.on("end", async () => {
       try {
         const { name, args } = JSON.parse(raw || "{}");
@@ -69,23 +73,26 @@ export function rpcMiddleware(options = {}) {
         json(res, { result: result === undefined ? null : result });
       } catch (e) {
         res.statusCode = 500;
-        json(res, { error: String((e && e.message) || e) });
+        json(res, { error: String((e && (e as any).message) || e) });
       }
     });
   };
 }
 
-function json(res, body) {
+function json(res: any, body: any): void {
   res.setHeader("content-type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
 }
 
 /** 静态文件中间件（用于生产环境托管 dist） */
-export function staticMiddleware(rootDir, { spa = true } = {}) {
+export function staticMiddleware(
+  rootDir: string,
+  { spa = true }: { spa?: boolean } = {}
+): (req: any, res: any, next?: () => void) => void {
   const root = path.resolve(rootDir);
-  return function plainStatic(req, res, next) {
+  return function plainStatic(req: any, res: any, next?: () => void) {
     const rawUrl = (req.url || "/").split("?")[0];
-    let rel;
+    let rel: string;
     try {
       rel = decodeURIComponent(rawUrl);
     } catch {
@@ -103,10 +110,10 @@ export function staticMiddleware(rootDir, { spa = true } = {}) {
       res.statusCode = 403;
       return res.end("Forbidden");
     }
-    fs.stat(file, (err, st) => {
+    fs.stat(file, (err: any, st: any) => {
       let target = file;
       if (!err && st.isDirectory()) target = path.resolve(target, "index.html");
-      fs.readFile(target, (e, buf) => {
+      fs.readFile(target, (e: any, buf: any) => {
         if (!e) {
           res.setHeader(
             "content-type",
@@ -120,7 +127,7 @@ export function staticMiddleware(rootDir, { spa = true } = {}) {
           req.method === "GET" && !/\.[a-zA-Z0-9]+$/.test(rawUrl);
         if (spa && looksLikePage) {
           const index = path.join(root, "index.html");
-          fs.readFile(index, (e2, b2) => {
+          fs.readFile(index, (e2: any, b2: any) => {
             if (e2) {
               res.statusCode = 404;
               return res.end("Not Found");
@@ -141,7 +148,12 @@ export function staticMiddleware(rootDir, { spa = true } = {}) {
  * 一行起生产服务：静态托管 dist + RPC
  * serve({ dist: 'dist', manifest: '.plain/server.mjs', port: 3000 })
  */
-export async function serve(options = {}) {
+export async function serve(options: {
+  dist?: string;
+  manifest?: string;
+  port?: number;
+  endpoint?: string;
+} = {}): Promise<http.Server> {
   const {
     dist = "dist",
     manifest = ".plain/server.mjs",
@@ -159,7 +171,7 @@ export async function serve(options = {}) {
     statics(req, res);
   });
 
-  await new Promise((r) => server.listen(port, r));
+  await new Promise((r) => server.listen(port, () => r(undefined)));
   const addr = server.address();
   const real = typeof addr === "object" && addr ? addr.port : port;
   // eslint-disable-next-line no-console

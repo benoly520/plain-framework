@@ -7,23 +7,32 @@ import ts from "typescript";
 import fs from "node:fs";
 import path from "node:path";
 
-function kind(name) {
+export interface ExtractedSchema {
+  file: string;
+  components: any[];
+  serverFunctions: any[];
+  routes: any[];
+  exports: any[];
+  imports: any[];
+}
+
+function kind(name: string): ts.ScriptKind {
   if (/\.tsx$/.test(name)) return ts.ScriptKind.TSX;
   if (/\.jsx$/.test(name)) return ts.ScriptKind.JSX;
   if (/\.ts$/.test(name)) return ts.ScriptKind.TS;
   return ts.ScriptKind.JS;
 }
 
-function isJsxLike(n) {
+function isJsxLike(n: any): boolean {
   return (
     n &&
     (ts.isJsxElement(n) || ts.isJsxSelfClosingElement(n) || ts.isJsxFragment(n))
   );
 }
 
-export function extractSchema(source, fileName = "module.tsx") {
+export function extractSchema(source: string, fileName = "module.tsx"): ExtractedSchema {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind(fileName));
-  const out = {
+  const out: ExtractedSchema = {
     file: fileName,
     components: [],
     serverFunctions: [],
@@ -32,8 +41,8 @@ export function extractSchema(source, fileName = "module.tsx") {
     imports: [],
   };
 
-  const jsxBodyOf = (fn) => {
-    const unwrap = (n) => {
+  const jsxBodyOf = (fn: any) => {
+    const unwrap = (n: any) => {
       let e = n;
       while (e && (ts.isParenthesizedExpression(e) || ts.isAsExpression(e)))
         e = e.expression;
@@ -43,24 +52,24 @@ export function extractSchema(source, fileName = "module.tsx") {
     if (isJsxLike(body)) return body;
     if (ts.isBlock(body)) {
       const r = body.statements.find(
-        (s) => ts.isReturnStatement(s) && s.expression && isJsxLike(unwrap(s.expression))
+        (s: any) => ts.isReturnStatement(s) && s.expression && isJsxLike(unwrap(s.expression))
       );
-      return r ? unwrap(r.expression) : null;
+      return r ? unwrap((r as any).expression) : null;
     }
     return null;
   };
 
-  const describeComponent = (nameNode, fn) => {
+  const describeComponent = (nameNode: any, fn: any) => {
     const jsx = jsxBodyOf(fn);
     if (!jsx) return;
     const name = nameNode && nameNode.getText ? nameNode.getText(sf) : null;
     if (!name) return;
     const propsObj =
       fn.parameters && fn.parameters[0] ? fn.parameters[0].name : null;
-    const props = [];
-    const usedProps = new Set();
+    const props: any[] = [];
+    const usedProps = new Set<string>();
     // props.xxx / props.children 的使用
-    const scanProps = (node) => {
+    const scanProps = (node: any) => {
       if (
         ts.isPropertyAccessExpression(node) &&
         ts.isIdentifier(node.expression) &&
@@ -79,7 +88,7 @@ export function extractSchema(source, fileName = "module.tsx") {
         ts.isIdentifier(node.initializer) &&
         node.initializer.text === propsObj.text
       ) {
-        node.name.elements.forEach((e) => {
+        node.name.elements.forEach((e: any) => {
           if (ts.isIdentifier(e.name)) usedProps.add(e.name.text);
         });
       }
@@ -88,14 +97,14 @@ export function extractSchema(source, fileName = "module.tsx") {
     if (fn.body) scanProps(fn.body);
 
     // 调用点上传了哪些属性
-    const callSites = new Set();
-    const collectCalls = (node) => {
+    const callSites = new Set<string>();
+    const collectCalls = (node: any) => {
       if (
         ts.isJsxSelfClosingElement(node) &&
         isComponentTag(node.tagName.getText(sf)) &&
         node.tagName.getText(sf) === name
       ) {
-        node.attributes.properties.forEach((p) => {
+        node.attributes.properties.forEach((p: any) => {
           if (ts.isJsxAttribute(p)) callSites.add(p.name.getText(sf));
         });
       }
@@ -104,7 +113,7 @@ export function extractSchema(source, fileName = "module.tsx") {
         isComponentTag(node.openingElement.tagName.getText(sf)) &&
         node.openingElement.tagName.getText(sf) === name
       ) {
-        node.openingElement.attributes.properties.forEach((p) => {
+        node.openingElement.attributes.properties.forEach((p: any) => {
           if (ts.isJsxAttribute(p)) callSites.add(p.name.getText(sf));
         });
       }
@@ -116,8 +125,8 @@ export function extractSchema(source, fileName = "module.tsx") {
       .filter((p) => p !== "children")
       .forEach((p) => props.push({ name: p, optional: !callSites.has(p) }));
 
-    const elements = new Set();
-    const collectTags = (node) => {
+    const elements = new Set<string>();
+    const collectTags = (node: any) => {
       if (ts.isJsxElement(node) && !isComponentTag(node.openingElement.tagName.getText(sf)))
         elements.add(node.openingElement.tagName.getText(sf));
       if (ts.isJsxSelfClosingElement(node) && !isComponentTag(node.tagName.getText(sf)))
@@ -135,7 +144,7 @@ export function extractSchema(source, fileName = "module.tsx") {
     });
   };
 
-  const visit = (node) => {
+  const visit = (node: any) => {
     if (ts.isFunctionDeclaration(node) && node.name) {
       describeComponent(node.name, node);
     }
@@ -163,9 +172,9 @@ export function extractSchema(source, fileName = "module.tsx") {
       const fnNode = node.arguments[0];
       out.serverFunctions.push({
         name: decl && ts.isIdentifier(decl.name) ? decl.name.text : null,
-        params: fnNode.parameters.map((p) => p.name.getText(sf)),
+        params: fnNode.parameters.map((p: any) => p.name.getText(sf)),
         async: !!fnNode.modifiers?.some(
-          (m) => m.kind === ts.SyntaxKind.AsyncKeyword
+          (m: any) => m.kind === ts.SyntaxKind.AsyncKeyword
         ),
         line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
       });
@@ -181,16 +190,16 @@ export function extractSchema(source, fileName = "module.tsx") {
       const arg = node.arguments[0];
       if (ts.isObjectLiteralExpression(arg)) {
         const p = arg.properties.find(
-          (x) => x.name && x.name.getText(sf) === "routes"
+          (x: any) => x.name && x.name.getText(sf) === "routes"
         );
         if (p && ts.isPropertyAssignment(p) && ts.isArrayLiteralExpression(p.initializer)) {
-          p.initializer.elements.forEach((el) => {
+          p.initializer.elements.forEach((el: any) => {
             if (ts.isObjectLiteralExpression(el)) {
               const pathProp = el.properties.find(
-                (x) => x.name && x.name.getText(sf) === "path"
+                (x: any) => x.name && x.name.getText(sf) === "path"
               );
               const cmpProp = el.properties.find(
-                (x) => x.name && x.name.getText(sf) === "component"
+                (x: any) => x.name && x.name.getText(sf) === "component"
               );
               out.routes.push({
                 path:
@@ -213,7 +222,7 @@ export function extractSchema(source, fileName = "module.tsx") {
     }
     if (
       ts.isExportDeclaration(node) ||
-      node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+      node.modifiers?.some((m: any) => m.kind === ts.SyntaxKind.ExportKeyword)
     ) {
       const name =
         (node.name && node.name.text) ||
@@ -228,14 +237,17 @@ export function extractSchema(source, fileName = "module.tsx") {
   return out;
 }
 
-function isComponentTag(n) {
+function isComponentTag(n: string): boolean {
   return /^[A-Z]/.test(n) || n.includes(".");
 }
 
 /** 扫描目录产出整个项目的契约 */
-export function scanProject(rootDir, { exts = /\.(tsx|jsx)$/, ignore = /node_modules|\.plain|dist/ } = {}) {
-  const files = [];
-  const walkDir = (dir) => {
+export function scanProject(
+  rootDir: string,
+  { exts = /\.(tsx|jsx)$/, ignore = /node_modules|\.plain|dist/ } = {}
+): any {
+  const files: string[] = [];
+  const walkDir = (dir: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, entry.name);
       if (ignore.test(p)) continue;
@@ -244,7 +256,7 @@ export function scanProject(rootDir, { exts = /\.(tsx|jsx)$/, ignore = /node_mod
     }
   };
   walkDir(rootDir);
-  const schema = {
+  const schema: any = {
     version: 1,
     framework: "plain",
     root: path.resolve(rootDir),

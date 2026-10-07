@@ -14,7 +14,7 @@ const MANIFEST = path.join(ROOT, "examples/todo/.plain/server.mjs");
 const SHOTS = path.join(ROOT, "examples/todo/shots");
 const PORT = 8421;
 
-const { serve } = await import(pathToFileURL(path.join(ROOT, "src/server/index.mjs")).href);
+const { serve } = await import(pathToFileURL(path.join(ROOT, "dist/server/index.js")).href);
 
 let passed = 0;
 let failed = 0;

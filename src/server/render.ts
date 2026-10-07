@@ -3,13 +3,18 @@
 // 因为 Plain 编译产物是「直接建 DOM」，且 effect 在首次执行时同步写入，
 // 所以 SSR 不需要独立的渲染器 —— 换个 document 实现即可。
 
-import { installServerDOM, serializeNode } from "./dom-shim.mjs";
+import { installServerDOM, serializeNode } from "./dom-shim.js";
+
+export type RenderableNode = any;
 
 /**
  * renderToString(component | node, { wait = 0 })
  * wait: 等待的毫秒数（用于让 resource 的 promise tick 完成）
  */
-export async function renderToString(component, options = {}) {
+export async function renderToString(
+  component: (() => any) | any,
+  options: { wait?: number; container?: boolean } = {}
+): Promise<string> {
   const { wait = 0, container = true } = options || {};
   const doc = installServerDOM();
   const root = doc.createElement(container ? "div" : "div");
@@ -21,7 +26,7 @@ export async function renderToString(component, options = {}) {
 }
 
 /** 同步版本：不含异步资源（resource 会停在 loading 态） */
-export function renderToStringSync(component) {
+export function renderToStringSync(component: (() => any) | any): string {
   const doc = installServerDOM();
   const node = typeof component === "function" ? component() : component;
   return serializeNode(node);

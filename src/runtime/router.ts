@@ -1,20 +1,21 @@
 // Plain 路由：history / hash 两种模式，支持 :param，路由切换自动回收上一页 effect
 
+import type { Router, Route, RouteProps, Renderable, Owner } from "../types.js";
 import { signal, computed, withOwner } from "./signal.js";
 import { resolve, nodesOf } from "./dom.js";
 
-function currentPath(mode) {
+function currentPath(mode: string): string {
   if (typeof window === "undefined") return "/";
   if (mode === "hash") return window.location.hash.slice(1) || "/";
   return window.location.pathname || "/";
 }
 
-function match(pattern, path) {
+function match(pattern: string, path: string): Record<string, string> | null {
   if (pattern === "*") return {};
   const ps = pattern.split("/").filter(Boolean);
   const xs = path.split("/").filter(Boolean);
   if (ps.length !== xs.length) return null;
-  const params = {};
+  const params: Record<string, string> = {};
   for (let i = 0; i < ps.length; i++) {
     if (ps[i].startsWith(":")) {
       params[ps[i].slice(1)] = decodeURIComponent(xs[i]);
@@ -29,7 +30,10 @@ function match(pattern, path) {
  * createRouter({ routes, mode })
  * routes: [{ path: '/', component: Home }, { path: '/todo/:id', component: Detail }, { path: '*', component: NotFound }]
  */
-export function createRouter(options) {
+export function createRouter(options: {
+  routes?: Route[];
+  mode?: "history" | "hash";
+}): Router {
   const { routes = [], mode = "history" } = options || {};
   const path = signal(currentPath(mode));
 
@@ -49,7 +53,7 @@ export function createRouter(options) {
     return { route: fallback || null, params: {}, path: p };
   });
 
-  function navigate(to, replace) {
+  function navigate(to: string, replace?: boolean): void {
     if (typeof window === "undefined") return;
     if (mode === "hash") {
       window.location.hash = to;
@@ -62,7 +66,10 @@ export function createRouter(options) {
     }
   }
 
-  function Link(props) {
+  function Link(props: {
+    to: string | (() => string);
+    children?: () => Renderable;
+  }): Node {
     const to = () => String(resolve(props.to));
     const el = document.createElement("a");
     el.setAttribute("href", to());
@@ -71,7 +78,7 @@ export function createRouter(options) {
       navigate(to());
     });
     const kids = props.children ? props.children() : null;
-    if (kids) nodesOf(kids).forEach((n) => el.appendChild(n));
+    if (kids) nodesOf(kids).forEach((n: Node) => el.appendChild(n));
     return el;
   }
 
@@ -85,23 +92,23 @@ export function createRouter(options) {
     /**
      * render(container) —— 返回一个 update 函数，路由变化时重绘并回收上一页
      */
-    render(container) {
-      let current = null;
+    render(container: Node) {
+      let current: any = null;
       return () => {
         const m = matched();
         if (current) {
           current.dispose();
-          current.nodes.forEach((n) => n.remove && n.remove());
+          current.nodes.forEach((n: any) => n.remove && n.remove());
           current = null;
         }
         if (!m.route || !m.route.component) return;
-        const cleanups = new Set();
-        let node = null;
+        const cleanups = new Set<() => void>();
+        let node: any = null;
         withOwner(cleanups, () => {
-          node = m.route.component({ params: m.params, path: m.path });
+          node = m.route!.component({ params: m.params, path: m.path } as RouteProps);
         });
         const nodes = nodesOf(node);
-        nodes.forEach((n) => container.appendChild(n));
+        nodes.forEach((n: Node) => container.appendChild(n));
         current = {
           nodes,
           dispose() {

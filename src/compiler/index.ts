@@ -10,8 +10,14 @@
 
 import ts from "typescript";
 
+/** 编译器识别出的服务端函数：{ name, body } */
+export interface ServerFunction {
+  name: string;
+  body: string;
+}
+
 let uid = 0;
-const fresh = (p) => `__${p}${++uid}`;
+const fresh = (p: string) => `__${p}${++uid}`;
 
 // helper 一律用别名引入，避免和用户自己的 import 重名
 const E = "__effect";
@@ -27,17 +33,17 @@ const HELPER_IMPORT =
   `import { effect as ${E}, stringify as ${S}, insert as ${INS}, ` +
   `each as ${EACH}, when as ${WHEN}, rpc as ${RPC}, place as ${PLACE} } from "plain";`;
 
-function isComponentTag(name) {
+function isComponentTag(name: string): boolean {
   return /^[A-Z]/.test(name) || name.includes(".");
 }
 
-function isJsxLike(n) {
+function isJsxLike(n: any): boolean {
   return (
     ts.isJsxElement(n) || ts.isJsxSelfClosingElement(n) || ts.isJsxFragment(n)
   );
 }
 
-function insideJsx(node) {
+function insideJsx(node: any): boolean {
   let cur = node.parent;
   while (cur) {
     if (isJsxLike(cur)) return true;
@@ -46,7 +52,7 @@ function insideJsx(node) {
   return false;
 }
 
-function unparen(n) {
+function unparen(n: any): any {
   let e = n;
   while (ts.isParenthesizedExpression(e)) e = e.expression;
   return e;
@@ -56,7 +62,10 @@ function unparen(n) {
  * compile(source) -> { code, serverFunctions }
  * serverFunctions: [{ name, body }] —— 需物理运行在服务端并对外暴露的部分
  */
-export function compile(source, fileName = "module.jsx") {
+export function compile(
+  source: string,
+  fileName = "module.jsx"
+): { code: string; serverFunctions: ServerFunction[] } {
   uid = 0;
   const sf = ts.createSourceFile(
     fileName,
@@ -66,10 +75,10 @@ export function compile(source, fileName = "module.jsx") {
     ts.ScriptKind.JSX
   );
 
-  const edits = [];
-  const serverFunctions = [];
+  const edits: any[] = [];
+  const serverFunctions: ServerFunction[] = [];
 
-  const walk = (node) => {
+  const walk = (node: any) => {
     // 1) server(fn) -> RPC 桩 + 物理剥离
     if (
       ts.isCallExpression(node) &&
@@ -136,7 +145,7 @@ export function compile(source, fileName = "module.jsx") {
  * 兜底自检：产物必须是能被普通 JS 解析器解析的干净代码，且不含任何 JSX。
  * 这一层是最后防线 —— 宁可报错，也不能把坏代码悄悄交给打包器。
  */
-function assertClean(code, fileName) {
+function assertClean(code: string, fileName: string): void {
   const out = ts.createSourceFile(
     fileName,
     code,
@@ -144,7 +153,7 @@ function assertClean(code, fileName) {
     true,
     ts.ScriptKind.JS
   );
-  const diags = out.parseDiagnostics || [];
+  const diags = (out as any).parseDiagnostics || [];
   if (diags.length) {
     const d = diags[0];
     const { line } = out.getLineAndCharacterOfPosition(d.start);
@@ -155,7 +164,7 @@ function assertClean(code, fileName) {
     );
   }
   let leaked = -1;
-  const scan = (n) => {
+  const scan = (n: any) => {
     if (isJsxLike(n) && leaked < 0) leaked = n.getStart(out);
     ts.forEachChild(n, scan);
   };
@@ -168,7 +177,7 @@ function assertClean(code, fileName) {
   }
 }
 
-function isCallArgument(node) {
+function isCallArgument(node: any): boolean {
   return (
     node.parent &&
     ts.isCallExpression(node.parent) &&
@@ -176,7 +185,7 @@ function isCallArgument(node) {
   );
 }
 
-function jsxContext(node) {
+function jsxContext(node: any): boolean {
   let cur = node.parent;
   while (cur) {
     if (isJsxLike(cur)) return true;
@@ -192,7 +201,7 @@ function jsxContext(node) {
   return false;
 }
 
-function applyEdits(source, edits) {
+function applyEdits(source: string, edits: any[]): string {
   const sorted = [...edits].sort((a, b) => b.start - a.start);
   let out = source;
   for (const e of sorted) {
@@ -201,7 +210,7 @@ function applyEdits(source, edits) {
   return out;
 }
 
-function serverVarName(node) {
+function serverVarName(node: any): string {
   let cur = node.parent;
   while (cur) {
     if (ts.isVariableDeclaration(cur) && ts.isIdentifier(cur.name)) {
@@ -220,14 +229,14 @@ function serverVarName(node) {
  * genFragment(node, out) —— 生成「把 node 渲染进一个新建 Fragment 并返回」的语句。
  * node 可以是 JSX，也可以是条件表达式 / && 表达式 / .map 调用，任意嵌套都支持。
  */
-function genFragment(node, out) {
+function genFragment(node: any, out: string[]): string[] {
   out.push(`const __f = document.createDocumentFragment();`);
   emitExprInto(node, "__f", out);
   out.push(`return __f;`);
   return out;
 }
 
-function genBlock(node) {
+function genBlock(node: any): string {
   return genFragment(node, []).join("\n");
 }
 
@@ -236,11 +245,11 @@ function genBlock(node) {
  * 任意表达式 -> 渲染到 parentVar。这是整个编译器唯一的「发射入口」，
  * 嵌套的条件/map 都走这里递归，保证不会有 JSX 偷偷漏到输出里。
  */
-function emitExprInto(node, parentVar, out) {
+function emitExprInto(node: any, parentVar: string, out: string[]): void {
   // arr.map(...)
   const m = detectMap(node);
   if (m) {
-    const body = [];
+    const body: string[] = [];
     genFragment(m.body, body);
     out.push(
       `${EACH}(${parentVar}, () => (${m.array}), (${m.param}${
@@ -253,8 +262,8 @@ function emitExprInto(node, parentVar, out) {
   // cond ? a : b
   if (ts.isConditionalExpression(node)) {
     const cond = node.condition.getText();
-    const thenOut = [];
-    const elseOut = [];
+    const thenOut: string[] = [];
+    const elseOut: string[] = [];
     genFragment(unparen(node.whenTrue), thenOut);
     const hasElse = !!node.whenFalse;
     if (hasElse) genFragment(unparen(node.whenFalse), elseOut);
@@ -272,7 +281,7 @@ function emitExprInto(node, parentVar, out) {
     node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
   ) {
     const cond = node.left.getText();
-    const thenOut = [];
+    const thenOut: string[] = [];
     genFragment(unparen(node.right), thenOut);
     out.push(
       `${WHEN}(${parentVar}, () => (${cond}), () => {\n${thenOut.join(
@@ -290,7 +299,7 @@ function emitExprInto(node, parentVar, out) {
   out.push(`${INS}(${parentVar}, () => (${node.getText()}));`);
 }
 
-function tagParts(node) {
+function tagParts(node: any): any[] | null {
   if (ts.isJsxElement(node))
     return [
       node.openingElement.tagName.getText(),
@@ -302,10 +311,10 @@ function tagParts(node) {
   return null;
 }
 
-function emitNode(node, parentVar, out) {
+function emitNode(node: any, parentVar: string, out: string[]): void {
   if (!node) return;
   if (ts.isJsxFragment(node)) {
-    node.children.forEach((c) => emitChild(c, parentVar, out));
+    node.children.forEach((c: any) => emitChild(c, parentVar, out));
     return;
   }
   const parts = tagParts(node);
@@ -322,38 +331,38 @@ function emitNode(node, parentVar, out) {
 
 // --- props -----------------------------------------------------------------
 
-function paramList(fn) {
-  return fn.parameters.map((p) => p.getText()).join(", ");
+function paramList(fn: any): string {
+  return fn.parameters.map((p: any) => p.getText()).join(", ");
 }
 
 /** 把「返回 JSX 的箭头函数」编译成正常的函数：主要出现在组件 props 里 */
-function genFnWithJsxBody(fn) {
-  let bodyNode = null;
+function genFnWithJsxBody(fn: any): string | null {
+  let bodyNode: any = null;
   if (isJsxLike(unparen(fn.body))) bodyNode = unparen(fn.body);
   else if (ts.isBlock(fn.body)) {
     const ret = fn.body.statements.find(
-      (s) => ts.isReturnStatement(s) && s.expression && isJsxLike(unparen(s.expression))
+      (s: any) => ts.isReturnStatement(s) && s.expression && isJsxLike(unparen(s.expression))
     );
     if (ret) bodyNode = unparen(ret.expression);
   }
   if (!bodyNode) return null;
-  const out = [];
+  const out: string[] = [];
   emitNode(bodyNode, "__fb", out);
   return `(${paramList(fn)}) => {\nconst __fb = document.createDocumentFragment();\n${out.join(
     "\n"
   )}\nreturn __fb;\n}`;
 }
 
-function valueCode(exprNode) {
+function valueCode(exprNode: any): string {
   if (ts.isArrowFunction(exprNode) || ts.isFunctionExpression(exprNode)) {
     return genFnWithJsxBody(exprNode) || exprNode.getText();
   }
   return exprNode.getText();
 }
 
-function collectProps(attrs) {
-  const parts = [];
-  attrs.properties.forEach((p) => {
+function collectProps(attrs: any): string[] {
+  const parts: string[] = [];
+  attrs.properties.forEach((p: any) => {
     if (ts.isJsxAttribute(p)) {
       const raw = p.name.getText();
       const key = raw === "class" ? "className" : raw;
@@ -383,11 +392,17 @@ function collectProps(attrs) {
   return parts;
 }
 
-function emitComponent(tagText, attrs, children, parentVar, out) {
+function emitComponent(
+  tagText: string,
+  attrs: any,
+  children: any,
+  parentVar: string,
+  out: string[]
+): void {
   const propsVar = fresh("props");
   const parts = collectProps(attrs);
   const meaningful = children.filter(
-    (c) => !ts.isJsxText(c) || c.text.trim() !== ""
+    (c: any) => !ts.isJsxText(c) || c.text.trim() !== ""
   );
   if (meaningful.length) {
     parts.push(`children: () => { ${genChildrenBody(meaningful)} }`);
@@ -396,9 +411,9 @@ function emitComponent(tagText, attrs, children, parentVar, out) {
   out.push(`${PLACE}(${parentVar}, ${tagText}(${propsVar}));`);
 }
 
-function genChildrenBody(children) {
-  const out = [];
-  children.forEach((c) => emitChild(c, "__cf", out));
+function genChildrenBody(children: any): string {
+  const out: string[] = [];
+  children.forEach((c: any) => emitChild(c, "__cf", out));
   return `const __cf = document.createDocumentFragment();\n${out.join(
     "\n"
   )}\nreturn __cf;`;
@@ -406,7 +421,7 @@ function genChildrenBody(children) {
 
 // --- 原生元素 --------------------------------------------------------------
 
-const PROP_ALIAS = {
+const PROP_ALIAS: Record<string, string> = {
   for: "htmlFor",
   readonly: "readOnly",
   maxlength: "maxLength",
@@ -415,7 +430,7 @@ const PROP_ALIAS = {
   autofocus: "autofocus",
 };
 
-const DOM_PROPS = new Set([
+const DOM_PROPS = new Set<string>([
   "value",
   "checked",
   "selected",
@@ -439,11 +454,17 @@ const DOM_PROPS = new Set([
   "maxLength",
 ]);
 
-function emitElement(tagText, attrs, children, parentVar, out) {
+function emitElement(
+  tagText: string,
+  attrs: any,
+  children: any,
+  parentVar: string,
+  out: string[]
+): void {
   const el = fresh("el");
   out.push(`const ${el} = document.createElement(${JSON.stringify(tagText)});`);
 
-  attrs.properties.forEach((p) => {
+  attrs.properties.forEach((p: any) => {
     if (ts.isJsxAttribute(p)) {
       const raw = p.name.getText();
       const key = PROP_ALIAS[raw] || raw;
@@ -497,13 +518,13 @@ function emitElement(tagText, attrs, children, parentVar, out) {
     }
   });
 
-  children.forEach((c) => emitChild(c, el, out));
+  children.forEach((c: any) => emitChild(c, el, out));
   out.push(`${parentVar}.appendChild(${el});`);
 }
 
 // --- children --------------------------------------------------------------
 
-function emitChild(child, parentVar, out) {
+function emitChild(child: any, parentVar: string, out: string[]): void {
   if (ts.isJsxText(child)) {
     if (child.text.trim() === "") return;
     out.push(
@@ -524,7 +545,7 @@ function emitChild(child, parentVar, out) {
 
 // --- map -------------------------------------------------------------------
 
-function detectMap(node) {
+function detectMap(node: any): any {
   if (
     ts.isCallExpression(node) &&
     ts.isPropertyAccessExpression(node.expression) &&
@@ -542,7 +563,7 @@ function detectMap(node) {
         cb.parameters.length >= 2 ? cb.parameters[1].name.getText() : null;
       const body = ts.isBlock(cb.body)
         ? (() => {
-            const ret = cb.body.statements.find((s) => ts.isReturnStatement(s));
+            const ret = cb.body.statements.find((s: any) => ts.isReturnStatement(s));
             return ret && ret.expression ? unparen(ret.expression) : null;
           })()
         : unparen(cb.body);
@@ -555,13 +576,13 @@ function detectMap(node) {
 // ---------------------------------------------------------------------------
 // 兜底校验：任何没被处理到的 JSX 都不能悄悄漏出去
 // ---------------------------------------------------------------------------
-function assertJsxCovered(sf, edits, fileName) {
-  const missing = [];
-  const visit = (node) => {
+function assertJsxCovered(sf: any, edits: any[], fileName: string): void {
+  const missing: string[] = [];
+  const visit = (node: any) => {
     if (isJsxLike(node) && !insideJsx(node)) {
       const start = node.getStart(sf);
       const end = node.getEnd();
-      const covered = edits.some((e) => e.start <= start && end <= e.end);
+      const covered = edits.some((e: any) => e.start <= start && end <= e.end);
       if (!covered) {
         const { line } = sf.getLineAndCharacterOfPosition(start);
         missing.push(`${fileName}:${line + 1}`);

@@ -10,10 +10,10 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "plain": ["../../types/plain.d.ts"],
-      "plain/vite": ["../../types/plain.d.ts"],
-      "plain/server": ["../../types/plain.d.ts"]
+      "plain": ["../../dist/index.d.ts"],
+      "plain/vite": ["../../dist/index.d.ts"],
+      "plain/server": ["../../dist/index.d.ts"]
     }
   },
-  "include": ["./**/*.tsx", "./**/*.ts", "../../types/plain.d.ts"]
+  "include": ["./**/*.tsx", "./**/*.ts", "../../dist/index.d.ts"]
 }
