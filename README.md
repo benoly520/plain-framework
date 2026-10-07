@@ -400,8 +400,7 @@ $ node test/browser.mjs
 
 ## 示例
 
-完整示例在 [`examples/todo/`](examples/todo/)：待办列表 + 详情路由 + 统计页（服务端数据）
-+ 错误边界，覆盖全部核心能力。截图在 [`examples/todo/shots/`](examples/todo/shots/)。
+完整示例在 [`examples/todo/`](examples/todo/)：待办列表 + 详情路由 + 统计页（服务端数据）+ 错误边界，覆盖全部核心能力。
 
 ```bash
 node src/cli/index.mjs dev examples/todo     # 打开 http://localhost:5173
