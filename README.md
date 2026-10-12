@@ -402,9 +402,33 @@ $ node test/browser.mjs
 
 完整示例在 [`examples/todo/`](examples/todo/)：待办列表 + 详情路由 + 统计页（服务端数据）+ 错误边界，覆盖全部核心能力。
 
+> ⚠️ `examples/todo` 没有自己的 `package.json`，它依赖**根目录框架先编译成 `dist/`**。
+> 启动前必须先装依赖、编译框架，否则 `dist/cli/index.js` 等文件不存在。
+
 ```bash
-node dist/cli/index.js dev examples/todo     # 打开 http://localhost:5173
+# 1. 装依赖（只需 typescript + vite）
+npm install
+
+# 2. 编译框架源码到 dist/
+npm run build
+
+# 3. 启动示例（推荐：走 examples/todo/vite.config.js，端口 8100）
+npm run dev:example
+#    打开 http://localhost:8100/
+
+# 3'. 也可以用官方 CLI（plaindev）；注意它不读 vite.config.js，端口是 vite 默认的 5173
+node dist/cli/index.js dev examples/todo
+#    打开 http://localhost:5173/
 ```
+
+两条命令的区别：
+
+| 命令 | 端口 | 是否读 `examples/todo/vite.config.js` | 说明 |
+| --- | --- | --- | --- |
+| `npm run dev:example` | 8100 | 是（含 `serverEntry` / `root` 配置） | 与示例配置完全一致，推荐 |
+| `node dist/cli/index.js dev examples/todo` | 5173 | 否（`configFile: false`，用插件默认配置） | 适合体验 plaindev CLI 自身 |
+
+> 改了源码后需重新 `npm run build` 再刷新（目前无 HMR，dev 下整页刷新，见「已知限制」）。
 
 ---
 
