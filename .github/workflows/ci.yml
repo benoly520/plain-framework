@@ -24,6 +24,16 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: 锁文件不得残留镜像 tarball URL
+        run: |
+          # 本地淘宝镜像会把绝对 tarball URL 写进 pnpm-lock.yaml，触发 pnpm 的
+          # 供应链校验失败（ERR_PNPM_TARBALL_URL_MISMATCH）。这里提前给出可操作的
+          # 报错，修复方式见 CONTRIBUTING.md「更新锁文件必须用官方 registry」。
+          if grep -q 'tarball: https://registry.npm' pnpm-lock.yaml; then
+            echo "::error::pnpm-lock.yaml 含镜像 tarball URL，请用官方 registry 重新生成：pnpm install --lockfile-only --registry=https://registry.npmjs.org/"
+            exit 1
+          fi
+
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
 

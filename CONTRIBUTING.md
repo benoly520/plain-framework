@@ -12,6 +12,36 @@ pnpm run coverage  # 覆盖率（低于 .c8rc.json 门槛会失败）
 pnpm run test:browser   # 可选：需要本机有 Chromium/Chrome
 ```
 
+### 更新锁文件必须用官方 registry
+
+CI 用官方 registry `https://registry.npmjs.org/`，并会跑 pnpm 的供应链校验：
+锁文件里记录的 tarball URL 必须与 registry 发布元数据一致。
+
+如果本地配了淘宝镜像（`registry.npmmirror.com`，或旧域名 `registry.npm.taobao.org`），
+pnpm 会把镜像的**绝对 tarball URL**写进 `pnpm-lock.yaml`。这样的锁文件一到 CI 就会被判失败：
+
+```
+[ERR_PNPM_TARBALL_URL_MISMATCH] 168 lockfile entries failed verification:
+  @acemir/cssom@0.9.32 has a tarball URL (https://registry.npmmirror.com/...) that
+  does not match the registry's published metadata (https://registry.npmjs.org/...)
+```
+
+所以**每次更新锁文件都要显式指定官方 registry**：
+
+```bash
+# 只重新解析锁文件（推荐，快）
+pnpm install --lockfile-only --registry=https://registry.npmjs.org/
+
+# 或者做一次完整安装
+pnpm install --registry=https://registry.npmjs.org/
+```
+
+提交前自查一下，锁文件里不应残留镜像 URL（下面应输出 `0`）：
+
+```bash
+grep -c 'tarball: https://registry.npm' pnpm-lock.yaml
+```
+
 ## 提交信息约定
 
 使用 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/)：
