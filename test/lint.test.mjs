@@ -102,6 +102,37 @@ test("[回归] 属性场景只报一次，且 autofix 不会重复插入调用",
   assert.ok(!fixed.includes("done()()"), "区间重叠曾把源码切成 done()()");
 });
 
+test("解构 props -> plain/no-props-destructure（动态属性是 getter，会丢响应性）", () => {
+  const src = [
+    "export function Card(props) {",
+    "  const { title } = props;",
+    "  return <p>{title}</p>;",
+    "}",
+  ].join("\n");
+  const issues = check(src, "Card.tsx");
+  assert.deepEqual(codes(issues), ["plain/no-props-destructure"]);
+  assert.equal(issues[0].line, 2);
+  assert.equal(issues[0].fix, undefined, "两种改法语义不同，不自动改");
+  assert.match(issues[0].message, /resolve\(props\.x\)/);
+});
+
+test("不误伤：非组件函数 / map 回调里解构行数据 / resource 解构", () => {
+  const cases = [
+    ["export function util(config) { const { a } = config; return a; }", "不返回 JSX，不是组件"],
+    [
+      "export function App(){ return <ul>{rows.map(r => { const { id } = r; return <li>{id}</li>; })}</ul>; }",
+      "map 回调里解构行数据是合法写法",
+    ],
+    [
+      "export function App(){ const { data } = resource(() => 1); return <p>{data()}</p>; }",
+      "resource 解构是官方用法",
+    ],
+  ];
+  for (const [src, why] of cases) {
+    assert.deepEqual(check(src, "a.tsx"), [], why);
+  }
+});
+
 test("同一文件多个问题：按行排序且一次性全部修复", () => {
   const src = [
     "import { signal } from 'plain';",

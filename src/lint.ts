@@ -147,7 +147,26 @@ export function check(
       );
     }
 
-    // 6) map 里没返回 JSX（编译器会拒绝，提前提示更友好）
+    // 6) 解构 props —— 动态属性在编译器里是 getter，解构拿到的是函数本身，
+    //    响应性会静默丢失（这是 AI 从 React/Solid 带过来的头号反模式）
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isObjectBindingPattern(node.name) &&
+      node.initializer &&
+      ts.isIdentifier(node.initializer) &&
+      isComponentPropsParam(node.initializer)
+    ) {
+      const p = node.initializer.text;
+      add(
+        node,
+        "error",
+        "plain/no-props-destructure",
+        `不要解构 props（"… = ${p}"）：动态属性是 getter，解构会拿到函数本身并丢失响应性。` +
+          `用 resolve(${p}.x) 取值，或写成 thunk：const x = () => resolve(${p}.x)`
+      );
+    }
+
+    // 7) map 里没返回 JSX（编译器会拒绝，提前提示更友好）
     ts.forEachChild(node, visit);
   };
 
@@ -183,6 +202,68 @@ export function formatIssues(issues: LintIssue[], fileName: string): string {
 }
 
 // ---------------------------------------------------------------------------
+
+function isJsxLike(n: ts.Node): boolean {
+  return (
+    ts.isJsxElement(n) || ts.isJsxSelfClosingElement(n) || ts.isJsxFragment(n)
+  );
+}
+
+/** 去掉括号 / as 断言，拿到真实表达式 */
+function unwrapExpr(n: ts.Node): ts.Node {
+  let e: ts.Node = n;
+  while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e)) e = e.expression;
+  return e;
+}
+
+/** 函数体是否会返回 JSX（口径与 compiler/schema.ts 保持一致） */
+function returnsJsx(fn: any): boolean {
+  const body = fn.body;
+  if (!body) return false;
+  if (isJsxLike(unwrapExpr(body))) return true;
+  if (ts.isBlock(body)) {
+    return body.statements.some(
+      (s) =>
+        ts.isReturnStatement(s) &&
+        !!s.expression &&
+        isJsxLike(unwrapExpr(s.expression))
+    );
+  }
+  return false;
+}
+
+/** 与编译器口径一致：这个函数会不会被当成组件（排除 map/resource 之类的回调参数） */
+function isComponentFn(fn: any): boolean {
+  const asArg =
+    fn.parent &&
+    ts.isCallExpression(fn.parent) &&
+    fn.parent.arguments.indexOf(fn) >= 0;
+  if (asArg) return false;
+  let cur: ts.Node | undefined = fn.parent;
+  while (cur) {
+    if (isJsxLike(cur)) return false;
+    cur = cur.parent;
+  }
+  return returnsJsx(fn);
+}
+
+/** id 是否是「组件的第一个参数」——也就是 props */
+function isComponentPropsParam(id: ts.Identifier): boolean {
+  let cur: ts.Node | undefined = id.parent;
+  while (cur) {
+    if (ts.isFunctionLike(cur)) {
+      const first = (cur as any).parameters[0];
+      return (
+        !!first &&
+        ts.isIdentifier(first.name) &&
+        first.name.text === id.text &&
+        isComponentFn(cur)
+      );
+    }
+    cur = cur.parent;
+  }
+  return false;
+}
 
 function isTsx(name: string): ts.ScriptKind {
   return /\.tsx$/.test(name)

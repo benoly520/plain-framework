@@ -37,7 +37,7 @@ mount("#app", App());
 - [面向 AI 的设计](#面向-ai-的设计)
 - [边界与已知限制](#边界与已知限制)
 - [测试与质量](#测试与质量)
-- [路线图 ROADMAP.md](ROADMAP.md)
+- [路线图 ROADMAP.md](ROADMAP.md) ｜ [给 AI 代理的说明 AGENTS.md](AGENTS.md) ｜ [AI 正确率评测 eval/](eval/README.md)
 
 ---
 
@@ -218,9 +218,9 @@ function Card(props) {
 编译器最后有一道**自检**：产物里若残留任何未处理的 JSX，或代码无法解析，直接抛错。
 **不会**把坏代码悄悄交给打包器。
 
-**一个刻意的例外**：列表里同时写 `key=` 和 index 参数时不报错，而是**静默放弃 key**、退回按位置复用。
-原因：keyed 复用下行只构建一次，回调捕获的 index 无法随位置更新，两者同时生效必然导致 index 过期。
-「index 永远正确」优先于「key 生效」，所以二者只能选一个。
+**一个刻意的取舍**：列表里同时写 `key=` 和 index 参数会**直接编译报错**（`PLAIN_E1005`），
+而不是悄悄丢掉其中一个。原因：keyed 复用下行只构建一次，回调捕获的 index 无法随位置更新，
+两者同时生效必然有一个语义是错的 —— 而**静默的语义降级**恰恰是本框架最想消灭的失败模式。
 
 ### 编译错误码
 
@@ -233,6 +233,21 @@ function Card(props) {
 | `PLAIN_E1002` | 产物无法解析（通常是输入没先剥离 TS 类型） |
 | `PLAIN_E1003` | 产物里残留 JSX（编译器 bug） |
 | `PLAIN_E1004` | 遇到不支持的语法节点（编译器 bug） |
+| `PLAIN_E1005` | 列表的 `key` 与 index 参数同时使用（二者选一） |
+| `PLAIN_E2001` | 契约检查未通过（由构建链路抛出，`plaindev check --fix` 可自动修） |
+
+**契约检查默认接在构建链路里**（`plainPlugin({ lint: "warn" | false })` 可调），
+所以下面那些 AI 常见错误会让**构建失败**，而不是拖到运行时才炸：
+
+| 契约规则 | 拦截的写法 | 能否自动修 |
+| --- | --- | --- |
+| `plain/signal-assign` | `count = 1` | ✅ 改成 `count.set(1)` |
+| `plain/signal-not-called` | `{count}` / `checked={done}` | ✅ 补上调用 |
+| `plain/react-habit` | `useState` / `useEffect` / … | ❌ 语义不同，只报错 |
+| `plain/no-inner-html` | `el.innerHTML = …` | ❌ 安全红线，只报错 |
+| `plain/no-props-destructure` | `const { title } = props` | ❌ 两种改法语义不同，只报错 |
+
+给 AI 代理看的完整反模式目录（含**尚未**被静态检查覆盖的坑）在 [`AGENTS.md`](AGENTS.md)。
 
 ```
 [PLAIN_E1001] Counter.tsx:8:11 这些位置的 JSX 编译器还不认识：Counter.tsx:8
@@ -376,7 +391,10 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ 列表 keyed 复用（`key={...}`）：头部插入 / 重排不重建已有节点
 - ✅ 结构化编译错误（`PLAIN_E100x` + 文件/行列/hint，可 JSON 序列化）
 - ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
-- ✅ 单测 117 项（内核 19 + 单元 98）+ 真实 Chromium 端到端 23 项
+- ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
+- ✅ `AGENTS.md` + 反模式目录（明确标注哪些已被静态检查、哪些还没有）
+- ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
+- ✅ 单测 124 项（内核 19 + 单元 105）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -406,7 +424,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 98 项
+pnpm test              # 构建 + 内核 19 项 + 单元 105 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -414,10 +432,11 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（98 项，`node:test`）：
+- `test/*.test.mjs`（105 项，`node:test`）：
   `lint` 规则与自动修复、`schema` 契约提取、`compiler` 报错兜底与 sourcemap、
-  `cli` 子命令、`vite` 插件的编译与剥离、`server`（静态托管 / 目录穿越 / RPC / 一行起服）、
-  `keyed` 列表复用语义、SSR 序列化、运行时边界分支。
+  `cli` 子命令、`vite` 插件的编译 / 剥离 / 契约检查拦截、
+  `server`（静态托管 / 目录穿越 / RPC / 一行起服）、
+  `keyed` 列表复用语义与 `PLAIN_E1005`、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
   路由跳转、详情参数、`server()` 往返、404、ErrorBoundary 降级与重试，以及**控制台零报错**。
 
@@ -429,14 +448,28 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 - 「多个文件各自有 `server()`」—— 服务端清单增量更新产出重复 `const` 声明的回归点
 - 「sourcemap 少算一行占位」—— helper import 行会让后续映射整体错位一行的回归点
 
+### AI 正确率评测（`eval/`）
+
+「Plain 比 React 更适合 AI」目前还是个**主张**。`eval/` 让它变成可比的数据：
+
+```bash
+node eval/run.mjs --prompt     # 打印任务提示词，交给代理
+node eval/run.mjs              # 跑 candidate 实现并输出指标
+node eval/run.mjs --reference  # 跑参考实现（自检 harness，不算指标）
+```
+
+指标口径是**首次通过率 / 平均迭代轮次 / 拦截率**（失败里有多少是被构建时拦下的），
+而不是满意度或上手时间。协议与公平性要求见 [`eval/README.md`](eval/README.md)，
+结果记在 [`eval/RESULTS.md`](eval/RESULTS.md)。
+
 覆盖率由 c8 度量、由 CI 强制（配置见 `.c8rc.json`）：
 
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
-| 语句 | 90% | 93.9% |
-| 分支 | 82% | 85.9% |
-| 函数 | 85% | 90.5% |
-| 行 | 90% | 93.9% |
+| 语句 | 90% | 94.0% |
+| 分支 | 82% | 85.7% |
+| 函数 | 85% | 90.9% |
+| 行 | 90% | 94.0% |
 
 > 唯一明显偏低的是 `src/cli`（约 69%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
 > 目前只在示例端到端里被间接验证。
@@ -444,7 +477,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 98 / fail 0    # 单元
+# pass 105 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23
@@ -516,9 +549,11 @@ test/
   browser.mjs              真实浏览器端到端（手动触发）
 .c8rc.json                 覆盖率门槛配置
 .github/workflows/ci.yml   构建 + 单测 + 覆盖率门禁
+AGENTS.md                  给 AI 代理的工作说明 + 反模式目录
 ROADMAP.md                 分阶段计划与验收标准
 CHANGELOG.md               更新日志
 CONTRIBUTING.md            贡献与提交约定（Conventional Commits）
+eval/                      AI 正确率评测：任务 + 验收断言 + 指标
 ```
 
 ---

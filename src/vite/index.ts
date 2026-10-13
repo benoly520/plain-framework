@@ -7,11 +7,12 @@
 //   4) dev 模式下提供 /_plain/rpc 中间件
 
 import type { Plugin } from "vite";
-import { compile } from "../compiler/index.js";
+import { compile, PlainCompileError } from "../compiler/index.js";
 import {
   updateServerManifest,
   writeServerManifest,
 } from "../compiler/manifest.js";
+import { check, formatIssues } from "../lint.js";
 import { transformWithEsbuild } from "vite";
 import path from "node:path";
 
@@ -19,8 +20,19 @@ export default function plainPlugin(options: {
   serverEntry?: string;
   include?: RegExp;
   rpc?: boolean;
+  /**
+   * 契约检查（默认开启）。AI 写错时构建就该失败，而不是静默产出语义不同的代码。
+   * - "error"（默认）：有问题直接让该模块的 transform 失败
+   * - "warn"：只告警，适合把 Plain 接入存量项目时过渡
+   * - false：关闭
+   */
+  lint?: "error" | "warn" | false;
 } = {}): Plugin {
-  const { serverEntry = ".plain/server.mjs", include = /\.(tsx|jsx)$/ } = options;
+  const {
+    serverEntry = ".plain/server.mjs",
+    include = /\.(tsx|jsx)$/,
+    lint = "error",
+  } = options;
   const registry = new Map<string, any>(); // name -> 可执行的 server 函数
   let root = process.cwd();
 
@@ -56,9 +68,20 @@ export default function plainPlugin(options: {
       };
     },
 
-    async transform(code: string, id: string) {
+    async transform(this: any, code: string, id: string) {
       if (id.includes("node_modules")) return null;
       if (!include.test(id)) return null;
+
+      const fileName = id.split("?")[0];
+
+      // 0) 契约检查（默认开启）：AI 常犯的错在编译前就拦掉
+      if (lint) {
+        const issues = check(code, fileName);
+        if (issues.length) {
+          if (lint === "error") throw toLintError(issues, fileName);
+          reportWarn(this, formatIssues(issues, fileName));
+        }
+      }
 
       // 1) 去 TS 类型，保留 JSX
       const stripped = await transformWithEsbuild(code, id, {
@@ -92,6 +115,29 @@ export default function plainPlugin(options: {
       flushAll();
     },
   };
+}
+
+/** 把 lint 问题包装成结构化编译错误，构建失败的输出里带规则码与位置 */
+function toLintError(issues: any[], fileName: string): PlainCompileError {
+  const first = issues[0];
+  const fixable = issues.filter((i: any) => i.fix).length;
+  return new PlainCompileError({
+    code: "PLAIN_E2001",
+    file: fileName,
+    line: first.line,
+    column: first.column,
+    detail: `契约检查未通过（${issues.length} 处）：\n${formatIssues(issues, fileName)}`,
+    hint: fixable
+      ? `其中 ${fixable} 处可自动修：运行 \`plaindev check --fix\``
+      : "按上面的规则码修正写法后重新构建",
+  });
+}
+
+/** warn 模式下优先走 vite 的告警通道，单测里没有插件上下文时退回 console */
+function reportWarn(ctx: any, message: string): void {
+  if (ctx && typeof ctx.warn === "function") ctx.warn(message);
+  // eslint-disable-next-line no-console
+  else console.warn(`[plain] ${message}`);
 }
 
 /** dev 模式下的 /_plain/rpc 处理器 */

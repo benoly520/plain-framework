@@ -23,12 +23,16 @@ export interface ServerFunction {
  * - `PLAIN_E1002` 生成的产物无法被 JS 解析（输入没先剥离 TS 类型）
  * - `PLAIN_E1003` 生成的产物里残留 JSX（编译器 bug）
  * - `PLAIN_E1004` 遇到不支持的语法节点（编译器 bug）
+ * - `PLAIN_E1005` 列表元素的 key 与 index 参数同时使用（语义二选一）
+ * - `PLAIN_E2001` 契约检查未通过（由构建链路抛出，见 vite 插件）
  */
 export type PlainErrorCode =
   | "PLAIN_E1001"
   | "PLAIN_E1002"
   | "PLAIN_E1003"
-  | "PLAIN_E1004";
+  | "PLAIN_E1004"
+  | "PLAIN_E1005"
+  | "PLAIN_E2001";
 
 export interface PlainCompileErrorInit {
   code: PlainErrorCode;
@@ -829,11 +833,27 @@ function detectMap(node: any): any {
           })()
         : unparen(cb.body);
       if (body) {
-        // keyed 复用下行只构建一次，回调里捕获的 index 无法随位置更新。
-        // 所以「用到 index」时主动放弃 key，退回 index 模式，保证 index 永远正确。
-        const key =
-          index && isIdentifierUsed(cb.body, index) ? null : detectKeyAttr(body);
-        return { array, param, index, body, key };
+        const keyAttr = detectKeyAttr(body);
+        // keyed 复用下行只构建一次，回调捕获的 index 无法随位置更新。
+        // 两者同时用必然导致其中一个语义静默失效 —— 所以编译期直接报错，
+        // 而不是悄悄丢掉其中一个（静默降级违背「读代码就能推出行为」）。
+        if (keyAttr && index && isIdentifierUsed(cb.body, index)) {
+          const sf = keyAttr.node.getSourceFile();
+          const at = sf.getLineAndCharacterOfPosition(keyAttr.node.getStart(sf));
+          throw new PlainCompileError({
+            code: "PLAIN_E1005",
+            file: sf.fileName,
+            line: at.line + 1,
+            column: at.character + 1,
+            detail:
+              `列表元素的 key 与 index 参数不能同时使用` +
+              `（key=${keyAttr.text}，index 参数 "${index}"）`,
+            hint:
+              `二者选一：想让节点跟着数据走，就删掉 index 参数、保留 key=${keyAttr.text}；` +
+              `想用 index，就删掉 key`,
+          });
+        }
+        return { array, param, index, body, key: keyAttr ? keyAttr.text : null };
       }
     }
   }
@@ -861,18 +881,21 @@ function isIdentifierUsed(root: any, name: string): boolean {
   return used;
 }
 
-/** 从 map 回调返回的 JSX 顶层元素上取出 key 表达式（key 只认顶层，与 React 一致） */
-function detectKeyAttr(jsx: any): string | null {
+/**
+ * 从 map 回调返回的 JSX 顶层元素上取出 key 表达式（key 只认顶层，与 React 一致）。
+ * 同时把属性节点带出来，供 PLAIN_E1005 报位置。
+ */
+function detectKeyAttr(jsx: any): { text: string; node: any } | null {
   const parts = tagParts(jsx);
   if (!parts) return null;
   for (const p of parts[1].properties) {
     if (ts.isJsxAttribute(p) && p.name.getText() === "key" && p.initializer) {
       const init = p.initializer;
       if (ts.isStringLiteral(init) || ts.isNumericLiteral(init)) {
-        return JSON.stringify(init.text);
+        return { text: JSON.stringify(init.text), node: p };
       }
       if (ts.isJsxExpression(init) && init.expression) {
-        return `(${init.expression.getText()})`;
+        return { text: `(${init.expression.getText()})`, node: p };
       }
     }
   }

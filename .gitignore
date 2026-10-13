@@ -8,6 +8,10 @@ dist/
 # 测试覆盖率产物
 coverage/
 
+# 评测中被测代理产出的实现（结果记在 eval/RESULTS.md，不提交代码）
+eval/tasks/*/candidate.tsx
+eval/tasks/*/candidate.jsx
+
 # 增量编译信息
 *.tsbuildinfo
 

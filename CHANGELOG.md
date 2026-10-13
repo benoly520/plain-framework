@@ -10,20 +10,29 @@
 - **列表 keyed 复用**：`arr.map(x => <li key={x.id}>…)` 现在按 key 认领行，
   头部插入 / 重排不会重建已有节点（关闭 `SPEC.md` §4 里 `each(..., keyFn, ...)` 的欠账）。
   `each()` 新增可选的第 4 个参数 `keyFn`；不传时行为与之前完全一致。
-  安全规则：同一条 map 回调里**同时用到 index 参数时，key 会被忽略**（退回按位置复用），
-  因为 keyed 复用下行只构建一次、捕获的 index 无法随位置更新。
+- **契约检查接进构建链路（默认开启）**：vite 插件 `transform` 第一步就跑 `lint`，
+  失败抛 `PLAIN_E2001`（带规则码、位置、可自动修提示）。
+  此前 `lint` 只在 `plaindev check` 里跑，写得不对照样构建成功、语义静默出错。
+  新增选项 `plainPlugin({ lint: "warn" | false })`。
+- **新增契约规则 `plain/no-props-destructure`**：解构 props（`const { title } = props`）
+  会拿到 getter 本身并丢失响应性 —— 这是 AI 从 React / Solid 带过来的头号反模式。
 - **结构化编译错误**：`PlainCompileError` 带
-  `code`（`PLAIN_E1001`–`PLAIN_E1004`）/ `file` / `line` / `column` / `hint`，可 `JSON.stringify`，
-  供 IDE / CI / AI 直接消费（`SPEC.md` §7「自解释错误」）。
+  `code`（`PLAIN_E1001`–`PLAIN_E1005`、`PLAIN_E2001`）/ `file` / `line` / `column` / `hint`，
+  可 `JSON.stringify`，供 IDE / CI / AI 直接消费（`SPEC.md` §7「自解释错误」）。
 - **编译产物 sourcemap**：`compile()` 返回 line 级 `map`，vite 插件会链式回传给 devtools，
   断点与堆栈可定位回 `.tsx` 源文件。
+- **`AGENTS.md` + 反模式目录**：10 条反模式逐条标注「是否已被静态检查覆盖」，
+  未覆盖的明确写「自己保证」，避免代理把「不报错」当成「是对的」。
+- **AI 正确率评测骨架 `eval/`**：任务 + 验收断言 + 指标口径（首次通过率 / 平均轮次 / 拦截率）
+  + 公平性与自欺清单；已自检 harness 能区分对错。
 - 覆盖率度量与门禁：`pnpm run coverage`（c8 + `src` 级 sourcemap 映射），门槛写在 `.c8rc.json`。
 - GitHub Actions 工作流（`.github/workflows/ci.yml`）：构建 + 内核/单元测试 + 覆盖率门禁；
   真实浏览器端到端改为手动触发。
 - 单元测试套件 `test/*.test.mjs`（`node:test`）：覆盖 `lint` 规则与自动修复、`schema` 契约提取、
-  `compiler` 报错兜底与 sourcemap、`cli` 子命令、`vite` 插件、`keyed` 列表语义、
-  `server`（静态托管/目录穿越/RPC/起服）、SSR 序列化、运行时边界分支。
-- `ROADMAP.md`（分阶段计划与验收标准）、`CONTRIBUTING.md`（环境、提交信息与改动要求）。
+  `compiler` 报错兜底与 sourcemap、`cli` 子命令、`vite` 插件的编译/剥离/契约拦截、
+  `keyed` 列表语义、`server`（静态托管/目录穿越/RPC/起服）、SSR 序列化、运行时边界分支。
+- `ROADMAP.md`（分阶段计划与验收标准，含「为什么先做免疫系统与评测」的排序原则）、
+  `CONTRIBUTING.md`（环境、提交信息与改动要求）。
 
 ### 修复
 
@@ -36,8 +45,12 @@
   （`PLAIN_CHROMIUM_PATH` / `CHROMIUM_PATH` / `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`）
   加常见路径探测，失败时给出可操作的提示。
 
-### 变更
+### 变更（含 breaking）
 
+- **`key` 与 index 同时使用现在是编译错误 `PLAIN_E1005`**（此前是静默丢掉 key、退回按位置复用）。
+  keyed 复用下行只构建一次，回调捕获的 index 无法随位置更新，两者同时生效必然有一个语义是错的；
+  静默的语义降级正是本框架最该消灭的失败模式。
+  受影响的写法：`arr.map((x, i) => <li key={x.id}>…</li>)`。修法：删掉 `key` 或删掉 index 参数。
 - 统一包管理器为 pnpm，移除 `package-lock.json`。
 - `tsconfig`：打开 `noImplicitAny`，开启 `sourceMap` / `declarationMap`。
 - `package.json`：新增 `engines`、`packageManager`、`sideEffects`。

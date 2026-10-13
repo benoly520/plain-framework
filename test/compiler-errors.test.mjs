@@ -40,6 +40,22 @@ test("PLAIN_E1002：产物无法解析时给出诊断与输入要求", () => {
   assert.match(err.hint, /jsx: 'preserve'/);
 });
 
+test("PLAIN_E1005：key 与 index 同时使用（不再静默丢掉其中一个）", () => {
+  const err = catchCompile(
+    [
+      "export function App(){",
+      '  return <ul>{items.map((it, i) => <li key={it.id}>{i}</li>)}</ul>;',
+      "}",
+    ].join("\n"),
+    "key.jsx"
+  );
+  assert.equal(err.code, "PLAIN_E1005");
+  assert.equal(err.file, "key.jsx");
+  assert.equal(err.line, 2);
+  assert.match(err.detail, /不能同时使用/);
+  assert.match(err.hint, /二者选一/);
+});
+
 test("错误可 JSON 序列化，便于 CI / AI 直接消费", () => {
   const err = catchCompile("const x = <p/>;", "a.jsx");
   const json = JSON.parse(JSON.stringify(err));

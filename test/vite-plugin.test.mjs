@@ -170,3 +170,66 @@ test("rpc: false 时不注册中间件", () => {
   p.configResolved({ root: tmpRoot() });
   assert.equal(p.configureServer({ middlewares: { use() {} } }), undefined);
 });
+
+// ---------------------------------------------------------------------------
+// 契约检查接进构建链路（默认开启）
+// ---------------------------------------------------------------------------
+
+const LINT_BAD = [
+  "import { signal } from 'plain';",
+  "const count = signal(0);",
+  "count = 1;",
+  "export function App(){ return <p>{count}</p>; }",
+].join("\n");
+
+test("[免疫系统] 默认让构建失败：AI 的典型错误在编译前就被拦下", async () => {
+  const root = tmpRoot();
+  const p = plugin();
+  p.configResolved({ root });
+
+  await assert.rejects(
+    () => p.transform(LINT_BAD, path.join(root, "Bad.tsx")),
+    (e) => {
+      assert.equal(e.code, "PLAIN_E2001", "应抛结构化编译错误");
+      assert.match(e.detail, /plain\/signal-assign/);
+      assert.match(e.detail, /plain\/signal-not-called/);
+      assert.match(e.hint, /plaindev check --fix/);
+      return true;
+    }
+  );
+});
+
+test("lint: 'warn' 只告警不阻断；lint: false 完全关闭", async () => {
+  const root = tmpRoot();
+  const id = path.join(root, "Bad.tsx");
+
+  const warned = [];
+  const pw = plugin({ lint: "warn" });
+  pw.configResolved({ root });
+  const res = await pw.transform.call({ warn: (m) => warned.push(m) }, LINT_BAD, id);
+  assert.ok(res && typeof res.code === "string", "warn 模式仍应产出代码");
+  assert.equal(warned.length, 1);
+  assert.match(warned[0], /plain\/signal-assign/);
+
+  const pf = plugin({ lint: false });
+  pf.configResolved({ root });
+  const res2 = await pf.transform(LINT_BAD, id);
+  assert.ok(res2 && typeof res2.code === "string");
+  assert.ok(
+    res2.code.includes("count = 1;"),
+    "关闭 lint 后错误写法应原样通过（说明确实是 lint 在拦）"
+  );
+});
+
+test("通过契约检查的模块不受影响", async () => {
+  const root = tmpRoot();
+  const p = plugin();
+  p.configResolved({ root });
+  const good = [
+    "import { signal } from 'plain';",
+    "export const n = signal(0);",
+    "export function App(){ return <p>{n()}</p>; }",
+  ].join("\n");
+  const res = await p.transform(good, path.join(root, "Good.tsx"));
+  assert.ok(res && typeof res.code === "string");
+});

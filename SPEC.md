@@ -70,8 +70,9 @@ function Counter() {
   - `each(items, keyFn, itemFn)` —— keyed 列表，按 key 复用未变节点
     - 落地形态（见 `src/compiler` + `src/runtime/dom.ts`）：用户写 `key={...}`，
       编译器把 `arr.map(x => <li key={x.id}/>)` 编译成 `each(parent, getter, itemFn, keyFn)`。
-    - 边界：同一条 map 回调里若用到 index 参数，key 会被忽略（退回按位置复用）——
-      keyed 复用下行只构建一次，捕获的 index 无法随位置更新；「index 永远正确」优先。
+    - 边界：同一条 map 回调里若同时用到 index 参数，**编译期报错 `PLAIN_E1005`（二者选一）**——
+      keyed 复用下行只构建一次，捕获的 index 无法随位置更新，两者同时生效必有一个语义是错的。
+      这里刻意不做静默降级：静默的语义降级是本规范最想消灭的失败模式。
 - 事件：`onclick=${fn}` 等，编译期转 `addEventListener`。
 - 布尔属性（`checked`/`disabled`/...）按属性语义处理，不依赖字符串 `"false"` 的歧义。
 
@@ -104,6 +105,12 @@ const loadUser = server((id) => db.users.find(id)); // 只跑在服务端
 1. **机器可读组件 schema**：扫描项目导出，生成 AI 可直接消费的"有哪些组件、接收什么 props、触发什么事件"清单，免去 AI 通读源码。
 2. **自解释错误**：编译/运行错误附带"为什么 + 修正后片段"。
 3. **契约式 lint**：把上面的"铁律"变成可自动修复的规则（如检测到在 effect 外写入却期望响应，直接提示）。
+
+> **落地状态**（详见 [README](README.md) 与 [AGENTS.md](AGENTS.md)）：
+> 1 已实现（`plaindev schema`，但 props 仍是"推断"而非"声明"，待补）；
+> 2 已实现（`PLAIN_E100x` / `PLAIN_E2001` + `hint`，可 JSON 序列化）；
+> 3 已实现 5 条规则并**默认接入构建链路**（构建即失败），目录见 `AGENTS.md`；
+> 尚未覆盖的坑（如 `server()` 闭包误用）已逐条列在 `AGENTS.md` 反模式目录里并标注"未拦截"。
 
 ---
 

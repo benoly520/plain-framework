@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
 import * as esbuild from "esbuild";
-import { compile } from "../dist/compiler/index.js";
+import { compile, PlainCompileError } from "../dist/compiler/index.js";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://localhost/",
@@ -206,24 +206,44 @@ test("对照：没有 key 时维持 index 语义（节点原地更新内容）",
   assert.equal(box.querySelector("li").textContent, "z", "但内容被换成了新数据");
 });
 
-test("安全规则：回调用到 index 时放弃 key，保证 index 永远正确", async () => {
+test("key 与 index 同时使用 -> 编译期报 PLAIN_E1005，而不是静默降级", async () => {
+  let err = null;
+  try {
+    await compileModule(
+      `
+      import { signal } from "plain";
+      export const items = signal([{ id: 1, text: "a" }]);
+      export function App() {
+        return <ul>{items().map((it, i) => <li key={it.id}>{i + ":" + it.text}</li>)}</ul>;
+      }
+      `,
+      "idx2"
+    );
+  } catch (e) {
+    err = e;
+  }
+  assert.ok(err instanceof PlainCompileError, "应当抛 PlainCompileError");
+  assert.equal(err.code, "PLAIN_E1005");
+  assert.match(err.hint, /二者选一/);
+});
+
+test("index 参数声明了但没用到时，key 照常生效", async () => {
   const { mod, code } = await compileModule(
     `
     import { signal } from "plain";
     export const items = signal([{ id: 1, text: "a" }, { id: 2, text: "b" }]);
     export function App() {
-      return <ul>{items().map((it, i) => <li key={it.id}>{i + ":" + it.text}</li>)}</ul>;
+      return <ul>{items().map((it, i) => <li key={it.id}>{it.text}</li>)}</ul>;
     }
     `,
-    "idx2"
+    "idx3"
   );
-  // key 被丢弃 => keyFn 不生成 => it.id 不会出现在产物里
-  assert.ok(!code.includes("it.id"), "用到 index 时应放弃 key：\n" + code);
+  assert.ok(code.includes("(it.id)"), "未使用 index 时 key 应保留：\n" + code);
 
   const box = mount();
   box.appendChild(mod.App());
-  const first = box.querySelector("li");
+  const [a0] = Array.from(box.querySelectorAll("li"));
   mod.items.set([{ id: 0, text: "z" }, ...mod.items()]);
-  assert.deepEqual(texts(box), ["0:z", "1:a", "2:b"], "index 必须跟着位置更新");
-  assert.equal(box.querySelector("li"), first, "走的是 index 模式");
+  assert.deepEqual(texts(box), ["z", "a", "b"]);
+  assert.equal(Array.from(box.querySelectorAll("li"))[1], a0, "应按 key 复用");
 });
