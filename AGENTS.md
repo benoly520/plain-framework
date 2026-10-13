@@ -31,17 +31,18 @@
 | 4 | `el.innerHTML = html` / `insertAdjacentHTML` | `{expr}` 插值 / `createTextNode` | ✅ `plain/no-inner-html` | — |
 | 5 | `const { title } = props` | `resolve(props.title)`，或 `const title = () => resolve(props.title)` | ✅ `plain/no-props-destructure` | — |
 | 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` | — |
-| 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ❌ 未拦截，自己保证 | 05 |
+| 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ✅ `plain/no-signal-mutate` | 05 |
 | 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` | 04（间接） |
-| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`） | `resolve(props.title)`；要响应式就写成 thunk | ❌ 未拦截，自己保证 | 06 |
-| 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ❌ 未拦截 | 07 |
+| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`） | `resolve(props.title)`；要响应式就写成 thunk | ✅ `plain/no-props-snapshot` | 06 |
+| 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ✅ `PLAIN_E1007` | 07 |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
 > **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
 > 也没被拦住，那就是最贵的失败）。跑法见 [eval/README.md](eval/README.md)。
 >
-> 第 7、9、10 条还没有静态检查（见 [ROADMAP.md](ROADMAP.md) M6）。
-> **不要因为它们「不报错」就以为是对的** —— 它们目前是最容易静默出错的地方。
+> 关于第 7、9、10 条：只报**源码上看得出**的写法（`items().push`、`const t = props.title`、
+> 字面量函数 / 本文件的类 / `new ReadableStream()` 这类）。看不出类型的标识符、
+> `new Date()`、`...spread` **不猜** —— 不去猜，是为了不误报。
 >
 > 关于第 8 条：编译器只报「本文件里确实绑定了、但不在函数体内」的名字。
 > 全局对象（`process` / `Math` / `fetch` …）不在判定范围内 —— 不去猜全局，是为了不误报。
@@ -56,6 +57,7 @@
 | `PLAIN_E1004` | 遇到不支持的语法节点 | 同上 |
 | `PLAIN_E1005` | 列表的 key 与 index 同时使用 | 二者选一 |
 | `PLAIN_E1006` | `server()` 的函数体引用了外部变量 | 在函数体内自己获取，或改成参数传入（闭包不会跟到服务端） |
+| `PLAIN_E1007` | `server()` 的调用参数无法 JSON 序列化 | 只传数据；把函数 / 校验逻辑写进 `server()` 函数体 |
 | `PLAIN_E2001` | 契约检查未通过 | 跑 `npx plaindev check --fix <dir>` 自动修，再重新构建 |
 
 错误对象带 `code` / `file` / `line` / `column` / `hint`，`JSON.stringify(error)` 可直接读，不用正则去刮 message。
@@ -78,7 +80,7 @@ npx plaindev schema <dir>   # 产出机器可读的组件 / server / 路由契�
 | `src/runtime/` | signal / dom / async / router / error —— 运行时（**对外 API 面冻结**） |
 | `src/compiler/` | TSX → 建 DOM 代码、服务端清单、契约提取、sourcemap |
 | `src/vite/` | Vite 插件：契约检查 → 类型剥离 → 编译 → `server()` 剥离 → 回传 sourcemap |
-| `src/lint.ts` | 契约检查与自动修复（反模式目录 1–5 的执行者） |
+| `src/lint.ts` | 契约检查与自动修复（反模式目录 1–5、7、9 的执行者） |
 | `src/cli/` | `plaindev` |
 | `test/` | 测试（跑的是 `dist/`，不是 `src/`） |
 | `eval/` | AI 正确率评测：任务 + 验收断言 + 指标 |

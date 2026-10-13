@@ -235,6 +235,7 @@ function Card(props) {
 | `PLAIN_E1004` | 遇到不支持的语法节点（编译器 bug） |
 | `PLAIN_E1005` | 列表的 `key` 与 index 参数同时使用（二者选一） |
 | `PLAIN_E1006` | `server()` 的函数体引用了外部变量（闭包不会跟到服务端） |
+| `PLAIN_E1007` | `server()` 的调用参数无法 JSON 序列化（函数 / 类实例 / Stream） |
 | `PLAIN_E2001` | 契约检查未通过（由构建链路抛出，`plaindev check --fix` 可自动修） |
 
 **契约检查默认接在构建链路里**（`plainPlugin({ lint: "warn" | false })` 可调），
@@ -247,8 +248,10 @@ function Card(props) {
 | `plain/react-habit` | `useState` / `useEffect` / … | ❌ 语义不同，只报错 |
 | `plain/no-inner-html` | `el.innerHTML = …` | ❌ 安全红线，只报错 |
 | `plain/no-props-destructure` | `const { title } = props` | ❌ 两种改法语义不同，只报错 |
+| `plain/no-props-snapshot` | `const t = props.title` / `{props.title}` | ❌ 内联 resolve 与 thunk 语义不同，只报错 |
+| `plain/no-signal-mutate` | `items().push(x)` | ❌ 只报错 |
 
-给 AI 代理看的完整反模式目录（含**尚未**被静态检查覆盖的坑）在 [`AGENTS.md`](AGENTS.md)。
+给 AI 代理看的完整反模式目录在 [`AGENTS.md`](AGENTS.md)。编译器还会拦 `server()` 调用里字面量函数 / 本文件类实例 / Stream（`PLAIN_E1007`）。
 
 ```
 [PLAIN_E1001] Counter.tsx:8:11 这些位置的 JSX 编译器还不认识：Counter.tsx:8
@@ -392,9 +395,10 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ 列表 keyed 复用（`key={...}`）：头部插入 / 重排不重建已有节点
 - ✅ 结构化编译错误（`PLAIN_E100x` + 文件/行列/hint，可 JSON 序列化）
 - ✅ `server()` 自包含校验（`PLAIN_E1006`）：引用了外部变量在**编译期**报错，不再等运行时 `ReferenceError`
+- ✅ `server()` 参数可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
 - ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
 - ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
-- ✅ `AGENTS.md` + 反模式目录（明确标注哪些已被静态检查、哪些还没有）
+- ✅ `AGENTS.md` + 反模式目录（10 条均有静态检查；看不出类型的不猜）
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
 - ✅ 单测 126 项（内核 19 + 单元 107）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
@@ -438,7 +442,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
   `lint` 规则与自动修复、`schema` 契约提取、`compiler` 报错兜底与 sourcemap、
   `cli` 子命令、`vite` 插件的编译 / 剥离 / 契约检查拦截、
   `server`（静态托管 / 目录穿越 / RPC / 一行起服）、
-  `keyed` 列表复用语义、`PLAIN_E1005` / `PLAIN_E1006` 的诊断与不误报、SSR 序列化、运行时边界分支。
+  `keyed` 列表复用语义、`PLAIN_E1005` / `PLAIN_E1006` / `PLAIN_E1007` 的诊断与不误报、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
   路由跳转、详情参数、`server()` 往返、404、ErrorBoundary 降级与重试，以及**控制台零报错**。
 

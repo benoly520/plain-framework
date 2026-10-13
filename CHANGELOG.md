@@ -7,6 +7,14 @@
 
 ### 新增
 
+- **契约规则 `plain/no-signal-mutate`**：就地改 signal 持有值（`items().push(x)` /
+  `items()[0] = x`）不会触发更新。构建期报错，不自动修。
+- **契约规则 `plain/no-props-snapshot`**：把动态 props 的 getter 存进变量
+  （`const t = props.title` / `const t = resolve(props.title)`）或 JSX 里忘了 `resolve`
+  （`{props.title}`）。`on*` 事件透传与 thunk 写法不报。
+- **`server()` 参数可序列化校验**：新增编译错误 `PLAIN_E1007`。调用 `server()` 产物时
+  传入字面量函数、本文件的类实例、或 `ReadableStream` / `FormData` 等，编译期失败。
+  看不出类型的标识符、`new Date()`、spread **不猜**，避免误报。
 - **列表 keyed 复用**：`arr.map(x => <li key={x.id}>…)` 现在按 key 认领行，
   头部插入 / 重排不会重建已有节点（关闭 `SPEC.md` §4 里 `each(..., keyFn, ...)` 的欠账）。
   `each()` 新增可选的第 4 个参数 `keyFn`；不传时行为与之前完全一致。
@@ -22,7 +30,7 @@
   此前要等运行时才炸，现在编译期就报出来。
   实现上**只报确知被文件绑定的名字**，不去猜全局变量 —— 避免误报，误报会毁掉免疫系统的可信度。
 - **结构化编译错误**：`PlainCompileError` 带
-  `code`（`PLAIN_E1001`–`PLAIN_E1006`、`PLAIN_E2001`）/ `file` / `line` / `column` / `hint`，
+  `code`（`PLAIN_E1001`–`PLAIN_E1007`、`PLAIN_E2001`）/ `file` / `line` / `column` / `hint`，
   可 `JSON.stringify`，供 IDE / CI / AI 直接消费（`SPEC.md` §7「自解释错误」）。
 - **编译产物 sourcemap**：`compile()` 返回 line 级 `map`，vite 插件会链式回传给 devtools，
   断点与堆栈可定位回 `.tsx` 源文件。

@@ -115,6 +115,82 @@ test("错误可 JSON 序列化，便于 CI / AI 直接消费", () => {
   assert.equal(typeof json.hint, "string");
 });
 
+test("PLAIN_E1007：给 server() 传函数 / 本文件类实例 / Stream", () => {
+  const cases = [
+    [
+      "内联函数",
+      [
+        "export const f = server(async (fn) => fn());",
+        "f(() => 1);",
+      ].join("\n"),
+      "函数",
+    ],
+    [
+      "本文件的校验函数",
+      [
+        "function validate(u) { return u; }",
+        "export const createUser = server(async (user, v) => v(user));",
+        "createUser({ name: 'a' }, validate);",
+      ].join("\n"),
+      "validate",
+    ],
+    [
+      "对象里夹函数",
+      [
+        "export const f = server(async (x) => x);",
+        "f({ ok: true, check: (n) => n > 0 });",
+      ].join("\n"),
+      "函数",
+    ],
+    [
+      "本文件 class 实例",
+      [
+        "class User { constructor(n) { this.n = n; } }",
+        "export const f = server(async (u) => u);",
+        "f(new User('a'));",
+      ].join("\n"),
+      "User",
+    ],
+    [
+      "ReadableStream",
+      [
+        "export const f = server(async (s) => s);",
+        "f(new ReadableStream());",
+      ].join("\n"),
+      "ReadableStream",
+    ],
+    [
+      "立即调用 server()(fn)",
+      "server(async (fn) => fn())(() => 1);",
+      "函数",
+    ],
+  ];
+  for (const [label, src, hint] of cases) {
+    const err = catchCompile(src, "s.jsx");
+    assert.equal(err.code, "PLAIN_E1007", label);
+    assert.equal(err.file, "s.jsx", label);
+    assert.match(err.detail, new RegExp(hint), label);
+    assert.match(err.hint, /不要传函数/, label);
+  }
+});
+
+test("PLAIN_E1007 不误报：可序列化参数 / 看不出类型的标识符 / Date / spread", () => {
+  const ok = [
+    "export const f = server(async (n) => n);\nf(1);",
+    "export const f = server(async (u) => u);\nf({ name: 'a', age: 1 });",
+    "export const f = server(async (xs) => xs);\nf(['a', { n: 1 }]);",
+    "export const f = server(async (d) => d);\nf(new Date());",
+    "export const f = server(async (x) => x);\nconst data = { a: 1 };\nf(data);",
+    "export const f = server(async (...xs) => xs);\nconst xs = [1];\nf(...xs);",
+    "export const f = server(async () => 1);\nf();",
+    "const a = server(async () => 1);\nconst b = server(async () => a());",
+    'const checkKeyword = server(async (word) => word);\ncheckKeyword("x");',
+  ];
+  for (const src of ok) {
+    assert.doesNotThrow(() => compile(src, "ok.jsx"), src);
+  }
+});
+
 test("合法输入不抛错，且默认返回 sourcemap", () => {
   const out = compile("export function App(){ return <p>x</p>; }", "ok.jsx");
   assert.equal(out.map.version, 3);

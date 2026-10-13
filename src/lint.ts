@@ -1,4 +1,5 @@
 // Plain 契约检查器：专治 AI（和人）在 Plain 里最高频的几类写法错误
+// 覆盖反模式目录 1–5（可自动修其中一部分）、7（就地改）、9（props 快照）
 //
 // 设计取向：能自动修的就别只报错。所有 fix 都是 AST 定位 + 源码切片，
 // 不做正则瞎替换，所以不会误伤多行声明。
@@ -166,7 +167,62 @@ export function check(
       );
     }
 
-    // 7) map 里没返回 JSX（编译器会拒绝，提前提示更友好）
+    // 7) 把 props 的 getter 存进变量 / 忘了 resolve
+    //    const t = props.title           —— 拿到函数本身
+    //    const t = resolve(props.title)  —— 初次对、之后不更新（快照）
+    //    {props.title} / title={props.title} —— JSX 里忘了 resolve
+    //    正确：在会重跑的上下文里 resolve，或写成 thunk。
+    //    on* 事件 prop 编译器不包 getter，透传不报。
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      !isThunk(node.initializer) &&
+      isPropsSnapshotExpr(node.initializer)
+    ) {
+      const access = propsAccessText(node.initializer);
+      add(
+        node,
+        "error",
+        "plain/no-props-snapshot",
+        `不要把 props 取值快照进变量（"${node.name.text} = ${access}"）：` +
+          `动态属性是 getter，这样会丢掉响应性。` +
+          `在 JSX / effect 里写 resolve(${access})，或写成 thunk：const ${node.name.text} = () => resolve(${access})`
+      );
+    }
+
+    if (
+      ts.isJsxExpression(node) &&
+      node.expression &&
+      isPropsChain(node.expression) &&
+      !(
+        node.parent &&
+        ts.isJsxAttribute(node.parent) &&
+        isEventAttrName(jsxAttrName(node.parent))
+      )
+    ) {
+      const access = propsAccessText(node.expression);
+      add(
+        node,
+        "error",
+        "plain/no-props-snapshot",
+        `JSX 里的动态 props 要用 resolve："{resolve(${access})}"（直接写 {${access}} 拿到的是 getter 本身）`
+      );
+    }
+
+    // 8) 对 signal 持有值就地改：items().push(x) / items()[0] = x
+    //    signal 用 Object.is 比较，就地改不会触发更新 —— 静默失败。
+    if (isMutatingSignalCall(node, signals)) {
+      const name = signalReadName(node);
+      add(
+        node,
+        "error",
+        "plain/no-signal-mutate",
+        `不要就地修改 signal 的值（"${name}().…"）：` +
+          `请生成新值再 set，例如 ${name}.set([...${name}(), x])`
+      );
+    }
+
     ts.forEachChild(node, visit);
   };
 
@@ -209,11 +265,142 @@ function isJsxLike(n: ts.Node): boolean {
   );
 }
 
-/** 去掉括号 / as 断言，拿到真实表达式 */
+/** 去掉括号 / as / 非空断言，拿到真实表达式 */
 function unwrapExpr(n: ts.Node): ts.Node {
   let e: ts.Node = n;
-  while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e)) e = e.expression;
+  while (
+    ts.isParenthesizedExpression(e) ||
+    ts.isAsExpression(e) ||
+    ts.isTypeAssertionExpression(e) ||
+    ts.isNonNullExpression(e) ||
+    ts.isSatisfiesExpression(e)
+  ) {
+    e = e.expression;
+  }
   return e;
+}
+
+function isThunk(n: ts.Node): boolean {
+  const e = unwrapExpr(n);
+  return ts.isArrowFunction(e) || ts.isFunctionExpression(e);
+}
+
+function isEventAttrName(name: string): boolean {
+  return /^on[A-Z]/.test(name);
+}
+
+function jsxAttrName(attr: ts.JsxAttribute): string {
+  return ts.isIdentifier(attr.name) ? attr.name.text : attr.name.getText();
+}
+
+/** 表达式是否从组件 props 出发的属性读取（props.title / props.params.id / props["x"]） */
+function propsRoot(n: ts.Node): ts.Identifier | null {
+  let e: ts.Node = unwrapExpr(n);
+  while (
+    ts.isPropertyAccessExpression(e) ||
+    ts.isElementAccessExpression(e)
+  ) {
+    e = unwrapExpr(e.expression);
+  }
+  return ts.isIdentifier(e) ? e : null;
+}
+
+function isPropsChain(n: ts.Node): boolean {
+  const e = unwrapExpr(n);
+  if (!(ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e))) {
+    return false;
+  }
+  const root = propsRoot(e);
+  return !!root && isComponentPropsParam(root);
+}
+
+function isResolveCall(n: ts.Node): boolean {
+  const e = unwrapExpr(n);
+  return (
+    ts.isCallExpression(e) &&
+    ts.isIdentifier(e.expression) &&
+    e.expression.text === "resolve" &&
+    e.arguments.length >= 1
+  );
+}
+
+/** const t = props.title  或  const t = resolve(props.title) */
+function isPropsSnapshotExpr(n: ts.Node): boolean {
+  if (isPropsChain(n)) return true;
+  const e = unwrapExpr(n);
+  if (isResolveCall(e) && ts.isCallExpression(e)) {
+    return isPropsChain(e.arguments[0]);
+  }
+  return false;
+}
+
+function propsAccessText(n: ts.Node): string {
+  const e = unwrapExpr(n);
+  if (isResolveCall(e) && ts.isCallExpression(e)) {
+    return unwrapExpr(e.arguments[0]).getText();
+  }
+  return e.getText();
+}
+
+const MUTATING_METHODS = new Set([
+  "push",
+  "pop",
+  "splice",
+  "shift",
+  "unshift",
+  "sort",
+  "reverse",
+  "fill",
+  "copyWithin",
+]);
+
+function isSignalRead(n: ts.Node, signals: Set<string>): n is ts.CallExpression {
+  const e = unwrapExpr(n);
+  return (
+    ts.isCallExpression(e) &&
+    ts.isIdentifier(e.expression) &&
+    signals.has(e.expression.text)
+  );
+}
+
+function signalReadName(n: ts.Node): string {
+  let e: ts.Node = unwrapExpr(n);
+  if (
+    ts.isCallExpression(e) &&
+    ts.isPropertyAccessExpression(e.expression)
+  ) {
+    e = e.expression.expression;
+  } else if (ts.isBinaryExpression(e)) {
+    e = e.left;
+  }
+  e = unwrapExpr(e);
+  if (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e)) {
+    e = unwrapExpr(e.expression);
+  }
+  e = unwrapExpr(e);
+  if (ts.isCallExpression(e) && ts.isIdentifier(e.expression)) {
+    return e.expression.text;
+  }
+  return "signal";
+}
+
+/** items().push(x) 或 items()[0] = x / items().foo = x */
+function isMutatingSignalCall(node: ts.Node, signals: Set<string>): boolean {
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+    const method = node.expression.name.text;
+    if (!MUTATING_METHODS.has(method)) return false;
+    return isSignalRead(node.expression.expression, signals);
+  }
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+  ) {
+    const left = unwrapExpr(node.left);
+    if (ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)) {
+      return isSignalRead(left.expression, signals);
+    }
+  }
+  return false;
 }
 
 /** 函数体是否会返回 JSX（口径与 compiler/schema.ts 保持一致） */

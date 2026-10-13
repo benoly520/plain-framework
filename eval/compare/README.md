@@ -74,7 +74,7 @@ node eval/compare/run.mjs counter       # 只跑名字含 counter 的用例
 - **服务端边界类**（`eval/tasks/` 里的 `03` / `04` / `07`）在 React 侧没有等价物：
   React 的对应能力是 RSC / Server Actions，机制完全不同，塞进这套 harness 会变成比 RSC 而不是比框架。
   那几条留在 `eval/tasks/` 里，作为 Plain 自己的质量指标。
-- **构建期闸门不对称**：Plain 侧候选要走 `契约检查 → 编译`（会因 `PLAIN_E2001` / `E1005` / `E1006` 直接失败），
+- **构建期闸门不对称**：Plain 侧候选要走 `契约检查 → 编译`（会因 `PLAIN_E2001` / `E1005` / `E1006` / `E1007` 直接失败），
   React 侧只有 JSX 转换，**没有等价闸门**（没接 eslint / React Compiler）。
   这是**有意保留**的：Plain 卖的正是「构建期把错误变便宜」这件事，把它拿掉反而失真。
   但必须说清楚：**这一栏的优势来自框架自带闸门，不来自 I/O 或模型能力**。

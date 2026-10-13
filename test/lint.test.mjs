@@ -168,3 +168,103 @@ test("文件名决定 ScriptKind：.ts 源码不报 JSX 类误判", () => {
   assert.deepEqual(check("const x: number = 1;", "a.ts"), []);
   assert.deepEqual(check("const obj = {};", "a.js"), []);
 });
+
+test("就地改 signal 值 -> plain/no-signal-mutate（push / 下标赋值）", () => {
+  const push = [
+    "import { signal } from 'plain';",
+    "const items = signal(['a']);",
+    "items().push('b');",
+  ].join("\n");
+  const issues = check(push, "a.tsx");
+  assert.deepEqual(codes(issues), ["plain/no-signal-mutate"]);
+  assert.equal(issues[0].fix, undefined);
+  assert.match(issues[0].message, /items\.set/);
+
+  const indexSet = [
+    "import { signal } from 'plain';",
+    "const items = signal(['a']);",
+    "items()[0] = 'z';",
+  ].join("\n");
+  assert.deepEqual(codes(check(indexSet, "a.tsx")), ["plain/no-signal-mutate"]);
+
+  const propSet = [
+    "import { signal } from 'plain';",
+    "const box = signal({ n: 1 });",
+    "box().n = 2;",
+  ].join("\n");
+  assert.deepEqual(codes(check(propSet, "a.tsx")), ["plain/no-signal-mutate"]);
+});
+
+test("不误伤：不可变更新 / 非 signal 数组的 push / .set", () => {
+  const src = [
+    "import { signal } from 'plain';",
+    "const items = signal(['a']);",
+    "items.set([...items(), 'b']);",
+    "items.set(items().concat(['c']));",
+    "items.set(items().filter((x) => x !== 'a'));",
+    "const raw = [];",
+    "raw.push(1);",
+  ].join("\n");
+  assert.deepEqual(check(src, "a.tsx"), []);
+});
+
+test("把 getter 存进变量 / JSX 忘了 resolve -> plain/no-props-snapshot", () => {
+  const store = [
+    "export function Card(props) {",
+    "  const t = props.title;",
+    "  return <h2>{t}</h2>;",
+    "}",
+  ].join("\n");
+  const storeIssues = check(store, "Card.tsx");
+  assert.deepEqual(codes(storeIssues), ["plain/no-props-snapshot"]);
+  assert.equal(storeIssues[0].line, 2);
+  assert.equal(storeIssues[0].fix, undefined);
+
+  const resolveOnce = [
+    "export function Card(props) {",
+    "  const t = resolve(props.title);",
+    "  return <h2>{t}</h2>;",
+    "}",
+  ].join("\n");
+  assert.deepEqual(codes(check(resolveOnce, "Card.tsx")), ["plain/no-props-snapshot"]);
+
+  const jsx = [
+    "export function Card(props) {",
+    "  return <h2>{props.title}</h2>;",
+    "}",
+  ].join("\n");
+  const jsxIssues = check(jsx, "Card.tsx");
+  assert.deepEqual(codes(jsxIssues), ["plain/no-props-snapshot"]);
+  assert.match(jsxIssues[0].message, /resolve\(props\.title\)/);
+
+  const attr = [
+    "export function Card(props) {",
+    "  return <input value={props.title} />;",
+    "}",
+  ].join("\n");
+  assert.deepEqual(codes(check(attr, "Card.tsx")), ["plain/no-props-snapshot"]);
+});
+
+test("不误伤：thunk / 内联 resolve / 事件透传 / 非组件", () => {
+  const cases = [
+    [
+      "export function Card(props) { const t = () => resolve(props.title); return <h2>{t()}</h2>; }",
+      "官方 thunk 写法",
+    ],
+    [
+      "export function Card(props) { return <h2>{resolve(props.title)}</h2>; }",
+      "JSX 里内联 resolve",
+    ],
+    [
+      "export function Card(props) { return <button onClick={props.onClick}>x</button>; }",
+      "on* 事件 prop 不是 getter，透传合法",
+    ],
+    [
+      "export function util(props) { const t = props.title; return t; }",
+      "不返回 JSX，不是组件",
+    ],
+  ];
+  for (const [src, why] of cases) {
+    assert.deepEqual(check(src, "a.tsx"), [], why);
+  }
+});

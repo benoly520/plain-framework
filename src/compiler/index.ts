@@ -25,6 +25,7 @@ export interface ServerFunction {
  * - `PLAIN_E1004` 遇到不支持的语法节点（编译器 bug）
  * - `PLAIN_E1005` 列表元素的 key 与 index 参数同时使用（语义二选一）
  * - `PLAIN_E1006` `server()` 的函数体引用了外部变量（闭包不会跟到服务端）
+ * - `PLAIN_E1007` `server()` 的调用参数无法 JSON 序列化（函数 / 类实例 / Stream）
  * - `PLAIN_E2001` 契约检查未通过（由构建链路抛出，见 vite 插件）
  */
 export type PlainErrorCode =
@@ -34,6 +35,7 @@ export type PlainErrorCode =
   | "PLAIN_E1004"
   | "PLAIN_E1005"
   | "PLAIN_E1006"
+  | "PLAIN_E1007"
   | "PLAIN_E2001";
 
 export interface PlainCompileErrorInit {
@@ -171,6 +173,9 @@ export function compile(
   // server() 的物理剥离要先知道「文件里存在哪些名字」——只有这些名字
   // 才可能在服务端变成 ReferenceError（见 assertServerSelfContained）
   const ambient = serverAmbientNames(sf);
+  const serverNames = collectServerBoundNames(sf);
+  const nonJsonNames = collectNonJsonBoundNames(sf);
+  for (const n of serverNames) nonJsonNames.add(n);
 
   const walk = (node: any) => {
     // 1) server(fn) -> RPC 桩 + 物理剥离
@@ -190,6 +195,15 @@ export function compile(
           end: node.getEnd(),
           text: `((...__args) => ${RPC}(${JSON.stringify(name)}, __args))`,
         });
+      }
+    }
+
+    // 1b) 调用 server() 产物时传入无法 JSON 序列化的参数（PLAIN_E1007）
+    //     只报 AST 上确知的函数 / 本文件的类实例 / 常见 Stream 类构造。
+    //     标识符若看不出是什么，不猜 —— 误报会毁掉免疫系统的可信度。
+    if (ts.isCallExpression(node)) {
+      if (isServerCallSite(node, serverNames)) {
+        assertServerArgsSerializable(node, nonJsonNames, fileName);
       }
     }
 
@@ -598,6 +612,185 @@ function assertServerSelfContained(
       "请在函数体内自己获取（如 process.env.DB_URL、await import(\"./db.js\")），" +
       "或把值作为参数传进来",
   });
+}
+
+/** 本文件里绑定到 server() 的变量名 */
+function collectServerBoundNames(sf: any): Set<string> {
+  const names = new Set<string>();
+  const scan = (n: any) => {
+    if (
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === "server"
+    ) {
+      let cur = n.parent;
+      while (cur) {
+        if (ts.isVariableDeclaration(cur) && ts.isIdentifier(cur.name)) {
+          names.add(cur.name.text);
+          break;
+        }
+        cur = cur.parent;
+      }
+    }
+    ts.forEachChild(n, scan);
+  };
+  scan(sf);
+  return names;
+}
+
+/**
+ * 本文件里确知「传给 RPC 一定坏掉」的名字：函数 / 类 / 绑定到函数表达式的 const。
+ * 不去把普通变量算进来。
+ */
+function collectNonJsonBoundNames(sf: any): Set<string> {
+  const names = new Set<string>();
+  const bind = (name: any) => {
+    if (ts.isIdentifier(name)) names.add(name.text);
+  };
+  const visit = (n: any) => {
+    if (ts.isFunctionDeclaration(n) && n.name) names.add(n.name.text);
+    if (ts.isClassDeclaration(n) && n.name) names.add(n.name.text);
+    if (ts.isVariableDeclaration(n) && n.initializer) {
+      const init = n.initializer;
+      if (
+        ts.isArrowFunction(init) ||
+        ts.isFunctionExpression(init) ||
+        ts.isClassExpression(init)
+      ) {
+        bind(n.name);
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return names;
+}
+
+function isServerFactoryCall(n: any): boolean {
+  return (
+    ts.isCallExpression(n) &&
+    ts.isIdentifier(n.expression) &&
+    n.expression.text === "server"
+  );
+}
+
+/** 是「调用已经剥离的 server 函数」，不是 `server(fn)` 工厂本身 */
+function isServerCallSite(node: any, serverNames: Set<string>): boolean {
+  if (!ts.isCallExpression(node) || isServerFactoryCall(node)) return false;
+  const callee = node.expression;
+  if (ts.isIdentifier(callee) && serverNames.has(callee.text)) return true;
+  // server(fn)(args) 立即调用
+  if (isServerFactoryCall(callee)) return true;
+  return false;
+}
+
+const NON_JSON_CTORS = new Set([
+  "ReadableStream",
+  "WritableStream",
+  "TransformStream",
+  "FormData",
+  "Blob",
+  "File",
+  "Request",
+  "Response",
+  "Headers",
+]);
+
+function ctorName(n: any): string | null {
+  const c = n.expression;
+  if (ts.isIdentifier(c)) return c.text;
+  if (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.name)) return c.name.text;
+  return null;
+}
+
+/** 返回无法序列化的原因；能序列化或看不出来则返回 null（不猜） */
+function nonJsonReason(expr: any, nonJsonNames: Set<string>): string | null {
+  if (!expr) return null;
+  let e = expr;
+  while (
+    ts.isParenthesizedExpression(e) ||
+    ts.isAsExpression(e) ||
+    ts.isTypeAssertionExpression(e) ||
+    ts.isNonNullExpression(e) ||
+    ts.isSatisfiesExpression(e)
+  ) {
+    e = e.expression;
+  }
+
+  if (
+    ts.isArrowFunction(e) ||
+    ts.isFunctionExpression(e) ||
+    ts.isFunctionDeclaration(e)
+  ) {
+    return "函数";
+  }
+  if (ts.isClassExpression(e) || ts.isClassDeclaration(e)) {
+    return "类";
+  }
+  if (ts.isNewExpression(e)) {
+    const name = ctorName(e);
+    if (name && NON_JSON_CTORS.has(name)) return `Stream/二进制实例 "${name}"`;
+    if (name && nonJsonNames.has(name)) return `类实例 "${name}"`;
+    return null;
+  }
+  if (ts.isIdentifier(e) && nonJsonNames.has(e.text)) {
+    return `函数/类 "${e.text}"`;
+  }
+  if (ts.isObjectLiteralExpression(e)) {
+    for (const p of e.properties) {
+      if (ts.isMethodDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)) {
+        return "带方法的对象";
+      }
+      if (ts.isPropertyAssignment(p)) {
+        const why = nonJsonReason(p.initializer, nonJsonNames);
+        if (why) return why;
+      }
+      if (ts.isShorthandPropertyAssignment(p) && nonJsonNames.has(p.name.text)) {
+        return `函数/类 "${p.name.text}"`;
+      }
+      if (ts.isSpreadAssignment(p)) {
+        const why = nonJsonReason(p.expression, nonJsonNames);
+        if (why) return why;
+      }
+    }
+    return null;
+  }
+  if (ts.isArrayLiteralExpression(e)) {
+    for (const el of e.elements) {
+      if (ts.isSpreadElement(el)) {
+        const why = nonJsonReason(el.expression, nonJsonNames);
+        if (why) return why;
+      } else {
+        const why = nonJsonReason(el, nonJsonNames);
+        if (why) return why;
+      }
+    }
+  }
+  return null;
+}
+
+function assertServerArgsSerializable(
+  call: any,
+  nonJsonNames: Set<string>,
+  fileName: string
+): void {
+  for (const arg of call.arguments) {
+    if (ts.isSpreadElement(arg)) continue;
+    const why = nonJsonReason(arg, nonJsonNames);
+    if (!why) continue;
+    const sf = call.getSourceFile();
+    const at = sf.getLineAndCharacterOfPosition(arg.getStart(sf));
+    throw new PlainCompileError({
+      code: "PLAIN_E1007",
+      file: fileName,
+      line: at.line + 1,
+      column: at.character + 1,
+      detail: `server() 的调用参数无法 JSON 序列化（${why}）`,
+      hint:
+        "参数与返回值走 JSON，不要传函数、类实例、Stream。" +
+        "把逻辑写进 server() 函数体，或只传入可序列化的数据",
+    });
+  }
 }
 
 function serverVarName(node: any): string {

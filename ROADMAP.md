@@ -127,10 +127,11 @@ Plain 的命题是「让 AI 首次写对的比例更高」（AX），不是「�
 
 - **MCP server**：把 `plaindev schema` / `plaindev check` / 编译错误暴露为 MCP 工具，AI IDE 可直接调用。
 - **错误码统一**：`lint` 用 `plain/*`、编译器用 `PLAIN_E*`，两套并存，应收敛到一套。
-- **补齐目录里标 ❌ 的静态检查**（按价值排序）：
-  1. `const t = props.title`（把 getter 存进变量）
-  2. 对 signal 持有值就地改（`items().push(x)`）
-  3. 给 `server()` 传函数 / 类实例 / Stream
+- **补齐目录里标 ❌ 的静态检查**（按价值排序）✅ 已落地：
+  1. `const t = props.title` → `plain/no-props-snapshot`
+  2. 对 signal 持有值就地改（`items().push(x)`）→ `plain/no-signal-mutate`
+  3. 给 `server()` 传函数 / 类实例 / Stream → `PLAIN_E1007`
+    （只报源码上确知的形态；标识符类型不明 / `Date` / spread 不猜）
 - **契约从「推断」变成「声明」**：`schema.ts` 的 props 来自「代码读了什么 + 调用点传了什么」，
   `<Card {...rest}/>` 就推不出来。让 AI 显式声明再校验，契约才可信。
 - **JSX 类型收紧**：`src/types.ts` 里 `[attr: string]: any` 让「类型即校验」在组件边界失效。
