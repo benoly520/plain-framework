@@ -95,6 +95,10 @@
 - **`eval/RESULTS.md` 记入首个真实模型跑数（含效度声明）**：7/7 首次通过、平均轮次 1.00；
   但该次执行前模型已读过 `check.mjs`，**不是协议干净的有效指标**，只能作为上界与 harness 联调记录 ——
   只喂 `task.md` 的有效实验仍待补。
+- **契约规则 `plain/no-resolve-event-prop`**：`resolve(props.onClick)` —— 编译器对 `on[A-Z]`
+  的 prop **不包 getter**（传进来的就是函数本身），而 `resolve(fn)` 会把函数**当场调用**，
+  于是事件处理器在渲染期就被执行。构建期报错，**可自动修**（去掉 `resolve` → `props.onClick`）。
+  此前 `plain/no-props-snapshot` 把 `on*` 一律当「合法透传」豁免，恰好漏放了这一种。
 
 ### 修复
 
@@ -113,6 +117,11 @@
   keyed 复用下行只构建一次，回调捕获的 index 无法随位置更新，两者同时生效必然有一个语义是错的；
   静默的语义降级正是本框架最该消灭的失败模式。
   受影响的写法：`arr.map((x, i) => <li key={x.id}>…</li>)`。修法：删掉 `key` 或删掉 index 参数。
+- **JSX 属性展开 `{...expr}` 现在是编译错误 `PLAIN_E1008`**（此前是「半套支持」：接受，但会静默跑错）。
+  展开产物是一段**只跑一次**的循环（不进 `effect`，信号变了不更新），且一律 `setAttribute`：
+  `className` 不生效、`style` 对象变成 `"[object Object]"`、`value` / `checked` 被设成 attribute
+  而非 property。受影响的写法：`<Card {...rest} />`、`<input {...attrs} />`。修法：展开成显式属性。
+  理由同 `PLAIN_E1005` —— 不做静默降级。
 - 统一包管理器为 pnpm，移除 `package-lock.json`。
 - `tsconfig`：打开 `noImplicitAny`，开启 `sourceMap` / `declarationMap`。
 - `package.json`：新增 `engines`、`packageManager`、`sideEffects`。

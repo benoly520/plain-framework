@@ -1,5 +1,5 @@
 // Plain 契约检查器：专治 AI（和人）在 Plain 里最高频的几类写法错误
-// 覆盖反模式目录 1–5（可自动修其中一部分）、7、9、11–13
+// 覆盖反模式目录 1–5（可自动修其中一部分）、7、9、11–14
 //
 // 设计取向：能自动修的就别只报错。所有 fix 都是 AST 定位 + 源码切片，
 // 不做正则瞎替换，所以不会误伤多行声明。
@@ -299,6 +299,25 @@ export function check(
         "error",
         "plain/no-props-snapshot",
         `JSX 里的动态 props 要用 resolve："{resolve(${access})}"（直接写 {${access}} 拿到的是 getter 本身）`
+      );
+    }
+
+    // 反模式 14：resolve on* 事件 prop —— 编译器不给 on[A-Z] 的 prop 包 getter，
+    //    传进来的就是函数本身，而 resolve(fn) 会把函数「当场调用」。
+    //    正确写法是直接 props.onXxx(...)。（no-props-snapshot 反而会漏放这一种，
+    //    因为它把 on* prop 一律当「合法的透传」豁免了。）
+    if (ts.isCallExpression(node) && isResolveCall(node) && isEventPropsAccess(node)) {
+      const arg = node.arguments[0];
+      add(
+        node,
+        "error",
+        "plain/no-resolve-event-prop",
+        `不要 resolve on* 事件 prop（"${node.getText(sf)}"）：` +
+          `编译器不给 on[A-Z] 的 prop 包 getter，传进来的就是函数本身，` +
+          `resolve(...) 会把它当场调用。直接写 ${arg.getText(sf)}(...)`,
+        node.arguments.length === 1
+          ? { start: node.getStart(sf), end: node.getEnd(), text: arg.getText(sf) }
+          : undefined
       );
     }
 

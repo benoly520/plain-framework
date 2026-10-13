@@ -100,5 +100,5 @@ React 侧默认没有等价闸门 —— 见 `compare/README.md` 的公平性说
 
 | 日期 | 任务 | 踩的坑 | 是否已加静态检查 |
 | --- | --- | --- | --- |
-| 2026-10-13 | 文档校对 `docs/patterns.md`（非评测） | 用 `{...spread}` 封装受控绑定：展开只在创建时求值一次，**不进 `effect`**，信号变了输入框不更新（"重置表单"会静默失效） | ❌ 合法语法，编译期无静态事实可判，拦不了 |
-| 2026-10-13 | 文档校对 `docs/patterns.md`（非评测） | `resolve(props.onSave)` 会把事件处理器**当场调用**：`on[A-Z]` 开头的 prop 不包 getter，取值应直接 `props.onSave(...)` | ❌ 类型上看不出，拦不了 |
+| 2026-10-13 | 文档校对 `docs/patterns.md`（非评测） | 用 `{...spread}` 封装受控绑定：展开只在创建时求值一次，**不进 `effect`**，信号变了输入框不更新（"重置表单"会静默失效）；且绕过 class / style / value 的正确处理 | ✅ 已加 `PLAIN_E1008`：编译期直接拒绝展开 |
+| 2026-10-13 | 文档校对 `docs/patterns.md`（非评测） | `resolve(props.onSave)` 会把事件处理器**当场调用**：`on[A-Z]` 开头的 prop 不包 getter，取值应直接 `props.onSave(...)` | ✅ 已加 `plain/no-resolve-event-prop`（可自动修） |

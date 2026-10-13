@@ -39,6 +39,8 @@
 | 11 | `effect(async () => { await … })` | 依赖收集在第一个 `await` 之后失效：把 `await` 提到 `effect` 外，或用 `resource()` | ✅ `plain/no-async-effect` | — |
 | 12 | `effect(() => count.set(count() + 1))`（读了又写同一个 signal） | 派生值用 `computed(fn)`；`effect` 里只写「没读过」的 signal | ✅ `plain/no-effect-loop` | — |
 | 13 | `computed(() => { s.set(…) })` | `computed` 必须是纯函数，副作用放 `effect` | ✅ `plain/no-computed-side-effect` | — |
+| 14 | `resolve(props.onClick)`（`on*` 事件 prop 不能 resolve） | `props.onClick(...)`：编译器不给 `on*` 包 getter，传进来的就是函数，`resolve` 会把它当场调用 | ✅ `plain/no-resolve-event-prop`（可自动修） | — |
+| 15 | JSX 属性展开 `{...expr}` | 展开成显式属性：展开只做半套（不进响应式 + 绕过 class / style / value），会静默跑错 | ✅ `PLAIN_E1008` | — |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
 > **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
@@ -67,6 +69,7 @@
 | `PLAIN_E1005` | 列表的 key 与 index 同时使用 | 二者选一 |
 | `PLAIN_E1006` | `server()` 的函数体引用了外部变量 | 在函数体内自己获取，或改成参数传入（闭包不会跟到服务端） |
 | `PLAIN_E1007` | `server()` 的调用参数无法 JSON 序列化 | 只传数据；把函数 / 校验逻辑写进 `server()` 函数体 |
+| `PLAIN_E1008` | JSX 属性展开 `{...expr}` | 展开成显式属性（展开只做半套，会静默跑错） |
 | `PLAIN_E2001` | 契约检查未通过 | 跑 `npx plaindev check --fix <dir>` 自动修，再重新构建 |
 
 错误对象带 `code` / `file` / `line` / `column` / `hint`，`JSON.stringify(error)` 可直接读，不用正则去刮 message。

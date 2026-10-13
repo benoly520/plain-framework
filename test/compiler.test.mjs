@@ -106,14 +106,12 @@ test("属性：静态 class 字符串保持原生 setAttribute 语义", () => {
   assert.ok(code.includes('setAttribute("class", "a")'));
 });
 
-test("属性：style 对象、spread 展开", () => {
+test("属性：style 对象编译成 Object.assign（展开属性已由 PLAIN_E1008 拒绝）", () => {
   const { code } = compile(
-    'export function App(){ return <div style={{color:"red"}} {...rest} />; }',
+    'export function App(){ return <div style={{color:"red"}} />; }',
     "st.jsx"
   );
   assert.ok(code.includes("Object.assign("));
-  assert.ok(code.includes("removeAttribute(k)"));
-  assert.ok(code.includes(".addEventListener(k.slice(2).toLowerCase()"));
 });
 
 test("内联函数 prop（返回 JSX）编译成真正的函数体", () => {

@@ -3,7 +3,7 @@
 // 覆盖点：signal-assign / signal-not-called（插值与属性两个分支）/ react-habit /
 //        no-inner-html（三种写法）/ no-props-destructure / no-props-snapshot
 //        （声明 / 赋值 / JSX 三种形态，含 on* 不误报）/ no-signal-mutate /
-//        resource 解构识别 / 不误伤 / formatIssues / 多修复
+//        no-resolve-event-prop / resource 解构识别 / 不误伤 / formatIssues / 多修复
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { check, autofix, formatIssues, suppressionCount } from "../dist/lint.js";
@@ -385,16 +385,44 @@ test("[回归] 不误报：把 on* 事件 prop 存进变量（编译器不给 on
       "on* prop 存的本来就是函数，快照不丢响应性",
     ],
     [
-      "export function Card(props) { const cb = resolve(props.onClick); return <button onClick={cb}>x</button>; }",
-      "resolve 包一层的 on* prop 同样不报",
-    ],
-    [
       'export function Card(props) { const cb = props["onClick"]; return <button onClick={cb}>x</button>; }',
       "下标形态的 on* prop 也算事件",
     ],
   ];
   for (const [src, why] of cases) {
     assert.deepEqual(check(src, "a.tsx"), [], why);
+  }
+});
+
+test("resolve on* 事件 prop -> plain/no-resolve-event-prop（会把处理器当场调用）", () => {
+  // 编译器对 on[A-Z] 的 prop 不包 getter，传进来的就是函数本身；
+  // resolve(fn) = fn()，于是 resolve(props.onClick) 会当场调用处理器。
+  const src = [
+    "export function Card(props) {",
+    "  const cb = resolve(props.onClick);",
+    "  return <button onClick={cb}>x</button>;",
+    "}",
+  ].join("\n");
+  const issues = check(src, "Card.tsx");
+  assert.deepEqual(codes(issues), ["plain/no-resolve-event-prop"]);
+  assert.match(issues[0].message, /当场调用/);
+  assert.ok(issues[0].fix, "去掉 resolve 是唯一正确改法，可自动修");
+  assert.ok(autofix(src, issues).includes("const cb = props.onClick;"));
+
+  // 下标形态的 on* 同样拦
+  assert.deepEqual(
+    codes(check('export function Card(props) { return <b onClick={resolve(props["onClick"])}>x</b>; }', "a.tsx")),
+    ["plain/no-resolve-event-prop"]
+  );
+
+  // 不误报：直接透传 / 直接调用 / 普通动态 props 的 resolve 都是对的
+  const ok = [
+    "export function Card(props) { return <button onClick={props.onClick}>x</button>; }",
+    "export function Card(props) { return <button onClick={() => props.onClick(1)}>x</button>; }",
+    "export function Card(props) { return <h2>{resolve(props.title)}</h2>; }",
+  ];
+  for (const s of ok) {
+    assert.deepEqual(check(s, "a.tsx"), [], s);
   }
 });
 

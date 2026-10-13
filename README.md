@@ -215,6 +215,7 @@ function Card(props) {
 | `.map()` 里 `return` 的不是 JSX | 无法编译成 DOM 指令 | 换成返回 JSX |
 | `innerHTML` / `insertAdjacentHTML` | 安全红线 | 用 `{expr}` 插值 |
 | `useState` / `useEffect` 等 React API | 不是 Plain 的 API | `signal` / `effect` |
+| JSX 属性展开 `{...expr}`（`PLAIN_E1008`） | 展开只做了半套：不进响应式 + 绕过 class / style / value，会静默跑错 | 展开成显式属性 |
 
 编译器最后有一道**自检**：产物里若残留任何未处理的 JSX，或代码无法解析，直接抛错。
 **不会**把坏代码悄悄交给打包器。
@@ -237,6 +238,7 @@ function Card(props) {
 | `PLAIN_E1005` | 列表的 `key` 与 index 参数同时使用（二者选一） |
 | `PLAIN_E1006` | `server()` 的函数体引用了外部变量（闭包不会跟到服务端） |
 | `PLAIN_E1007` | `server()` 的调用参数 / 返回值无法 JSON 序列化（函数 / 类实例 / Stream） |
+| `PLAIN_E1008` | JSX 属性展开 `{...expr}`（只做了半套支持，会静默跑错） |
 | `PLAIN_E2001` | 契约检查未通过（由构建链路抛出，`plaindev check --fix` 可自动修） |
 
 **契约检查默认接在构建链路里**（`plainPlugin({ lint: "warn" | false })` 可调），
@@ -254,6 +256,7 @@ function Card(props) {
 | `plain/no-async-effect` | `effect(async () => { await … })` | ❌ 依赖收集在 await 后失效，只报错 |
 | `plain/no-effect-loop` | `effect(() => count.set(count() + 1))` | ❌ 自触发会栈溢出，只报错（钳位写法不报） |
 | `plain/no-computed-side-effect` | `computed(() => { s.set(…) })` | ❌ 派生值必须纯，只报错 |
+| `plain/no-resolve-event-prop` | `resolve(props.onClick)` | ✅ 去掉 resolve → `props.onClick` |
 
 给 AI 代理看的完整反模式目录在 [`AGENTS.md`](AGENTS.md)。编译器侧还会拦 `server()` 的参数与返回值里字面量函数 / 本文件类实例 / Stream（`PLAIN_E1007`）。
 

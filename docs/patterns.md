@@ -373,6 +373,8 @@ const user = resource(() => getUser(props.params.id));
 | 提交 | 忘了 `e.preventDefault()` | 处理函数第一行就挡掉 |
 | 校验 | 把校验函数当参数传给 `server()` | 校验写在 `server()` 函数体内 |
 | 列表行 | 不写 `key` 却依赖行内局部状态 | `<Row key={item.id} … />` |
+| 事件 prop | `resolve(props.onClick)`（会把处理器当场调用） | `props.onClick(...)` —— `on*` prop 不是 getter |
+| 透传一组属性 | `<Card {...rest} />` | 逐个显式列出（`PLAIN_E1008`） |
 
 ---
 
@@ -391,7 +393,8 @@ Plain 的取舍是：**少一个概念，就少一类错误**。
 ```
 
 编译产物里，展开是一段**只跑一次**的循环（`setAttribute` / `addEventListener`），而不是 `effect(…)`。
-这是**合法语法，没有任何静态规则拦得住** —— 它会安静地跑错，正是本文件最想消灭的失败模式。
+所以编译器现在**直接拒绝**它：`PLAIN_E1008`（见 `AGENTS.md` 第 3 节第 15 条）——
+与其留一个"半对"的行为让人静默踩坑，不如在编译期报错，这正是本框架的取舍。
 
 **结论：受控绑定一律写全三件套，不要用 spread 封装。**
 

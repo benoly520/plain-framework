@@ -249,6 +249,46 @@ test("PLAIN_E1007 不误报：可序列化参数 / 看不出类型的标识符 /
   }
 });
 
+test("PLAIN_E1008：拒绝 JSX 属性展开 {...expr}（半套支持会静默跑错）", () => {
+  const cases = [
+    [
+      "组件上展开",
+      ["export function App(){", "  const rest = {};", "  return <Card {...rest} />;", "}"].join("\n"),
+      3,
+    ],
+    [
+      "原生元素上展开",
+      ["export function App(){", "  return <input {...attrs} />;", "}"].join("\n"),
+      2,
+    ],
+    [
+      "嵌套子节点里也要拦",
+      ["export function App(){", "  return <div><span {...x} /></div>;", "}"].join("\n"),
+      2,
+    ],
+  ];
+  for (const [label, src, line] of cases) {
+    const err = catchCompile(src, "sp.jsx");
+    assert.equal(err.code, "PLAIN_E1008", label);
+    assert.equal(err.file, "sp.jsx", label);
+    assert.equal(err.line, line, label);
+    assert.match(err.detail, /静默跑错/, label);
+    assert.match(err.hint, /显式属性/, label);
+  }
+});
+
+test("PLAIN_E1008 不误报：普通属性 / 数组与对象展开 / 调用参数展开", () => {
+  const ok = [
+    "export function App(){ return <Card title={t} onClick={save} />; }",
+    "export function App(){ const o = { a: 1 }; const b = { ...o, c: 2 }; return <b>{b.c}</b>; }",
+    "export function App(){ const xs = [1]; return <div>{xs.map((x) => <span>{x}</span>)}</div>; }",
+    "export const f = server(async (...xs) => xs);\nconst xs = [1];\nf(...xs);",
+  ];
+  for (const src of ok) {
+    assert.doesNotThrow(() => compile(src, "ok.jsx"), src);
+  }
+});
+
 test("合法输入不抛错，且默认返回 sourcemap", () => {
   const out = compile("export function App(){ return <p>x</p>; }", "ok.jsx");
   assert.equal(out.map.version, 3);

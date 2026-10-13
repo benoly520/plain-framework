@@ -26,6 +26,7 @@ export interface ServerFunction {
  * - `PLAIN_E1005` 列表元素的 key 与 index 参数同时使用（语义二选一）
  * - `PLAIN_E1006` `server()` 的函数体引用了外部变量（闭包不会跟到服务端）
  * - `PLAIN_E1007` `server()` 的调用参数 / 返回值无法 JSON 序列化（函数 / 类实例 / Stream）
+ * - `PLAIN_E1008` JSX 属性展开 `{...expr}`（只做了半套支持，会静默跑错）
  * - `PLAIN_E2001` 契约检查未通过（由构建链路抛出，见 vite 插件）
  */
 export type PlainErrorCode =
@@ -36,6 +37,7 @@ export type PlainErrorCode =
   | "PLAIN_E1005"
   | "PLAIN_E1006"
   | "PLAIN_E1007"
+  | "PLAIN_E1008"
   | "PLAIN_E2001";
 
 export interface PlainCompileErrorInit {
@@ -954,6 +956,32 @@ function tagParts(node: any): any[] | null {
   return null;
 }
 
+/**
+ * 拒绝 JSX 属性展开 `{...expr}`（PLAIN_E1008）。
+ *
+ * 展开只被编译器「半实现」：它不会像显式属性那样包进 `effect`（信号变了不更新），
+ * 也没有走 class / style / value 的正确属性路径 —— 会**静默跑错**。
+ * 与其留一个半对的行为，不如在编译期直接报错：这正是本框架「消灭静默语义降级」的取舍
+ * （与 `PLAIN_E1005` 拒绝 key + index 同一条理由）。
+ */
+function assertNoSpreadAttrs(attrs: any, sf: any): void {
+  const spread = attrs.properties.find((p: any) => ts.isJsxSpreadAttribute(p));
+  if (!spread) return;
+  const at = sf.getLineAndCharacterOfPosition(spread.getStart(sf));
+  throw new PlainCompileError({
+    code: "PLAIN_E1008",
+    file: sf.fileName,
+    line: at.line + 1,
+    column: at.character + 1,
+    detail:
+      "JSX 属性展开 {...} 不支持：展开只在创建时求值一次，不会进入响应式更新，" +
+      "也绕过了 class / style / value 的正确处理 —— 会静默跑错。",
+    hint:
+      "改成显式属性，例如 <Card title={t()} onSave={save} />；" +
+      "确实要透传一组属性时，请逐个列出。",
+  });
+}
+
 function emitNode(node: any, parentVar: string, out: string[]): void {
   if (!node) return;
   if (ts.isJsxFragment(node)) {
@@ -974,6 +1002,7 @@ function emitNode(node: any, parentVar: string, out: string[]): void {
     });
   }
   const [tagText, attrs, children] = parts;
+  assertNoSpreadAttrs(attrs, node.getSourceFile());
   if (isComponentTag(tagText)) {
     emitComponent(tagText, attrs, children, parentVar, out);
     return;
@@ -1039,9 +1068,8 @@ function collectProps(attrs: any): string[] {
           parts.push(`${key}: () => (${exprNode.getText()})`);
         }
       }
-    } else if (ts.isJsxSpreadAttribute(p)) {
-      parts.push(`...(${p.expression.getText()})`);
     }
+    // 展开属性 {...expr} 由 assertNoSpreadAttrs 在编译期直接拒绝（PLAIN_E1008）
   });
   return parts;
 }
@@ -1166,12 +1194,8 @@ function emitElement(
           );
         }
       }
-    } else if (ts.isJsxSpreadAttribute(p)) {
-      const sp = fresh("sp");
-      out.push(
-        `const ${sp} = ${p.expression.getText()}; for (const k of Object.keys(${sp})) { const v = ${sp}[k]; if (/^on[A-Z]/.test(k)) ${el}.addEventListener(k.slice(2).toLowerCase(), v); else if (v === false || v == null) ${el}.removeAttribute(k); else ${el}.setAttribute(k, ${S}(v)); }`
-      );
     }
+    // 展开属性 {...expr} 由 assertNoSpreadAttrs 在编译期直接拒绝（PLAIN_E1008）
   });
 
   children.forEach((c: any) => emitChild(c, el, out));
