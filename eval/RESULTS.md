@@ -92,22 +92,49 @@ React 侧默认没有等价闸门 —— 见 `compare/README.md` 的公平性说
 
 | 日期 | 模型 | 上下文 | 用例数 | Plain 首次通过率 | React 首次通过率 | Plain 构建期拦下 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2026-10-13 | deepseek-v4.1-flash | task | 5 | 5 / 5 = 100% | 5 / 5 = 100% | 0 | **非协议干净，见下** |
+| 2026-10-13 | deepseek-v4.1-flash | task | 5 | 5 / 5 = 100% | 5 / 5 = 100% | 0 | **换了写手重跑（只读 README），见下** |
+| 2026-10-13 | deepseek-v4.1-flash | full | 5 | 5 / 5 = 100% | 5 / 5 = 100% | 0 | 未读 `check.mjs`，但仍越出该档白名单，见下 |
 
-> ⚠️ **效度说明（与上面 tasks 那条同源）**：
+> ⚠️ **本轮协议（`task` 行，替换掉了原行）**：
 >
-> 按协议，代理**只应拿到 `task.md`**，两侧各按**该框架的惯用写法**完成。本次两侧实现由**同一个模型**写出
-> （Plain 用 `signal` / `computed` / `resource`，React 用 `useState` / 解构 props / `useEffect`），
-> 但该模型**在动手前已读过全部 `check.mjs`**。因此：
+> 两侧实现由**另一个全新上下文的写手**产出（同模型 `deepseek-v4.1-flash`，无本次会话历史），
+> 逐字落盘、**未做任何修改**后才跑 harness。它的阅读范围被压到 **`README.md` 一个文件**
+> （它给出的审计清单也只有 `README.md`）：`check.mjs`、`plain.tsx`、`react.jsx`、`AGENTS.md`、
+> `docs/patterns.md`、`src/**`、`RESULTS.md`、`compare/README.md` 均未读。
+> 被替换掉的原来那行，其写手**在动手前读过全部 `check.mjs`**（等于知道断言），效度更差 —— 这是替换的理由。
 >
-> - 100% / 100% 只能当**上界**看 —— **不能**据此说「两者一样好」，更不能说「Plain 更强」；
+> 但**仍不是干净实验**，请勿当成 `task` 档的有效数据：
+>
+> - 写手读的 `README.md` 里本身就带错误码表与规则码表（`PLAIN_E1005`、`plain/no-props-snapshot`、
+>   `plain/no-signal-mutate`、`plain/react-habit`…），所以这一档的实际信息量**高于**「只给 `task.md`」，
+>   更接近「公开文档基线」。它与 `full` 档（AGENTS §1–§3）之间的差别，**不能**解释成"上下文多少"的因果效应。
+> - 100% / 100% 只能当**上界**看 —— **不能**据此说「两者一样好」，更不能说「Plain 更强」；样本只有 5 个。
 > - 本次 **`Plain 构建期拦下 = 0`**：两边都一次写对，闸门没有被触发。这**不代表闸门无效** ——
 >   它的价值只在「写错时」体现。Plain 免疫系统的对称性证据见
 >   [`compare/README.md`](compare/README.md) 的「已确立的对称性」（02 / 03 的错法被**同一行断言**抓住）。
-> - 有效实验的要求：让**没读过 `check.mjs`** 的模型、只喂 `task.md` 重跑一次，再把这行替换掉。
+> - 一个可记录的覆盖盲区：写手在 `02-list-update` / `04-empty-branch` 的列表里**没写 `key=`**
+>   （`<li>{item}</li>`），断言照样通过 —— 即当前这套对比用例**没有**拦住「不写 key」（实测结论，
+>   未读 `check.mjs` 反推）。这与 `eval/tasks/` 里 `02-keyed-list` 专门用断言测 key 的做法不同，
+>   应视作对比用例的覆盖缺口，而不是「key 不重要」。
 >
 > 另：本批用例实际有 **5** 个（`compare/README.md` 里「只有 3 个用例」的说法已过时），样本仍很小，
 > 结论一律只作**方向性**参考。
+
+> **关于 `full` 档那一行（协议比上面干净，但仍不是干净实验）**：
+>
+> - 本轮代理**没有读** `check.mjs`、`plain.tsx`、`react.jsx`、`RESULTS.md`、`compare/README.md`；
+>   写实现时只用了各用例 `task.md` + `AGENTS.md` §1–§3（即 `--context full`）。
+>   上一轮的候选文件是**先删除再重写**的，没有读旧答案。
+> - 但**仍越出了该档的严格白名单**：为确认裸导入路径（`"plain"`）与 `resource()` 的
+>   `{ data, loading, error, refetch }` 语义，读了 `package.json`、`eval/compare/run.mjs`、
+>   `eval/compare/harness.mjs`、`eval/harness.mjs`、`src/runtime/index.ts`、`src/runtime/async.ts`。
+>   这些**不是用例答案**（不含断言、不含参考实现），但确实不是「只给 `task.md` + §1–§3」，
+>   而 `resource()` 的 loading/data 语义正是 `05-async-loading` 的关键 —— 所以这一行同样只能当**上界**。
+> - 记录命令：`node eval/compare/run.mjs --context full`（脚本默认 `task`，漏参数会把档位标错）。
+>   该批产物后来被 `task` 档重跑覆盖，已备份到 `/tmp/plain-compare-full-batch/`（临时路径，不在仓库内；
+>   磁盘上现存的 `cases/*/*.candidate.*` 是 `task` 档那一批）。
+> - 5 / 5 与 5 / 5 的读法与上一行一致：**不能**据此说「两者一样好」或「Plain 更强」；
+>   `Plain 构建期拦下 = 0` 同样只是「这次没人写错」，不是闸门无效。
 
 ## 发现的反模式（重要产出）
 
