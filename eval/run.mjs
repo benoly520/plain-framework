@@ -1,10 +1,13 @@
 // eval/run.mjs —— 跑所有评测任务，输出「AI 首次写对率」相关指标
 //
 // 用法：
-//   node eval/run.mjs            跑全部任务
-//   node eval/run.mjs counter    只跑名字包含 counter 的任务
-//   node eval/run.mjs --prompt   只打印任务提示词（给代理消费）
+//   node eval/run.mjs                       跑全部任务
+//   node eval/run.mjs counter               只跑名字包含 counter 的任务
+//   node eval/run.mjs --prompt              只打印任务提示词（给代理消费）
 //   node eval/run.mjs --prompt 01
+//   node eval/run.mjs --prompt --context minimal
+//       给代理的上下文分三档（见 eval/README.md「上下文对照」）：
+//         task（默认）只给 task.md；minimal 加 5 条核心规则；full 再加反模式目录
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -23,11 +26,45 @@ const SOURCE_NAMES = {
   reference: ["reference.tsx", "reference.jsx"],
 };
 
+/** 会吃掉下一个参数的开关（解析位置参数时要跳过它们的值） */
+const VALUED_FLAGS = new Set(["--context"]);
 const argv = process.argv.slice(2);
+
+const flagValue = (name, fallback = null) => {
+  const i = argv.indexOf(name);
+  return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+};
+const positionals = [];
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a.startsWith("--")) {
+    if (VALUED_FLAGS.has(a)) i++;
+    continue;
+  }
+  positionals.push(a);
+}
+
 const promptOnly = argv.includes("--prompt");
 const useReference = argv.includes("--reference");
-const filter = argv.find((a) => !a.startsWith("--"));
+const filter = positionals[0];
+const context = flagValue("--context", "task");
 const sourceNames = useReference ? SOURCE_NAMES.reference : SOURCE_NAMES.candidate;
+
+/** 按 `## N.` 分节摘 AGENTS.md（上下文对照实验用，规则只有一份） */
+function agentSection(from, to) {
+  const md = fs.readFileSync(path.join(HERE, "..", "AGENTS.md"), "utf8");
+  const start = md.indexOf(`\n## ${from}.`);
+  const end = md.indexOf(`\n## ${to}.`);
+  if (start < 0 || end < 0 || end <= start) return "";
+  return md.slice(start, end).trim();
+}
+
+/** 这次给代理的规则上下文（task 档为空 —— 与旧协议一致，保证历史可比） */
+function contextBlock() {
+  if (context === "minimal") return agentSection(1, 3); // 简介 + 5 条规则
+  if (context === "full") return agentSection(1, 4); // 再加反模式目录
+  return "";
+}
 
 /** 读取任务目录里的 attempts.json（没有就返回 null） */
 function readMeta(dir) {
@@ -51,6 +88,13 @@ function taskDirs() {
 }
 
 async function printPrompts() {
+  const block = contextBlock();
+  if (block) {
+    console.log(
+      `\n${"=".repeat(64)}\n# Plain 规则上下文（--context ${context}）\n${"=".repeat(64)}`
+    );
+    console.log(block);
+  }
   for (const name of taskDirs()) {
     const dir = path.join(TASKS_DIR, name);
     const md = path.join(dir, "task.md");
@@ -59,7 +103,8 @@ async function printPrompts() {
     console.log(fs.readFileSync(md, "utf8").trim());
   }
   console.log(
-    "\n把实现写到 `eval/tasks/<任务名>/candidate.tsx`，然后运行 `node eval/run.mjs`。"
+    `\n把实现写到 \`eval/tasks/<任务名>/candidate.tsx\`，然后运行 \`node eval/run.mjs\`。` +
+      `\n记录结果时请一并记下上下文档位：--context ${context}（见 eval/README.md）。`
   );
 }
 

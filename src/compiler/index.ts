@@ -25,7 +25,7 @@ export interface ServerFunction {
  * - `PLAIN_E1004` 遇到不支持的语法节点（编译器 bug）
  * - `PLAIN_E1005` 列表元素的 key 与 index 参数同时使用（语义二选一）
  * - `PLAIN_E1006` `server()` 的函数体引用了外部变量（闭包不会跟到服务端）
- * - `PLAIN_E1007` `server()` 的调用参数无法 JSON 序列化（函数 / 类实例 / Stream）
+ * - `PLAIN_E1007` `server()` 的调用参数 / 返回值无法 JSON 序列化（函数 / 类实例 / Stream）
  * - `PLAIN_E2001` 契约检查未通过（由构建链路抛出，见 vite 插件）
  */
 export type PlainErrorCode =
@@ -189,6 +189,8 @@ export function compile(
       if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
         const name = serverVarName(node);
         assertServerSelfContained(arg, ambient, fileName);
+        // 返回值也要走 JSON：RPC 序列化时函数 / Stream 会悄悄变成 {} —— 静默失败
+        assertServerReturnsSerializable(arg, nonJsonNames, fileName);
         serverFunctions.push({ name, body: arg.getText(sf) });
         edits.push({
           start: node.getStart(sf),
@@ -778,19 +780,74 @@ function assertServerArgsSerializable(
     if (ts.isSpreadElement(arg)) continue;
     const why = nonJsonReason(arg, nonJsonNames);
     if (!why) continue;
-    const sf = call.getSourceFile();
-    const at = sf.getLineAndCharacterOfPosition(arg.getStart(sf));
-    throw new PlainCompileError({
-      code: "PLAIN_E1007",
-      file: fileName,
-      line: at.line + 1,
-      column: at.character + 1,
-      detail: `server() 的调用参数无法 JSON 序列化（${why}）`,
-      hint:
-        "参数与返回值走 JSON，不要传函数、类实例、Stream。" +
-        "把逻辑写进 server() 函数体，或只传入可序列化的数据",
-    });
+    throwSerializationError(
+      arg,
+      `server() 的调用参数无法 JSON 序列化（${why}）`,
+      fileName
+    );
   }
+}
+
+/**
+ * server() 的返回值同样走 JSON —— 返回函数 / 类实例 / Stream 会被 RPC 的
+ * JSON.stringify 悄悄丢成 {} 或 undefined，客户端不报错、只是拿到空值。
+ * 只扫「不属于嵌套函数」的 return：嵌套函数自己的返回值不过 RPC 边界，不猜。
+ * 注：引用外层名字的 return 会先被 PLAIN_E1006 拦下，这里管的是函数体内自产的坏值。
+ */
+function assertServerReturnsSerializable(
+  fn: any,
+  nonJsonNames: Set<string>,
+  fileName: string
+): void {
+  const body = fn.body;
+  if (!body) return;
+  // 简洁体 () => expr 等价于 return expr
+  if (!ts.isBlock(body)) {
+    const why = nonJsonReason(body, nonJsonNames);
+    if (why) {
+      throwSerializationError(
+        body,
+        `server() 的返回值无法 JSON 序列化（${why}）`,
+        fileName
+      );
+    }
+    return;
+  }
+  const scan = (n: any) => {
+    if (ts.isFunctionLike(n)) return; // 嵌套函数内部的 return 不过 RPC 边界
+    if (ts.isReturnStatement(n) && n.expression) {
+      const why = nonJsonReason(n.expression, nonJsonNames);
+      if (why) {
+        throwSerializationError(
+          n,
+          `server() 的返回值无法 JSON 序列化（${why}）`,
+          fileName
+        );
+      }
+    }
+    ts.forEachChild(n, scan);
+  };
+  scan(body);
+}
+
+/** 抛出 PLAIN_E1007（调用参数与返回值共用同一错误码） */
+function throwSerializationError(
+  node: any,
+  detail: string,
+  fileName: string
+): never {
+  const sf = node.getSourceFile();
+  const at = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+  throw new PlainCompileError({
+    code: "PLAIN_E1007",
+    file: fileName,
+    line: at.line + 1,
+    column: at.character + 1,
+    detail,
+    hint:
+      "参数与返回值都走 JSON：不要传 / 返回函数、类实例、Stream。" +
+      "把逻辑写进 server() 函数体，只让可序列化的数据过边界",
+  });
 }
 
 function serverVarName(node: any): string {

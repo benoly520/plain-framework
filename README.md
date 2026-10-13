@@ -235,7 +235,7 @@ function Card(props) {
 | `PLAIN_E1004` | 遇到不支持的语法节点（编译器 bug） |
 | `PLAIN_E1005` | 列表的 `key` 与 index 参数同时使用（二者选一） |
 | `PLAIN_E1006` | `server()` 的函数体引用了外部变量（闭包不会跟到服务端） |
-| `PLAIN_E1007` | `server()` 的调用参数无法 JSON 序列化（函数 / 类实例 / Stream） |
+| `PLAIN_E1007` | `server()` 的调用参数 / 返回值无法 JSON 序列化（函数 / 类实例 / Stream） |
 | `PLAIN_E2001` | 契约检查未通过（由构建链路抛出，`plaindev check --fix` 可自动修） |
 
 **契约检查默认接在构建链路里**（`plainPlugin({ lint: "warn" | false })` 可调），
@@ -247,11 +247,24 @@ function Card(props) {
 | `plain/signal-not-called` | `{count}` / `checked={done}` | ✅ 补上调用 |
 | `plain/react-habit` | `useState` / `useEffect` / … | ❌ 语义不同，只报错 |
 | `plain/no-inner-html` | `el.innerHTML = …` | ❌ 安全红线，只报错 |
-| `plain/no-props-destructure` | `const { title } = props` | ❌ 两种改法语义不同，只报错 |
-| `plain/no-props-snapshot` | `const t = props.title` / `{props.title}` | ❌ 内联 resolve 与 thunk 语义不同，只报错 |
-| `plain/no-signal-mutate` | `items().push(x)` | ❌ 只报错 |
+| `plain/no-props-destructure` | `const { title } = props` / `function Card({ title })` | ❌ 两种改法语义不同，只报错 |
+| `plain/no-props-snapshot` | `const t = props.title` / `{props.title}` / `let t; t = props.title` | ❌ 内联 resolve 与 thunk 语义不同，只报错 |
+| `plain/no-signal-mutate` | `items().push(x)` / `todos()[0].done = true` / `const a = items(); a.push(x)` | ❌ 只报错 |
+| `plain/no-async-effect` | `effect(async () => { await … })` | ❌ 依赖收集在 await 后失效，只报错 |
+| `plain/no-effect-loop` | `effect(() => count.set(count() + 1))` | ❌ 自触发会栈溢出，只报错（钳位写法不报） |
+| `plain/no-computed-side-effect` | `computed(() => { s.set(…) })` | ❌ 派生值必须纯，只报错 |
 
-给 AI 代理看的完整反模式目录在 [`AGENTS.md`](AGENTS.md)。编译器还会拦 `server()` 调用里字面量函数 / 本文件类实例 / Stream（`PLAIN_E1007`）。
+给 AI 代理看的完整反模式目录在 [`AGENTS.md`](AGENTS.md)。编译器侧还会拦 `server()` 的参数与返回值里字面量函数 / 本文件类实例 / Stream（`PLAIN_E1007`）。
+
+规则是启发式，确认误报时用**行级抑制指令**（只对 lint 规则生效；编译器的 `PLAIN_E*` 压不住）：
+
+```js
+const t = props.title; // plain-ignore-line plain/no-props-snapshot
+// plain-ignore-next-line
+effect(() => count.set(count() + 1));
+```
+
+不写规则码表示抑制该行全部规则；`plaindev check` 会把抑制处数报出来 —— 抑制是可见的，不是静音开关。
 
 ```
 [PLAIN_E1001] Counter.tsx:8:11 这些位置的 JSX 编译器还不认识：Counter.tsx:8
@@ -321,6 +334,9 @@ plaindev schema [dir] [--out f]     # 输出机器可读的组件契约 JSON
 plaindev dev [root] [--port n]      # 开发服务器（含 RPC）
 plaindev build [root] [--out-dir d] # 生产构建
 plaindev serve [dist] [--port n]    # 生产托管 + RPC
+plaindev agent-context [--write]    # 打印给 AI 的规则上下文（取自 AGENTS.md）
+                                    # --write 落盘 AGENTS.md / copilot / cursor，不覆盖已有文件
+plaindev mcp                        # MCP stdio server：把 check / schema 交给 AI IDE
 ```
 
 ### `check`：把 AI 的典型错误直接改掉
@@ -395,12 +411,15 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ 列表 keyed 复用（`key={...}`）：头部插入 / 重排不重建已有节点
 - ✅ 结构化编译错误（`PLAIN_E100x` + 文件/行列/hint，可 JSON 序列化）
 - ✅ `server()` 自包含校验（`PLAIN_E1006`）：引用了外部变量在**编译期**报错，不再等运行时 `ReferenceError`
-- ✅ `server()` 参数可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
+- ✅ `server()` 参数与返回值可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
 - ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
 - ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
-- ✅ `AGENTS.md` + 反模式目录（10 条均有静态检查；看不出类型的不猜）
+- ✅ `AGENTS.md` + 反模式目录（13 条均有静态检查；看不出类型的不猜）
+- ✅ AI 可发现性：`plaindev agent-context [--write]` 把规则落盘成跨工具标准 `AGENTS.md`
+  （外加 `.github/copilot-instructions.md` 与 `.cursor/rules/*.mdc` 兜底，已有文件不覆盖）；
+  `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；确认误报可用行级抑制指令
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 136 项（内核 19 + 单元 117）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 156 项（内核 19 + 单元 137）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -411,7 +430,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 | --- | --- | --- |
 | **HMR / 热更新** | dev 下改文件整页刷新；Plain 的核心场景是「AI 写 → 人看」，这条最伤反馈环 | P0 |
 | **注水（hydration）** | SSR 只有首屏 HTML，客户端会重新渲染一次 | P0 |
-| **AI 原生工具（MCP）** | `schema` / `check` 还不能被 AI IDE 直接调用 | P1 |
+| **AI 原生工具（余下部分）** | `plaindev mcp` / `agent-context` 已可用；仍缺 **LSP 实时诊断**（编辑器里写时就报，而不是等 dev/build）与错误码统一 | P1 |
 | **RPC 请求合并 / 防抖** | 高频调用会各发一次请求 | P1 |
 | **多入口 / 代码分割** | 只验证了单入口 | P1 |
 | **并发渲染 / 时间切片** | 没有 | P2 |
@@ -430,7 +449,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 117 项
+pnpm test              # 构建 + 内核 19 项 + 单元 137 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -438,11 +457,13 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（117 项，`node:test`）：
-  `lint` 规则与自动修复、`schema` 契约提取、`compiler` 报错兜底与 sourcemap、
-  `cli` 子命令、`vite` 插件的编译 / 剥离 / 契约检查拦截、
+- `test/*.test.mjs`（137 项，`node:test`）：
+  `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
+  `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
+  `cli` 子命令（含 `agent-context` / `mcp` 的 wire 层）、`vite` 插件的编译 / 剥离 / 契约检查拦截、
   `server`（静态托管 / 目录穿越 / RPC / 一行起服）、
-  `keyed` 列表复用语义、`PLAIN_E1005` / `PLAIN_E1006` / `PLAIN_E1007` 的诊断与不误报、SSR 序列化、运行时边界分支。
+  `keyed` 列表复用语义、`PLAIN_E1005` / `PLAIN_E1006` / `PLAIN_E1007`（参数与返回值）的诊断与不误报、
+  `eval` 上下文档位、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
   路由跳转、详情参数、`server()` 往返、404、ErrorBoundary 降级与重试，以及**控制台零报错**。
 
@@ -479,10 +500,10 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
-| 语句 | 90% | 94.3% |
-| 分支 | 82% | 86.2% |
-| 函数 | 85% | 91.7% |
-| 行 | 90% | 94.3% |
+| 语句 | 90% | 92.2% |
+| 分支 | 82% | 87.5% |
+| 函数 | 85% | 90.8% |
+| 行 | 90% | 92.2% |
 
 > 唯一明显偏低的是 `src/cli`（约 69%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
 > 目前只在示例端到端里被间接验证。
@@ -490,7 +511,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 117 / fail 0   # 单元
+# pass 137 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23

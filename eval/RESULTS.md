@@ -29,6 +29,22 @@
 - 拦截率指标已接进 `run.mjs`（失败中被构建期拦下的比例 —— 越高说明错误越便宜）。
   上面这批坏例的拦截率是 **2 / 6**：也就是说这几个 AI 高频错误里，多数仍要等到运行时/断言才暴露。
 
+## 2026-10-13 · 新增规则后复核上面这批坏例（不是新实验，只是重跑旧坏例）
+
+不新增任务、不改断言，只把上面那批「故意写坏」的实现再跑一遍，看闸门有没有变强：
+
+| 任务 | 坏例 | 之前在哪一层被拦 | 现在 | 拦它的规则 |
+| --- | --- | --- | --- | --- |
+| `01-counter` | `count = 1` + `{count}` | 构建期 `PLAIN_E2001` | 构建期 | `plain/signal-assign` / `signal-not-called` |
+| `02-keyed-list` | 不写 `key=` | 断言 | 断言（不变） | —（key 复用是运行时节点身份，拦不了） |
+| `04-server-config` | 模块作用域读 env 再被 `server()` 引用 | 构建期 `PLAIN_E1006` | 构建期 | `PLAIN_E1006` |
+| `05-immutable-update` | `items().push(text)` / `items().pop()` | 断言（DOM 不更新） | **构建期** | `plain/no-signal-mutate` |
+| `06-props-snapshot` | `const t = resolve(props.title)` | 断言（改第二次才暴露） | **构建期** | `plain/no-props-snapshot` |
+| `07-server-validation` | 把校验函数当参数传进来 | 断言（服务端收到 `undefined`） | **构建期** | `PLAIN_E1007` |
+
+坏例拦截率：**2 / 6 → 5 / 6**。剩下的 `02` 属于「行为在运行时才可观测」（DOM 节点身份），
+编译期没有对应的静态事实可判，只能留在断言里。
+
 ## 2026-10-13 · 对比 harness 自检（不算指标）
 
 Plain vs React 的对称对比（见 [compare/README.md](compare/README.md)）：
@@ -46,11 +62,13 @@ Plain vs React 的对称对比（见 [compare/README.md](compare/README.md)）�
 
 ## 真实实验结果（`eval/tasks/`，Plain 自己的质量指标）
 
-（还没有。跑法：`node eval/run.mjs --prompt` 把提示词给代理 → 实现写入 `candidate.tsx` → 跑 `node eval/run.mjs` → 把结果补到下面）
+（还没有。跑法：`node eval/run.mjs --prompt [--context …]` 把提示词给代理 →
+实现写入 `candidate.tsx` → 跑 `node eval/run.mjs` → 把结果补到下面。
+**上下文档位必须记下来**，否则三次跑的数字没法比 —— 见 [README.md](README.md)「上下文对照」。）
 
-| 日期 | 模型 | 任务数 | 首次通过率 | 平均轮次 | 拦截率 | 备注 |
-| --- | --- | --- | --- | --- | --- | --- |
-| — | — | — | — | — | — | — |
+| 日期 | 模型 | 上下文 | 任务数 | 首次通过率 | 平均轮次 | 拦截率 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| — | — | — | — | — | — | — | — |
 
 ## 真实对比结果（`eval/compare/`，Plain vs React）
 

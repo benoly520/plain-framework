@@ -35,11 +35,31 @@ node eval/run.mjs --prompt     # 打印所有任务的提示词（把这段给�
 node eval/run.mjs              # 跑所有 candidate.tsx，输出指标
 node eval/run.mjs counter      # 只跑名字含 counter 的任务
 node eval/run.mjs --reference  # 跑 reference 实现 —— 自检 harness 本身是否可用，不算指标
+
+# 换一批提示词时，把「给代理的上下文」也一起打印出来
+node eval/run.mjs --prompt --context minimal
 ```
+
+## 上下文对照（重要：它是一条自变量）
+
+同一个任务、同一个模型，**给代理多少规则上下文**会显著影响首次通过率。
+所以上下文档位必须和结果一起记录，否则数字没法比：
+
+| 档位 | 给代理什么 | 回答的问题 |
+| --- | --- | --- |
+| `--context task`（默认） | 只有 `task.md` | Plain 的**真实下限**：代理没读过任何文档时会写成什么样 |
+| `--context minimal` | `task.md` + `AGENTS.md` §1–2（简介 + 5 条规则） | 只给最核心的规则，反模式目录靠框架自己拦 |
+| `--context full` | `task.md` + §1–3（再加反模式目录） | 文档给全，规则的价值（以及「AI 会不会去读它」的问题） |
+
+三档的规则文本都从 `AGENTS.md` 现读现切（`eval/run.mjs` 里 `contextBlock()`）——
+规则只有一份，改了 AGENTS.md 三档一起变，不会出现「文档说 A、喂给 AI 的是 B」。
+
+`--context task` 是历史数字的默认档位；换档位重跑时，必须在 `RESULTS.md` 里写清是哪个档位。
 
 ## 协议（很重要，别绕过）
 
-1. **提示词只给代理 `task.md` 的内容**，不要给 `check.mjs`，也不要给 `reference.tsx`。
+1. **提示词只给代理 `task.md` 的内容**（外加 `--context` 选定的规则文本），
+   不要给 `check.mjs`，也不要给 `reference.tsx`。
 2. 代理把实现写到 `eval/tasks/<任务名>/candidate.tsx`。
 3. 跑 `node eval/run.mjs`，把结果记进 `RESULTS.md`。
 4. **同一个任务不要事后改 `check.mjs`**。如果断言写错了，要把该任务的结果作废重跑，

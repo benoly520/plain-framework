@@ -125,20 +125,37 @@ Plain 的命题是「让 AI 首次写对的比例更高」（AX），不是「�
 
 ## M6 —— 剩余的 AI 原生工具（P1）
 
-- **MCP server**：把 `plaindev schema` / `plaindev check` / 编译错误暴露为 MCP 工具，AI IDE 可直接调用。
+- **MCP server** ✅ 已落地（`plaindev mcp`，零依赖 stdio JSON-RPC）：把 `plain_check` /
+  `plain_schema` 暴露成 MCP 工具，AI IDE 可直接调用。
+  仍缺 **LSP 实时诊断**（编辑器里写时就报，而不是等 dev / build）—— 那是另一套投入
+  （要维护 tsserver 插件），先做 MCP 是因为成本低、收益同构。
+- **让 AI 找得到规则** ✅ 已落地：`plaindev agent-context [--write]` 把 `AGENTS.md` §1–5
+  现读现切，`--write` 时落盘成跨工具标准 `AGENTS.md`，外加 `.github/copilot-instructions.md`
+  与 `.cursor/rules/*.mdc` 兜底（已有文件默认不覆盖，`--force` 才覆盖）。
+  「让 AI 找到规则」比「把规则写得更全」更优先 —— 文档没人读就是零。
+- **误报的出口** ✅ 已落地：行级抑制指令 `plain-ignore-line` / `plain-ignore-next-line`
+  （只作用于 lint 规则；编译器的 `PLAIN_E*` 是硬错，不可抑制），`plaindev check`
+  会把抑制处数报出来，避免它变成静音开关。
 - **错误码统一**：`lint` 用 `plain/*`、编译器用 `PLAIN_E*`，两套并存，应收敛到一套。
 - **补齐目录里标 ❌ 的静态检查**（按价值排序）✅ 已落地：
   1. `const t = props.title` → `plain/no-props-snapshot`
   2. 对 signal 持有值就地改（`items().push(x)`）→ `plain/no-signal-mutate`
   3. 给 `server()` 传函数 / 类实例 / Stream → `PLAIN_E1007`
     （只报源码上确知的形态；标识符类型不明 / `Date` / spread 不猜）
+  4. 覆盖面补强：深层路径与别名就地改、参数解构 `function Card({ x })`、`server()` 返回值
+  5. 响应式卫生：`effect(async …)` / `effect` 自触发 / `computed` 写 signal（目录 11–13）
+- **评测的上下文档位** ✅ 已落地：`eval/run.mjs --prompt --context task|minimal|full`。
+  这条是自变量，不记下来三次跑的数字就没法比（见 `eval/README.md`）。
+  真实 agent 结果仍待跑 —— 评测的诚实性优先于「有个数字」。
 - **契约从「推断」变成「声明」**：`schema.ts` 的 props 来自「代码读了什么 + 调用点传了什么」，
   `<Card {...rest}/>` 就推不出来。让 AI 显式声明再校验，契约才可信。
 - **JSX 类型收紧**：`src/types.ts` 里 `[attr: string]: any` 让「类型即校验」在组件边界失效。
 
 **验收标准**
 
-- [ ] MCP server 可被 AI IDE 连上，暴露 `schema` / `check` 两个工具
+- [x] MCP server 可被 AI IDE 连上，暴露 `schema` / `check` 两个工具
+      （工具名 `plain_check` / `plain_schema`；wire 层已有脚本化会话测试，
+      **真实 IDE 连通性尚未外部验证** —— 不在本仓自证范围内）
 - [ ] 编译器与 lint 使用同一套错误码前缀
 
 ## M7 —— 生态与合规（需作者决策）

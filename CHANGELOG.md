@@ -9,14 +9,39 @@
 
 - **契约规则 `plain/no-signal-mutate`**：就地改 signal 持有值（`items().push(x)` /
   `items()[0] = x`）不会触发更新。构建期报错，不自动修。
+  覆盖面按「源码上看得出的可变操作」铺开：深层路径（`todos()[0].done = true`、
+  `user().profile.name = "x"`、`todos()[0].tags.push(x)`）与**先存后改**
+  （`const arr = items(); arr.push(x)`，按函数作用域解析别名）都拦；
+  `items().filter(f).push(x)`（改的是新数组副本）不报。
 - **契约规则 `plain/no-props-snapshot`**：把动态 props 的 getter 存进变量
   （`const t = props.title` / `const t = resolve(props.title)`）、赋值形态（`let t; t = props.title`，
   只报组件函数体顶层的赋值，写在 `effect` / 回调里的会重跑、不报）或 JSX 里忘了 `resolve`
   （`{props.title}`）。`on*` 事件 prop 编译器不包 getter（存进变量、透传都合法）与 thunk 写法不报；
   动态下标（`props[key]`）看不出来，仍按 getter 报。
-- **`server()` 参数可序列化校验**：新增编译错误 `PLAIN_E1007`。调用 `server()` 产物时
-  传入字面量函数、本文件的类实例、或 `ReadableStream` / `FormData` 等，编译期失败。
-  看不出类型的标识符、`new Date()`、spread **不猜**，避免误报。
+- **`server()` 参数与返回值可序列化校验**：新增编译错误 `PLAIN_E1007`。调用 `server()` 产物时
+  传入字面量函数、本文件的类实例、或 `ReadableStream` / `FormData` 等，编译期失败；
+  `server(() => …)` 的**返回值**同样要能序列化（`return () => {}`、`return new ReadableStream()`、
+  对象里夹函数、返回函数体内自产的 helper 都会报）—— 此前这类返回值会被 RPC 的
+  `JSON.stringify` 悄悄丢成 `{}` / `undefined`，客户端不报错。
+  看不出类型的标识符、`new Date()`、spread、嵌套函数自己的 `return` **不猜**，避免误报。
+- **三条响应式卫生规则**（AI 高频、且不报错只行为错的坑）：
+  - `plain/no-async-effect`：`effect(async () => { await … })` —— 依赖收集在第一个 `await` 之后失效。
+  - `plain/no-effect-loop`：`effect(() => count.set(count() + 1))` —— 读了又写同一个 signal，
+    是同步递归、直接 `RangeError: Maximum call stack`；只报**没有条件闸门**的写法，
+    `if (c() > 10) c.set(0)` 这种钳位会在第二轮收敛，不报。
+  - `plain/no-computed-side-effect`：`computed(() => { s.set(…) })` —— 派生值必须是纯函数。
+- **AI 可发现性**：`plaindev agent-context [--write]` 把 `AGENTS.md` §1–5 现读现切并打印
+  （规则只有一份，不维护第二份副本）。`--write` 落盘的目标按「谁会被 AI 自动读取」排序：
+  跨工具标准 **`AGENTS.md`**（Codex / Cursor / Copilot / Windsurf / Claude Code … 都读它），
+  再加 `.github/copilot-instructions.md` 与 `.cursor/rules/plain.mdc`（带 `alwaysApply`
+  front-matter）给只认自家文件的工具兜底。**已存在的文件默认不覆盖**（项目自己写的
+  AGENTS.md 通常更好），要覆盖得显式 `--force`；`--targets agents,copilot,cursor` 可只写其一。
+- **`plaindev mcp`**：零依赖的 MCP stdio server，暴露 `plain_check` / `plain_schema`
+  两个工具，AI IDE 可以直接调 —— 不必等人类跑一次构建才知道写错了。
+- **误报的出口：行级抑制指令**：`plain-ignore-line` / `plain-ignore-next-line`
+  （可跟规则码，不跟则抑制该行全部 lint 规则），按「CLI 报出来的行号」匹配。
+  只作用于 lint 规则 —— 编译器的 `PLAIN_E*` 是产物必坏的硬错，**不可抑制**。
+  `plaindev check` 会报出抑制处数，避免它变成静音开关。
 - **列表 keyed 复用**：`arr.map(x => <li key={x.id}>…)` 现在按 key 认领行，
   头部插入 / 重排不会重建已有节点（关闭 `SPEC.md` §4 里 `each(..., keyFn, ...)` 的欠账）。
   `each()` 新增可选的第 4 个参数 `keyFn`；不传时行为与之前完全一致。
@@ -26,6 +51,9 @@
   新增选项 `plainPlugin({ lint: "warn" | false })`。
 - **新增契约规则 `plain/no-props-destructure`**：解构 props（`const { title } = props`）
   会拿到 getter 本身并丢失响应性 —— 这是 AI 从 React / Solid 带过来的头号反模式。
+  口径补齐到三种写法：`const { x } = props`、`const { x } = props.data`、
+  `function Card({ x })` / `const Row = ({ x }) => …`（**参数解构**此前完全漏过，
+  而它正是 React 肌肉记忆里最顺手的一种）。先 `resolve()` 再解构是正确写法，不报。
 - **`server()` 自包含校验**：新增编译错误 `PLAIN_E1006`。`server()` 的函数体会被物理搬到
   `.plain/server.mjs`，那个文件里没有 import、也没有模块作用域，所以引用「本文件里绑定了、
   却不在函数体内」的名字（模块变量 / import / 外层参数）到了服务端必然 ReferenceError。

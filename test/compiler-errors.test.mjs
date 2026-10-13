@@ -170,7 +170,65 @@ test("PLAIN_E1007：给 server() 传函数 / 本文件类实例 / Stream", () =>
     assert.equal(err.code, "PLAIN_E1007", label);
     assert.equal(err.file, "s.jsx", label);
     assert.match(err.detail, new RegExp(hint), label);
-    assert.match(err.hint, /不要传函数/, label);
+    assert.match(err.hint, /不要传 \/ 返回函数/, label);
+  }
+});
+
+test("PLAIN_E1007：server() 的返回值也要能 JSON 序列化", () => {
+  const cases = [
+    [
+      "简洁体返回函数",
+      "export const f = server(() => () => {});",
+      "函数",
+    ],
+    [
+      "返回对象里夹函数",
+      "export const f = server(() => ({ onClick: () => {} }));",
+      "函数",
+    ],
+    [
+      "返回本文件局部定义的 helper",
+      "export const f = server(() => { const helper = () => {}; return helper; });",
+      "函数",
+    ],
+    [
+      "返回 Stream",
+      "export const f = server(async () => new ReadableStream());",
+      "ReadableStream",
+    ],
+    [
+      "分支里的 return",
+      [
+        "export const f = server(async (n) => {",
+        "  if (n > 0) { return { ok: true }; }",
+        "  return () => {};",
+        "});",
+      ].join("\n"),
+      "函数",
+    ],
+  ];
+  for (const [label, src, hint] of cases) {
+    const err = catchCompile(src, "s.jsx");
+    assert.equal(err.code, "PLAIN_E1007", label);
+    assert.match(err.detail, /返回值/, label);
+    assert.match(err.detail, new RegExp(hint), label);
+  }
+});
+
+test("PLAIN_E1007 返回值不误报：可序列化数据 / 嵌套函数自己的 return / await", () => {
+  const ok = [
+    "export const f = server(() => 1);",
+    "export const f = server(() => ({ a: 1, b: ['x'] }));",
+    "export const f = server(() => { const rows = [1, 2]; return rows; });",
+    "export const f = server(async () => { const d = await Promise.resolve(1); return { d }; });",
+    "export const f = server(() => { if (1) return; return { ok: true }; });",
+    // 嵌套函数自己的 return 不过 RPC 边界
+    "export const f = server(() => { const make = () => () => {}; return make()(); });",
+    "export const f = server(() => { return [1, 2].map((x) => x * 2); });",
+    "export const f = server(() => new Date());",
+  ];
+  for (const src of ok) {
+    assert.doesNotThrow(() => compile(src, "ok.jsx"), src);
   }
 });
 
