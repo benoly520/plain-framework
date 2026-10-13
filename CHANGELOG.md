@@ -131,6 +131,13 @@
 - `package.json`：新增 `engines`、`packageManager`、`sideEffects`。
 - 从仓库移除构建产物 `plain-deliverable.zip`；`coverage/` 加入 `.gitignore`。
 
+### 许可证
+
+- **由「非商业许可」改为 MIT**：此前 `LICENSE` 默认禁止商用（`ROADMAP.md` 标注为企业级目标互斥的前置决策），
+  现改为 **MIT** —— 可自由使用、修改、再分发与商用，唯一要求是保留版权声明与许可证全文。
+  配套同步 `package.json` 的 `license` 字段（`SEE LICENSE IN LICENSE` → `MIT`）与 README「许可证」章节；
+  `ROADMAP.md` M7 的许可证决策项已勾选完成。这不是代码 breaking change，但改变了使用授权范围。
+
 ## [0.3.0]
 
 TypeScript 源码 + tsc 构建；signals 响应式内核、编译到 DOM、`server()` 编译期物理剥离、
