@@ -31,14 +31,57 @@ function ok(cond, msg) {
   }
 }
 
+// Chromium 可执行文件解析：环境变量优先，其次常见安装路径，最后交给 playwright-core。
+// 不要把 /usr/bin/chromium 写死 —— 否则 CI / macOS / Windows 上必然启动失败。
+const CHROMIUM_CANDIDATES = [
+  process.env.PLAIN_CHROMIUM_PATH,
+  process.env.CHROMIUM_PATH,
+  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+  "/snap/bin/chromium",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+].filter(Boolean);
+
+/** 找到第一个真实存在的 Chromium 路径；找不到返回 undefined 由 playwright 自行解析 */
+function resolveChromiumPath() {
+  for (const p of CHROMIUM_CANDIDATES) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {
+      // 非法路径（长度/字符问题）直接跳过
+    }
+  }
+  return undefined;
+}
+
 fs.mkdirSync(SHOTS, { recursive: true });
 const server = await serve({ dist: DIST, manifest: MANIFEST, port: PORT });
 const base = `http://127.0.0.1:${PORT}/`;
 
-const browser = await chromium.launch({
-  executablePath: "/usr/bin/chromium",
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
-});
+const executablePath = resolveChromiumPath();
+let browser;
+try {
+  browser = await chromium.launch({
+    ...(executablePath ? { executablePath } : {}),
+    args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  });
+} catch (e) {
+  console.error(
+    "[plain] 找不到可用的 Chromium，请任选一种方式：\n" +
+      "  - 设置环境变量 PLAIN_CHROMIUM_PATH=/path/to/chrome\n" +
+      "  - 安装系统 Chromium / Chrome\n" +
+      "  - 执行 npx playwright install chromium\n" +
+      `原始错误：${e.message}`
+  );
+  await new Promise((r) => server.close(r));
+  process.exit(1);
+}
 const page = await browser.newPage({ viewport: { width: 900, height: 900 } });
 
 const errors = [];

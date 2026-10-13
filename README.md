@@ -349,7 +349,8 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ SSR 输出（`renderToStringSync` / `renderToString`）
 - ✅ CLI：check / schema / dev / build / serve
 - ✅ TypeScript 类型（含 JSX 类型，`tsc --noEmit` 通过）
-- ✅ 单测 19 项 + 真实 Chromium 端到端 23 项
+- ✅ 单测 101 项（内核 19 + 单元 82）+ 真实 Chromium 端到端 23 项
+- ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
 
@@ -357,7 +358,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 | --- | --- | --- |
 | **注水（hydration）** | SSR 只有首屏 HTML，客户端会重新渲染一次 | 需要 SSR 交互的项目先只用 CSR |
 | **HMR / 热更新** | dev 下改文件会整页刷新 | 不影响正确性，只影响手感 |
-| **Source map** | 断点落在编译产物上（产物本身可读） | 可接受 |
+| **Source map** | 框架自身产物已开 tsc sourceMap（覆盖率/调试可映射回 `src`）；但编译器未向 vite 回传用户代码的 map，用户断点仍落在编译产物上 | 产物本身可读，暂可接受 |
 | **列表 keyed diff** | 当前按 index 复用行；大列表 `unshift` 会有多余更新 | 尾部增删无影响 |
 | **多入口 / 代码分割** | 只验证了单入口 | 路由懒加载用动态 `import()` |
 | **并发渲染 / 时间切片** | 没有 | 典型业务不需要 |
@@ -375,24 +376,45 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-node test/run.mjs       # 19 项：内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS
-node test/browser.mjs   # 23 项：真实 Chromium 走完整个应用（需先 build）
+pnpm test              # 构建 + 内核 19 项 + 单元 82 项
+pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
+pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
 
-其中两项是**回归测试**，专门盯着历史上被验证过的致命 bug：
+分层：
+
+- `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
+- `test/*.test.mjs`（82 项，`node:test`）：`lint` 规则与自动修复、`schema` 契约提取、
+  `compiler` 报错兜底、`cli` 子命令、`vite` 插件的编译与剥离、
+  `server`（静态托管与目录穿越防护、RPC、一行起服）、SSR 序列化、运行时边界分支。
+- `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
+  路由跳转、详情参数、`server()` 往返、404、ErrorBoundary 降级与重试，以及**控制台零报错**。
+
+其中若干项是**回归测试**，专门盯着历史上被验证过的致命 bug：
 
 - 「勾选待办后 UI 不更新」—— 行级响应式（`rowProxy`）的回归点
 - 「切换分支 / 删除行后 effect 泄漏」—— owner 作用域回收的回归点
+- 「JSX 属性里的 signal 漏调用」—— `autofix` 区间重叠会把源码改坏（`done()` → `done()()`）的回归点
+- 「多个文件各自有 `server()`」—— 服务端清单增量更新产出重复 `const` 声明的回归点
 
-浏览器端到端覆盖：勾选 / 取消勾选、新增、筛选、删除、路由跳转、详情参数、
-`server()` 往返、带参 `server()` 调用、404、ErrorBoundary 降级与重试，
-以及**控制台零报错**。
+覆盖率由 c8 度量、由 CI 强制（配置见 `.c8rc.json`）：
+
+| 指标 | 门槛 | 当前实测 |
+| --- | --- | --- |
+| 语句 | 90% | 93.6% |
+| 分支 | 82% | 85.8% |
+| 函数 | 85% | 89.8% |
+| 行 | 90% | 93.6% |
+
+> 唯一明显偏低的是 `src/cli`（约 69%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
+> 目前只在示例端到端里被间接验证。
 
 ```bash
-$ node test/run.mjs
-通过 19 / 19
+$ pnpm test
+通过 19 / 19          # 内核
+# pass 82 / fail 0    # 单元
 
-$ node test/browser.mjs
+$ pnpm run test:browser
 通过 23 / 23
 ```
 
@@ -407,13 +429,13 @@ $ node test/browser.mjs
 
 ```bash
 # 1. 装依赖（只需 typescript + vite）
-npm install
+pnpm install
 
 # 2. 编译框架源码到 dist/
-npm run build
+pnpm run build
 
 # 3. 启动示例（推荐：走 examples/todo/vite.config.js，端口 8100）
-npm run dev:example
+pnpm run dev:example
 #    打开 http://localhost:8100/
 
 # 3'. 也可以用官方 CLI（plaindev）；注意它不读 vite.config.js，端口是 vite 默认的 5173
@@ -425,10 +447,10 @@ node dist/cli/index.js dev examples/todo
 
 | 命令 | 端口 | 是否读 `examples/todo/vite.config.js` | 说明 |
 | --- | --- | --- | --- |
-| `npm run dev:example` | 8100 | 是（含 `serverEntry` / `root` 配置） | 与示例配置完全一致，推荐 |
+| `pnpm run dev:example` | 8100 | 是（含 `serverEntry` / `root` 配置） | 与示例配置完全一致，推荐 |
 | `node dist/cli/index.js dev examples/todo` | 5173 | 否（`configFile: false`，用插件默认配置） | 适合体验 plaindev CLI 自身 |
 
-> 改了源码后需重新 `npm run build` 再刷新（目前无 HMR，dev 下整页刷新，见「已知限制」）。
+> 改了源码后需重新 `pnpm run build` 再刷新（目前无 HMR，dev 下整页刷新，见「已知限制」）。
 
 ---
 
@@ -456,6 +478,12 @@ src/
   lint.ts        契约检查与自动修复
   index.ts       汇总导出（产出 dist/index.d.ts 作为包类型入口）
 types/           历史手写 .d.ts 已删除，类型由 tsc 自动从源码产出到 dist/
+test/
+  run.mjs                  内核/集成验证（必跑）
+  *.test.mjs               单元测试（node:test，由 pnpm test:unit 跑）
+  browser.mjs              真实浏览器端到端（手动触发）
+.c8rc.json                 覆盖率门槛配置
+.github/workflows/ci.yml   构建 + 单测 + 覆盖率门禁
 ```
 
 ---

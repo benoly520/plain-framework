@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 构建 / 单测 / 覆盖率门槛
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 类型检查 + 构建
+        run: pnpm run build
+
+      - name: 内核 + 单元测试
+        run: |
+          pnpm run test:kernel
+          pnpm run test:unit
+
+      - name: 覆盖率门槛（c8，见 .c8rc.json）
+        run: pnpm run coverage
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: coverage/lcov.info
+          if-no-files-found: ignore
+
+  e2e:
+    name: 真实浏览器端到端（手动触发）
+    # 需要真实 Chrome/Chromium。默认不随每次 push 运行，避免在没有浏览器的
+    # runner 上产生假失败：在 Actions 页面手动 Run workflow 即可。
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 安装 Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium || sudo apt-get install -y chromium-browser
+
+      - name: 构建示例应用
+        run: pnpm run build:example
+
+      - name: 端到端验证
+        run: node test/browser.mjs

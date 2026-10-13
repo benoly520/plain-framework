@@ -5,5 +5,11 @@ node_modules/
 dist/
 .plain/
 
+# 测试覆盖率产物
+coverage/
+
+# 增量编译信息
+*.tsbuildinfo
+
 # 日志
 *.log

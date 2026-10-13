@@ -70,12 +70,16 @@ export function check(
     }
 
     // 2) JSX 里把 signal 当值用：<p>{count}</p>
+    // 注意：属性值 checked={done} 的 JsxExpression 也满足下面的条件，
+    // 但那条由规则 3 负责。这里必须排除，否则同一个标识符会被报两次，
+    // 且两条 fix 覆盖同一区间，autofix 会把源码改成 done()() 形式的坏代码。
     if (
       ts.isJsxExpression(node) &&
       node.expression &&
       ts.isIdentifier(node.expression) &&
       signals.has(node.expression.text) &&
-      !isDeclarationName(node.expression)
+      !isDeclarationName(node.expression) &&
+      !(node.parent && ts.isJsxAttribute(node.parent))
     ) {
       add(
         node,
@@ -155,9 +159,16 @@ export function check(
 export function autofix(source: string, issues: LintIssue[]): string {
   const fixes = issues.filter((i) => i.fix).map((i) => i.fix!);
   if (!fixes.length) return source;
+  // 从后往前替换。若两个 fix 的区间有重叠，第二个（更靠前的那个）必须丢弃 ——
+  // 否则它的偏移量已经因为前一次替换而失效，会把源码切坏。
   const sorted = [...fixes].sort((a, b) => b.start - a.start);
   let out = source;
-  for (const f of sorted) out = out.slice(0, f.start) + f.text + out.slice(f.end);
+  let lastStart = Infinity;
+  for (const f of sorted) {
+    if (f.end > lastStart) continue;
+    out = out.slice(0, f.start) + f.text + out.slice(f.end);
+    lastStart = f.start;
+  }
   return out;
 }
 

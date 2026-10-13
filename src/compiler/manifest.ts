@@ -62,6 +62,12 @@ function readManifestEntries(src: string): ManifestEntry[] {
   const out: ManifestEntry[] = [];
   const re = /^export const ([A-Za-z_$][\w$]*) = ([\s\S]*?);\n(?=export |$)/gm;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(src))) out.push({ name: m[1], body: m[2] });
+  while ((m = re.exec(src))) {
+    // __plainHandlers 是模板里的固定段，不是用户函数。
+    // 必须跳过：否则它会被当成一条 entry 再写一遍，产出重复 const 声明，
+    // 让 dev 模式下的 /_plain/rpc 直接加载失败。
+    if (m[1] === "__plainHandlers") continue;
+    out.push({ name: m[1], body: m[2] });
+  }
   return out;
 }
