@@ -5,6 +5,16 @@
 > **「Plain 比 React 更适合 AI」目前是一个主张，不是一个数据。**
 > 这里把它变成数据。
 
+两套东西，别混：
+
+| 目录 | 回答的问题 | 跑法 |
+| --- | --- | --- |
+| `tasks/`（本目录） | Plain 自己的免疫系统管不管用？代理会不会犯这些错？ | `pnpm run eval` |
+| [`compare/`](compare/README.md) | **同一个提示词、同一份断言**，Plain 与 React 各自写成什么样？ | `pnpm run eval:compare` |
+
+`compare/` 是单独一套，因为要做到「交互一律走 DOM 事件 + 只有一份断言」，
+它和 `tasks/` 里允许直接调导出函数的设计**互不兼容**（理由见 `compare/README.md`）。
+
 ## 指标定义
 
 | 指标 | 定义 | 为什么是它 |

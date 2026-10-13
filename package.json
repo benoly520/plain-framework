@@ -54,6 +54,8 @@
     "test:unit": "node --test \"test/**/*.test.mjs\"",
     "test:browser": "tsc && node test/browser.mjs",
     "coverage": "c8 npm test",
+    "eval": "tsc && node eval/run.mjs",
+    "eval:compare": "tsc && node eval/compare/run.mjs",
     "build:example": "tsc && vite build --config examples/todo/vite.config.js",
     "dev:example": "tsc && vite --config examples/todo/vite.config.js",
     "typecheck:example": "tsc && tsc --noEmit -p examples/todo/tsconfig.json",
@@ -70,6 +72,8 @@
     "c8": "^12.0.0",
     "jsdom": "^27.0.0",
     "playwright-core": "^1.56.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "vite": "^7.0.0"
   }
 }

@@ -33,6 +33,12 @@
   （首次通过率 / 平均轮次 / 拦截率）+ 公平性与自欺清单。
   harness 新增 `evalServerFn()`：把物理剥离出来的服务端函数单独执行（与 dev 的 `evalFn` 同路径），
   从而能断言 `server()` 的真实行为。7 个 reference 全过；6 个「直觉但错」的实现全部按设计失败。
+- **Plain vs React 对比基线 `eval/compare/`**：3 个用例（计数器 / 列表增删 / 父状态传子组件），
+  **共用同一份提示词与同一份断言**，框架差异全部收在适配器里（交互一律走 DOM 事件）。
+  服务端边界类任务不可比，已排除并说明理由；Plain 侧的构建期闸门与 React 侧默认无闸门
+  这一不对称也写进了公平性说明。
+  已验证：两边的「各自惯用但错」实现被**同一行断言**抓住（就地改 / 派生状态快照）。
+  新增 `package.json` 脚本 `eval` / `eval:compare`，并接进 CI 作为 harness 自检。
 - 覆盖率度量与门禁：`pnpm run coverage`（c8 + `src` 级 sourcemap 映射），门槛写在 `.c8rc.json`。
 - GitHub Actions 工作流（`.github/workflows/ci.yml`）：构建 + 内核/单元测试 + 覆盖率门禁；
   真实浏览器端到端改为手动触发。

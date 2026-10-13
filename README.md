@@ -452,17 +452,24 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 
 ### AI 正确率评测（`eval/`）
 
-「Plain 比 React 更适合 AI」目前还是个**主张**。`eval/` 让它变成可比的数据：
+「Plain 比 React 更适合 AI」目前还是个**主张**。`eval/` 把它变成可比的数据，分两套：
 
 ```bash
-node eval/run.mjs --prompt     # 打印任务提示词，交给代理
-node eval/run.mjs              # 跑 candidate 实现并输出指标
-node eval/run.mjs --reference  # 跑参考实现（自检 harness，不算指标）
+pnpm run eval              # Plain 自己的质量指标（7 个任务）
+pnpm run eval:compare      # Plain vs React 对称对比（3 个用例，共用提示词与断言）
+
+node eval/run.mjs --prompt          # 打印任务提示词，交给代理
+node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
+# 两者都支持 --reference：跑参考实现自检 harness（不算指标）
 ```
 
+- `eval/tasks/`：代理会不会犯这些错、构建期拦不拦得住。与 `AGENTS.md` 反模式目录对齐。
+- `eval/compare/`：**同一份提示词 + 同一份断言**，框架差异全部收在适配器里；
+  服务端边界类任务不可比，已排除并说明理由。
+
 指标口径是**首次通过率 / 平均迭代轮次 / 拦截率**（失败里有多少是被构建时拦下的），
-而不是满意度或上手时间。协议与公平性要求见 [`eval/README.md`](eval/README.md)，
-结果记在 [`eval/RESULTS.md`](eval/RESULTS.md)。
+而不是满意度或上手时间。协议与公平性要求见 [`eval/README.md`](eval/README.md) 与
+[`eval/compare/README.md`](eval/compare/README.md)，结果记在 [`eval/RESULTS.md`](eval/RESULTS.md)。
 
 覆盖率由 c8 度量、由 CI 强制（配置见 `.c8rc.json`）：
 

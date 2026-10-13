@@ -16,8 +16,28 @@ const RUNTIME_URL = pathToFileURL(path.join(ROOT, "dist/runtime/index.js")).href
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "plain-eval-"));
 
 let dom = null;
+let seq = 0;
 
-/** 建立浏览器环境（所有任务共用一份） */
+// 需要装到 globalThis 上的浏览器环境（React 也要用，所以比 Plain 需要的多一些）
+const DOM_GLOBALS = [
+  "window",
+  "document",
+  "navigator",
+  "Node",
+  "Element",
+  "HTMLElement",
+  "HTMLInputElement",
+  "HTMLButtonElement",
+  "Event",
+  "MouseEvent",
+  "KeyboardEvent",
+  "CustomEvent",
+  "getComputedStyle",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
+];
+
+/** 建立浏览器环境（所有任务共用一份，切勿建第二份 —— 两份 document 会互相看不见） */
 export function setupDom() {
   if (dom) return dom;
   if (!fs.existsSync(path.join(ROOT, "dist/runtime/index.js"))) {
@@ -25,13 +45,28 @@ export function setupDom() {
   }
   dom = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "http://localhost/",
+    pretendToBeVisual: true,
   });
-  globalThis.window = dom.window;
-  globalThis.document = dom.window.document;
-  globalThis.Node = dom.window.Node;
-  globalThis.Element = dom.window.Element;
-  globalThis.HTMLElement = dom.window.HTMLElement;
-  globalThis.Event = dom.window.Event;
+  for (const key of DOM_GLOBALS) {
+    const value = dom.window[key];
+    if (value === undefined) continue;
+    try {
+      globalThis[key] = value;
+    } catch {
+      // Node 21+ 把 navigator 定义成了只读 getter，直接赋值会抛；用 defineProperty 覆盖
+      try {
+        Object.defineProperty(globalThis, key, {
+          value,
+          configurable: true,
+          writable: true,
+        });
+      } catch {
+        // 实在覆盖不了就跳过 —— 缺它不影响 jsdom 下的渲染
+      }
+    }
+  }
+  // React 的 act() 需要这个开关，否则会打警告 / 不 flush
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   return dom;
 }
 
@@ -64,7 +99,8 @@ export async function loadCandidate(file) {
   const out = compile(stripped.code, path.basename(file));
   const code = out.code.replace(/from\s+["']plain["']/g, `from "${RUNTIME_URL}"`);
 
-  const name = `${path.basename(file, path.extname(file))}-${Date.now()}`;
+  // 带序号：不同用例的同一个文件名（如两个 plain.tsx）不能撞到同一个模块 URL
+  const name = `${path.basename(file, path.extname(file))}-${Date.now()}-${++seq}`;
   const target = path.join(TMP, `${name}.mjs`);
   fs.writeFileSync(target, code);
   const mod = await import(pathToFileURL(target).href);

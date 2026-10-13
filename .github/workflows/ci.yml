@@ -38,6 +38,11 @@ jobs:
       - name: 覆盖率门槛（c8，见 .c8rc.json）
         run: pnpm run coverage
 
+      - name: 评测 harness 自检（reference 实现，防止 harness 腐化）
+        run: |
+          node eval/run.mjs --reference
+          node eval/compare/run.mjs --reference
+
       - name: 上传覆盖率报告
         if: always()
         uses: actions/upload-artifact@v4

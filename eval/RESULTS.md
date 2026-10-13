@@ -29,11 +29,37 @@
 - 拦截率指标已接进 `run.mjs`（失败中被构建期拦下的比例 —— 越高说明错误越便宜）。
   上面这批坏例的拦截率是 **2 / 6**：也就是说这几个 AI 高频错误里，多数仍要等到运行时/断言才暴露。
 
-## 真实实验结果
+## 2026-10-13 · 对比 harness 自检（不算指标）
+
+Plain vs React 的对称对比（见 [compare/README.md](compare/README.md)）：
+3 个用例、两个框架、**同一份断言**，reference 实现均 3/3 通过。
+
+再用「各自惯用但错」的实现验证对称性 —— 两边的错法被**同一行断言**抓住：
+
+| 用例 | Plain 的错法 | React 的错法 | 共同的失败断言 |
+| --- | --- | --- | --- |
+| `02-list-update` | `items().push(text)` | `items.push(text)` 后不 `setState` | `添加后应立刻变成 3 项` |
+| `03-props-update` | `const t = resolve(props.title)` | `const [t] = useState(title)` | `父状态变化后子组件的 <h2> 必须跟着更新` |
+
+这两组是**同一个概念错误的两种方言**（就地改 / 派生状态快照），说明这套对比测的是行为本身，
+而不是某一方的实现细节。
+
+## 真实实验结果（`eval/tasks/`，Plain 自己的质量指标）
 
 （还没有。跑法：`node eval/run.mjs --prompt` 把提示词给代理 → 实现写入 `candidate.tsx` → 跑 `node eval/run.mjs` → 把结果补到下面）
 
 | 日期 | 模型 | 任务数 | 首次通过率 | 平均轮次 | 拦截率 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| — | — | — | — | — | — | — |
+
+## 真实对比结果（`eval/compare/`，Plain vs React）
+
+（还没有。跑法：`node eval/compare/run.mjs --prompt` → 两边各写一份实现 → 跑 `node eval/compare/run.mjs`）
+
+**同一个模型、同一批提示词**，两侧都要记录；「被构建期拦下」要单独记（Plain 的闸门是产品的一部分，
+React 侧默认没有等价闸门 —— 见 `compare/README.md` 的公平性说明）。
+
+| 日期 | 模型 | 用例数 | Plain 首次通过率 | React 首次通过率 | Plain 构建期拦下 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
 | — | — | — | — | — | — | — |
 

@@ -11,6 +11,11 @@ coverage/
 # 评测中被测代理产出的实现（结果记在 eval/RESULTS.md，不提交代码）
 eval/tasks/*/candidate.tsx
 eval/tasks/*/candidate.jsx
+eval/compare/cases/*/plain.candidate.tsx
+eval/compare/cases/*/react.candidate.jsx
+
+# 框架对比时编译产物落在这里（放仓内是为了让 react 这类裸导入能解析）
+eval/compare/.tmp/
 
 # 增量编译信息
 *.tsbuildinfo
