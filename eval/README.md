@@ -40,6 +40,9 @@ node eval/run.mjs --reference  # 跑 reference 实现 —— 自检 harness 本�
 node eval/run.mjs --prompt --context minimal
 ```
 
+> 想跑 **Plain vs React 对比**（`compare/`）、并用一个**没读过断言**的新会话拿有效数据：
+> 启动提示词与流程见 [`compare/README.md`](compare/README.md) 的「交给代理的启动提示词（干净跑）」。
+
 ## 上下文对照（重要：它是一条自变量）
 
 同一个任务、同一个模型，**给代理多少规则上下文**会显著影响首次通过率。

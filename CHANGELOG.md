@@ -99,6 +99,10 @@
   的 prop **不包 getter**（传进来的就是函数本身），而 `resolve(fn)` 会把函数**当场调用**，
   于是事件处理器在渲染期就被执行。构建期报错，**可自动修**（去掉 `resolve` → `props.onClick`）。
   此前 `plain/no-props-snapshot` 把 `on*` 一律当「合法透传」豁免，恰好漏放了这一种。
+- **`eval/compare` 补齐上下文档位 `--context task|minimal|full`**：此前只有 `eval/tasks` 有这条自变量，
+  compare 侧缺失 —— 于是「给不给规则文档」这个最关键的自变量没处记，不同档位的数字之间不可比。
+  现与 tasks 侧同口径（从 `AGENTS.md` 现读现切），运行输出与 `--prompt` 都会打印档位。
+  React 侧不额外喂文档（React 是模型已有知识），故这一档量的是「Plain 要补多少文档才追得上」。
 
 ### 修复
 

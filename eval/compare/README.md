@@ -32,6 +32,8 @@ compare/
       react.jsx        React 参考实现
     02-list-update/
     03-props-update/
+    04-empty-branch/
+    05-async-loading/
 ```
 
 ## 交互协议
@@ -53,12 +55,67 @@ compare/
 pnpm run build                  # eval 跑的是 dist/，必须先构建
 
 node eval/compare/run.mjs --prompt      # 打印共用提示词，交给代理
-node eval/compare/run.mjs               # 跑候选实现
+node eval/compare/run.mjs               # 跑候选实现（默认 --context task）
 node eval/compare/run.mjs --reference   # 跑参考实现（自检 harness，不算指标）
 node eval/compare/run.mjs counter       # 只跑名字含 counter 的用例
+node eval/compare/run.mjs --context full           # 指定给代理的规则上下文（见下）
+node eval/compare/run.mjs --prompt --context full  # 打印「提示词 + 规则上下文」，原样交给代理
 ```
 
 代理产出的实现写到 `cases/<用例>/plain.candidate.tsx` 与 `react.candidate.jsx`（已 gitignore）。
+
+## 上下文对照（它是一条自变量，必须和结果一起记）
+
+同一个用例、同一个模型，**给代理多少 Plain 规则文档**会显著影响 Plain 侧的通过率；
+不记下来，不同档位的数字之间没法比。三档与 [`eval/tasks/run.mjs`](../run.mjs) **完全一致**，
+规则文本也从 `AGENTS.md` 现读现切（规则只有一份，不会出现「文档说 A、喂给代理的是 B」）：
+
+| 档位 | 给代理什么 | 回答的问题 |
+| --- | --- | --- |
+| `--context task`（默认） | 只有 `task.md` | 代理**完全不了解 Plain** 时的下限 |
+| `--context minimal` | `task.md` + `AGENTS.md` §1–2（简介 + 5 条规则） | 只给最核心的规则 |
+| `--context full` | `task.md` + §1–3（再加反模式目录） | 文档给全 |
+
+> **为什么只给 Plain 文档、不给 React 文档**：React 是模型已有知识，Plain 不是。
+> 所以这一档量的是 **「Plain 要补多少文档才能追上 React」** —— 这个不对称是刻意的，
+> 也正是这套对比最想测的东西。无论结果如何，都必须写清用的是哪一档。
+
+## 交给代理的启动提示词（干净跑）
+
+要拿到**有效**结果，代理必须是一个**没读过断言**的新会话（新窗口 / 新 agent）。
+先跑一次 `node eval/compare/run.mjs --prompt --context <档位>`，把它的输出（提示词 + 规则上下文）
+连同下面这段一起贴给代理：
+
+```text
+你在跑 Plain 框架的 AI 正确率对比实验（eval/compare），请严格遵守以下规则。
+
+任务：
+  读 eval/compare/cases/*/task.md，为每个用例写两份实现：
+    · eval/compare/cases/<用例>/plain.candidate.tsx   ← 用 Plain 的惯用写法
+    · eval/compare/cases/<用例>/react.candidate.jsx   ← 用 React 的惯用写法
+
+硬性禁止（违反则实验作废）：
+  不要读 cases/*/check.mjs、cases/*/plain.tsx、cases/*/react.jsx，
+  也不要读 eval/RESULTS.md 与 eval/compare/README.md。
+  只允许读 cases/*/task.md，以及本轮「上下文档位」明确给出的规则文档。
+
+本轮「上下文档位」（只给这一档，由上面的 --prompt 输出提供）：
+  〔task〕什么都不给，只有 task.md
+  〔minimal〕额外给 AGENTS.md 的 §1–§2（简介 + 5 条规则）
+  〔full〕额外给 AGENTS.md 的 §1–§3（再加反模式目录）
+
+流程：
+  写完所有实现（5 个用例 × 2 = 10 个文件）后，直接跑
+    node eval/compare/run.mjs --context <档位>
+  把完整输出贴回来，并声明你用的是哪个档位。
+  不要为了对答案去读 check.mjs —— 首次尝试才算数。
+```
+
+> **为什么这么严**：一旦代理读了 `check.mjs` 或参考答案，这次数字就**只能当上界**，
+> 记进 `RESULTS.md` 时必须标注（见下面的「自欺清单」与 `RESULTS.md` 的效度说明）。
+> 更真实的数据是**同一个新会话跑两档**（`task` 与 `full`）—— 那才能看出「补多少文档才追得上」。
+
+## 公平性规则
 
 ## 公平性规则
 
@@ -79,7 +136,7 @@ node eval/compare/run.mjs counter       # 只跑名字含 counter 的用例
   这是**有意保留**的：Plain 卖的正是「构建期把错误变便宜」这件事，把它拿掉反而失真。
   但必须说清楚：**这一栏的优势来自框架自带闸门，不来自 I/O 或模型能力**。
   想更严格地比较，应给 React 侧也接上 lint / React Compiler，并把这个开关记进结果。
-- 只有 3 个用例，样本极小 —— 任何结论都只是**方向性**的，不是统计显著。
+- 只有 5 个用例，样本极小 —— 任何结论都只是**方向性**的，不是统计显著。
 
 ## 自欺清单
 

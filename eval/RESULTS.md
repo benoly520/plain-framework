@@ -85,14 +85,29 @@ Plain vs React 的对称对比（见 [compare/README.md](compare/README.md)）�
 
 ## 真实对比结果（`eval/compare/`，Plain vs React）
 
-（还没有。跑法：`node eval/compare/run.mjs --prompt` → 两边各写一份实现 → 跑 `node eval/compare/run.mjs`）
+跑法：`node eval/compare/run.mjs --prompt` → 两边各写一份实现 → 跑 `node eval/compare/run.mjs`
 
-**同一个模型、同一批提示词**，两侧都要记录；「被构建期拦下」要单独记（Plain 的闸门是产品的一部分，
+**同一个模型、同一批提示词、同一个上下文档位**，三项要一起记；「被构建期拦下」要单独记（Plain 的闸门是产品的一部分，
 React 侧默认没有等价闸门 —— 见 `compare/README.md` 的公平性说明）。
 
-| 日期 | 模型 | 用例数 | Plain 首次通过率 | React 首次通过率 | Plain 构建期拦下 | 备注 |
-| --- | --- | --- | --- | --- | --- | --- |
-| — | — | — | — | — | — | — |
+| 日期 | 模型 | 上下文 | 用例数 | Plain 首次通过率 | React 首次通过率 | Plain 构建期拦下 | 备注 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-13 | deepseek-v4.1-flash | task | 5 | 5 / 5 = 100% | 5 / 5 = 100% | 0 | **非协议干净，见下** |
+
+> ⚠️ **效度说明（与上面 tasks 那条同源）**：
+>
+> 按协议，代理**只应拿到 `task.md`**，两侧各按**该框架的惯用写法**完成。本次两侧实现由**同一个模型**写出
+> （Plain 用 `signal` / `computed` / `resource`，React 用 `useState` / 解构 props / `useEffect`），
+> 但该模型**在动手前已读过全部 `check.mjs`**。因此：
+>
+> - 100% / 100% 只能当**上界**看 —— **不能**据此说「两者一样好」，更不能说「Plain 更强」；
+> - 本次 **`Plain 构建期拦下 = 0`**：两边都一次写对，闸门没有被触发。这**不代表闸门无效** ——
+>   它的价值只在「写错时」体现。Plain 免疫系统的对称性证据见
+>   [`compare/README.md`](compare/README.md) 的「已确立的对称性」（02 / 03 的错法被**同一行断言**抓住）。
+> - 有效实验的要求：让**没读过 `check.mjs`** 的模型、只喂 `task.md` 重跑一次，再把这行替换掉。
+>
+> 另：本批用例实际有 **5** 个（`compare/README.md` 里「只有 3 个用例」的说法已过时），样本仍很小，
+> 结论一律只作**方向性**参考。
 
 ## 发现的反模式（重要产出）
 

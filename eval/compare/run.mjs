@@ -15,10 +15,31 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CASES_DIR = path.join(HERE, "cases");
 const TMP = path.join(HERE, ".tmp");
 
+/** 会吃掉下一个参数的开关（解析位置参数时要跳过它们的值） */
+const VALUED_FLAGS = new Set(["--context"]);
 const argv = process.argv.slice(2);
+
+const flagValue = (name, fallback = null) => {
+  const i = argv.indexOf(name);
+  return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+};
+const positionals = [];
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a.startsWith("--")) {
+    if (VALUED_FLAGS.has(a)) i++;
+    continue;
+  }
+  positionals.push(a);
+}
+
 const promptOnly = argv.includes("--prompt");
 const useReference = argv.includes("--reference");
-const filter = argv.find((a) => !a.startsWith("--"));
+const filter = positionals[0];
+// 给代理的规则上下文分三档（与 `eval/tasks/run.mjs` 同口径，见 compare/README.md）：
+//   task（默认）只给 task.md；minimal 加 AGENTS.md §1–2；full 再加反模式目录。
+//   必须和结果一起记 —— 否则不同档位的数字之间没法比。
+const context = flagValue("--context", "task");
 
 const SOURCES = {
   plain: {
@@ -51,7 +72,30 @@ function pick(dir, kind, side) {
   return file || null;
 }
 
+/** 按 `## N.` 分节摘 AGENTS.md（与 eval/tasks/run.mjs 同一套口径，规则只有一份） */
+function agentSection(from, to) {
+  const md = fs.readFileSync(path.join(HERE, "..", "..", "AGENTS.md"), "utf8");
+  const start = md.indexOf(`\n## ${from}.`);
+  const end = md.indexOf(`\n## ${to}.`);
+  if (start < 0 || end < 0 || end <= start) return "";
+  return md.slice(start, end).trim();
+}
+
+/** 这次给代理的规则上下文（task 档为空 —— 只给 task.md，与 tasks 侧一致） */
+function contextBlock() {
+  if (context === "minimal") return agentSection(1, 3); // 简介 + 5 条规则
+  if (context === "full") return agentSection(1, 4); // 再加反模式目录
+  return "";
+}
+
 function printPrompts() {
+  const block = contextBlock();
+  if (block) {
+    console.log(
+      `\n${"=".repeat(64)}\n# Plain 规则上下文（--context ${context}）\n${"=".repeat(64)}`
+    );
+    console.log(block);
+  }
   for (const name of caseDirs()) {
     const md = path.join(CASES_DIR, name, "task.md");
     if (!fs.existsSync(md)) continue;
@@ -60,7 +104,8 @@ function printPrompts() {
   }
   console.log(
     "\n把 Plain 实现写到 `<用例>/plain.candidate.tsx`，React 实现写到 `<用例>/react.candidate.jsx`，" +
-      "然后跑 `node eval/compare/run.mjs`。"
+      "然后跑 `node eval/compare/run.mjs`。" +
+      `\n记录结果时请一并记下上下文档位：--context ${context}（见 compare/README.md）。`
   );
 }
 
@@ -103,7 +148,7 @@ async function main() {
 
   const pad = (s, n) => String(s).padEnd(n);
   console.log(
-    `\nPlain vs React 对比（${rows.length} 个用例` +
+    `\nPlain vs React 对比（${rows.length} 个用例 · 上下文 ${context}` +
       (useReference ? "，当前跑的是 reference 实现 —— 自检 harness，不算指标" : "") +
       "）"
   );
@@ -143,7 +188,8 @@ async function main() {
     );
   }
   console.log(
-    "\n把结果记进 eval/RESULTS.md。改断言要作废重跑 —— 见 eval/compare/README.md 的三条自欺清单。\n"
+    `\n把结果记进 eval/RESULTS.md（连同上文档位 \`${context}\` 一起记；见 compare/README.md 的上下文对照）。` +
+      `\n改断言要作废重跑 —— 见 eval/compare/README.md 的三条自欺清单。\n`
   );
 }
 
