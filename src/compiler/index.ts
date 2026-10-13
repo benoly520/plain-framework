@@ -9,6 +9,9 @@
 //   3. 遇到不支持的 JSX 形态必须报带行号的错误，而不是静默产出坏代码
 
 import ts from "typescript";
+import type { PlainErrorCode } from "../errors.js";
+
+export type { PlainErrorCode } from "../errors.js";
 
 /** 编译器识别出的服务端函数：{ name, body } */
 export interface ServerFunction {
@@ -17,7 +20,10 @@ export interface ServerFunction {
 }
 
 /**
- * 编译错误码 —— 机器可读，供 IDE / CI / AI 直接消费（SPEC §7「自解释错误」）。
+ * 编译器错误码 —— 机器可读，供 IDE / CI / AI 直接消费（SPEC §7「自解释错误」）。
+ *
+ * 全框架的错误码目录已收敛到 `src/errors.ts` 一处；这里保留一段面向编译器读者的说明，
+ * 码本身从目录类型导入，避免两处各写各的。
  *
  * - `PLAIN_E1001` 有 JSX 落在编译器不认识的写法里
  * - `PLAIN_E1002` 生成的产物无法被 JS 解析（输入没先剥离 TS 类型）
@@ -29,16 +35,6 @@ export interface ServerFunction {
  * - `PLAIN_E1008` JSX 属性展开 `{...expr}`（只做了半套支持，会静默跑错）
  * - `PLAIN_E2001` 契约检查未通过（由构建链路抛出，见 vite 插件）
  */
-export type PlainErrorCode =
-  | "PLAIN_E1001"
-  | "PLAIN_E1002"
-  | "PLAIN_E1003"
-  | "PLAIN_E1004"
-  | "PLAIN_E1005"
-  | "PLAIN_E1006"
-  | "PLAIN_E1007"
-  | "PLAIN_E1008"
-  | "PLAIN_E2001";
 
 export interface PlainCompileErrorInit {
   code: PlainErrorCode;

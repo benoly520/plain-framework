@@ -35,11 +35,11 @@
 
 | 任务 | 坏例 | 之前在哪一层被拦 | 现在 | 拦它的规则 |
 | --- | --- | --- | --- | --- |
-| `01-counter` | `count = 1` + `{count}` | 构建期 `PLAIN_E2001` | 构建期 | `plain/signal-assign` / `signal-not-called` |
+| `01-counter` | `count = 1` + `{count}` | 构建期 `PLAIN_E2001` | 构建期 | `PLAIN_E1101` / `PLAIN_E1102` |
 | `02-keyed-list` | 不写 `key=` | 断言 | 断言（不变） | —（key 复用是运行时节点身份，拦不了） |
 | `04-server-config` | 模块作用域读 env 再被 `server()` 引用 | 构建期 `PLAIN_E1006` | 构建期 | `PLAIN_E1006` |
-| `05-immutable-update` | `items().push(text)` / `items().pop()` | 断言（DOM 不更新） | **构建期** | `plain/no-signal-mutate` |
-| `06-props-snapshot` | `const t = resolve(props.title)` | 断言（改第二次才暴露） | **构建期** | `plain/no-props-snapshot` |
+| `05-immutable-update` | `items().push(text)` / `items().pop()` | 断言（DOM 不更新） | **构建期** | `PLAIN_E1106` |
+| `06-props-snapshot` | `const t = resolve(props.title)` | 断言（改第二次才暴露） | **构建期** | `PLAIN_E1112` |
 | `07-server-validation` | 把校验函数当参数传进来 | 断言（服务端收到 `undefined`） | **构建期** | `PLAIN_E1007` |
 
 坏例拦截率：**2 / 6 → 5 / 6**。剩下的 `02` 属于「行为在运行时才可观测」（DOM 节点身份），
@@ -105,8 +105,8 @@ React 侧默认没有等价闸门 —— 见 `compare/README.md` 的公平性说
 >
 > 但**仍不是干净实验**，请勿当成 `task` 档的有效数据：
 >
-> - 写手读的 `README.md` 里本身就带错误码表与规则码表（`PLAIN_E1005`、`plain/no-props-snapshot`、
->   `plain/no-signal-mutate`、`plain/react-habit`…），所以这一档的实际信息量**高于**「只给 `task.md`」，
+> - 写手读的 `README.md` 里本身就带错误码表与规则码表（`PLAIN_E1005`、`PLAIN_E1112`、
+>   `PLAIN_E1106`、`PLAIN_E1103`…），所以这一档的实际信息量**高于**「只给 `task.md`」，
 >   更接近「公开文档基线」。它与 `full` 档（AGENTS §1–§3）之间的差别，**不能**解释成"上下文多少"的因果效应。
 > - 100% / 100% 只能当**上界**看 —— **不能**据此说「两者一样好」，更不能说「Plain 更强」；样本只有 5 个。
 > - 本次 **`Plain 构建期拦下 = 0`**：两边都一次写对，闸门没有被触发。这**不代表闸门无效** ——
@@ -143,4 +143,4 @@ React 侧默认没有等价闸门 —— 见 `compare/README.md` 的公平性说
 | 日期 | 任务 | 踩的坑 | 是否已加静态检查 |
 | --- | --- | --- | --- |
 | 2026-10-13 | 文档校对 `docs/patterns.md`（非评测） | 用 `{...spread}` 封装受控绑定：展开只在创建时求值一次，**不进 `effect`**，信号变了输入框不更新（"重置表单"会静默失效）；且绕过 class / style / value 的正确处理 | ✅ 已加 `PLAIN_E1008`：编译期直接拒绝展开 |
-| 2026-10-13 | 文档校对 `docs/patterns.md`（非评测） | `resolve(props.onSave)` 会把事件处理器**当场调用**：`on[A-Z]` 开头的 prop 不包 getter，取值应直接 `props.onSave(...)` | ✅ 已加 `plain/no-resolve-event-prop`（可自动修） |
+| 2026-10-13 | 文档校对 `docs/patterns.md`（非评测） | `resolve(props.onSave)` 会把事件处理器**当场调用**：`on[A-Z]` 开头的 prop 不包 getter，取值应直接 `props.onSave(...)` | ✅ 已加 `PLAIN_E1108`（可自动修） |

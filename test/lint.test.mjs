@@ -10,7 +10,7 @@ import { check, autofix, formatIssues, suppressionCount } from "../dist/lint.js"
 
 const codes = (issues) => issues.map((i) => i.code);
 
-test("直接给 signal 变量赋值 -> plain/signal-assign，且 fix 可应用", () => {
+test("直接给 signal 变量赋值 -> PLAIN_E1101，且 fix 可应用", () => {
   const src = [
     "import { signal } from 'plain';",
     "const count = signal(0);",
@@ -18,7 +18,7 @@ test("直接给 signal 变量赋值 -> plain/signal-assign，且 fix 可应用",
   ].join("\n");
   const issues = check(src, "Counter.tsx");
   assert.equal(issues.length, 1);
-  assert.equal(issues[0].code, "plain/signal-assign");
+  assert.equal(issues[0].code, "PLAIN_E1101");
   assert.equal(issues[0].level, "error");
   assert.equal(issues[0].line, 3);
   assert.equal(
@@ -27,26 +27,26 @@ test("直接给 signal 变量赋值 -> plain/signal-assign，且 fix 可应用",
   );
 });
 
-test("JSX 插值里漏调用 signal -> plain/signal-not-called", () => {
+test("JSX 插值里漏调用 signal -> PLAIN_E1102", () => {
   const src = [
     "import { signal } from 'plain';",
     "const count = signal(0);",
     "export function App() { return <p>{count}</p>; }",
   ].join("\n");
   const issues = check(src, "App.tsx");
-  assert.deepEqual(codes(issues), ["plain/signal-not-called"]);
+  assert.deepEqual(codes(issues), ["PLAIN_E1102"]);
   assert.equal(issues[0].line, 3);
   assert.ok(autofix(src, issues).includes("<p>{count()}</p>"));
 });
 
-test("JSX 属性里漏调用 signal -> plain/signal-not-called", () => {
+test("JSX 属性里漏调用 signal -> PLAIN_E1102", () => {
   const src = [
     "import { signal } from 'plain';",
     "const done = signal(false);",
     "export function App() { return <input checked={done} />; }",
   ].join("\n");
   const issues = check(src, "App.tsx");
-  assert.deepEqual(codes(issues), ["plain/signal-not-called"]);
+  assert.deepEqual(codes(issues), ["PLAIN_E1102"]);
   assert.ok(issues[0].message.includes("属性"));
   assert.ok(autofix(src, issues).includes("checked={done()}"));
 });
@@ -54,7 +54,7 @@ test("JSX 属性里漏调用 signal -> plain/signal-not-called", () => {
 test("React 肌肉记忆 API 只报错、不自动改", () => {
   for (const name of ["useState", "useEffect", "useMemo", "useCallback", "useRef"]) {
     const issues = check(`const x = ${name}(0);`, "a.tsx");
-    assert.deepEqual(codes(issues), ["plain/react-habit"], name);
+    assert.deepEqual(codes(issues), ["PLAIN_E1103"], name);
     assert.equal(issues[0].fix, undefined, `${name} 不应有自动修复`);
   }
 });
@@ -66,7 +66,7 @@ test("innerHTML / outerHTML / insertAdjacentHTML 都被拦下", () => {
     "el.insertAdjacentHTML('beforeend', '<b>x</b>');",
   ];
   for (const src of cases) {
-    assert.deepEqual(codes(check(src, "a.tsx")), ["plain/no-inner-html"], src);
+    assert.deepEqual(codes(check(src, "a.tsx")), ["PLAIN_E1104"], src);
   }
 });
 
@@ -76,7 +76,7 @@ test("resource 解构出来的 data/loading/error 也按 signal 校验", () => {
     "const { data, loading } = resource(() => 1);",
     "loading = false;",
   ].join("\n");
-  assert.deepEqual(codes(check(src, "a.tsx")), ["plain/signal-assign"]);
+  assert.deepEqual(codes(check(src, "a.tsx")), ["PLAIN_E1101"]);
 });
 
 test("不误伤：声明 / 对象属性赋值 / 普通变量赋值", () => {
@@ -104,7 +104,7 @@ test("[回归] 属性场景只报一次，且 autofix 不会重复插入调用",
   assert.ok(!fixed.includes("done()()"), "区间重叠曾把源码切成 done()()");
 });
 
-test("解构 props -> plain/no-props-destructure（动态属性是 getter，会丢响应性）", () => {
+test("解构 props -> PLAIN_E1105（动态属性是 getter，会丢响应性）", () => {
   const src = [
     "export function Card(props) {",
     "  const { title } = props;",
@@ -112,7 +112,7 @@ test("解构 props -> plain/no-props-destructure（动态属性是 getter，会�
     "}",
   ].join("\n");
   const issues = check(src, "Card.tsx");
-  assert.deepEqual(codes(issues), ["plain/no-props-destructure"]);
+  assert.deepEqual(codes(issues), ["PLAIN_E1105"]);
   assert.equal(issues[0].line, 2);
   assert.equal(issues[0].fix, undefined, "两种改法语义不同，不自动改");
   assert.match(issues[0].message, /resolve\(props\.x\)/);
@@ -121,13 +121,13 @@ test("解构 props -> plain/no-props-destructure（动态属性是 getter，会�
 test("解构 props 的另外两种口径：参数解构 / props 链解构", () => {
   const param = "export function Card({ title }) { return <h2>{title}</h2>; }";
   const paramIssues = check(param, "Card.tsx");
-  assert.deepEqual(codes(paramIssues), ["plain/no-props-destructure"]);
+  assert.deepEqual(codes(paramIssues), ["PLAIN_E1105"]);
   assert.match(paramIssues[0].message, /function Card\(props\)/);
 
   const arrow = "export const Row = ({ id }) => <li>{id}</li>;";
   assert.deepEqual(
     codes(check(arrow, "Row.tsx")),
-    ["plain/no-props-destructure"],
+    ["PLAIN_E1105"],
     "箭头组件同样要拦"
   );
 
@@ -138,7 +138,7 @@ test("解构 props 的另外两种口径：参数解构 / props 链解构", () =
     "}",
   ].join("\n");
   const chainIssues = check(chain, "Card.tsx");
-  assert.deepEqual(codes(chainIssues), ["plain/no-props-destructure"]);
+  assert.deepEqual(codes(chainIssues), ["PLAIN_E1105"]);
   assert.match(chainIssues[0].message, /resolve\(props\.data\)/);
 });
 
@@ -150,7 +150,7 @@ test("先存后改也拦：const arr = items(); arr.push(x)", () => {
   ];
   for (const [src, why] of cases) {
     const issues = check(src, "a.tsx");
-    assert.deepEqual(codes(issues), ["plain/no-signal-mutate"], why);
+    assert.deepEqual(codes(issues), ["PLAIN_E1106"], why);
     assert.match(issues[0].message, /signal 是 /, why);
   }
 
@@ -240,7 +240,7 @@ test("formatIssues 输出 文件:行:列 + 规则码", () => {
     "count = 1;",
   ].join("\n");
   const text = formatIssues(check(src, "C.tsx"), "C.tsx");
-  assert.match(text, /C\.tsx:3:1\s+\[plain\/signal-assign\]/);
+  assert.match(text, /C\.tsx:3:1\s+\[PLAIN_E1101\]/);
 });
 
 test("文件名决定 ScriptKind：.ts 源码不报 JSX 类误判", () => {
@@ -248,14 +248,14 @@ test("文件名决定 ScriptKind：.ts 源码不报 JSX 类误判", () => {
   assert.deepEqual(check("const obj = {};", "a.js"), []);
 });
 
-test("就地改 signal 值 -> plain/no-signal-mutate（push / 下标赋值）", () => {
+test("就地改 signal 值 -> PLAIN_E1106（push / 下标赋值）", () => {
   const push = [
     "import { signal } from 'plain';",
     "const items = signal(['a']);",
     "items().push('b');",
   ].join("\n");
   const issues = check(push, "a.tsx");
-  assert.deepEqual(codes(issues), ["plain/no-signal-mutate"]);
+  assert.deepEqual(codes(issues), ["PLAIN_E1106"]);
   assert.equal(issues[0].fix, undefined);
   assert.match(issues[0].message, /items\.set/);
 
@@ -264,14 +264,14 @@ test("就地改 signal 值 -> plain/no-signal-mutate（push / 下标赋值）", 
     "const items = signal(['a']);",
     "items()[0] = 'z';",
   ].join("\n");
-  assert.deepEqual(codes(check(indexSet, "a.tsx")), ["plain/no-signal-mutate"]);
+  assert.deepEqual(codes(check(indexSet, "a.tsx")), ["PLAIN_E1106"]);
 
   const propSet = [
     "import { signal } from 'plain';",
     "const box = signal({ n: 1 });",
     "box().n = 2;",
   ].join("\n");
-  assert.deepEqual(codes(check(propSet, "a.tsx")), ["plain/no-signal-mutate"]);
+  assert.deepEqual(codes(check(propSet, "a.tsx")), ["PLAIN_E1106"]);
 });
 
 test("不误伤：不可变更新 / 非 signal 数组的 push / .set", () => {
@@ -296,14 +296,14 @@ test("深层路径就地改也拦：todos()[0].done = true / user().profile.name
   ];
   for (const src of cases) {
     const issues = check(src, "a.tsx");
-    assert.deepEqual(codes(issues), ["plain/no-signal-mutate"], src);
+    assert.deepEqual(codes(issues), ["PLAIN_E1106"], src);
     assert.match(issues[0].message, /set\(/, src);
   }
 
   // 单层 / 属性写入仍是老行为
   assert.deepEqual(
     codes(check("const box = signal({}); box().n = 1;", "a.tsx")),
-    ["plain/no-signal-mutate"]
+    ["PLAIN_E1106"]
   );
 
   // 不误伤：非就地链（filter / slice / map 返回新数组）改的是副本
@@ -317,7 +317,7 @@ test("深层路径就地改也拦：todos()[0].done = true / user().profile.name
   }
 });
 
-test("把 getter 存进变量 / JSX 忘了 resolve -> plain/no-props-snapshot", () => {
+test("把 getter 存进变量 / JSX 忘了 resolve -> PLAIN_E1112", () => {
   const store = [
     "export function Card(props) {",
     "  const t = props.title;",
@@ -325,7 +325,7 @@ test("把 getter 存进变量 / JSX 忘了 resolve -> plain/no-props-snapshot", 
     "}",
   ].join("\n");
   const storeIssues = check(store, "Card.tsx");
-  assert.deepEqual(codes(storeIssues), ["plain/no-props-snapshot"]);
+  assert.deepEqual(codes(storeIssues), ["PLAIN_E1112"]);
   assert.equal(storeIssues[0].line, 2);
   assert.equal(storeIssues[0].fix, undefined);
 
@@ -335,7 +335,7 @@ test("把 getter 存进变量 / JSX 忘了 resolve -> plain/no-props-snapshot", 
     "  return <h2>{t}</h2>;",
     "}",
   ].join("\n");
-  assert.deepEqual(codes(check(resolveOnce, "Card.tsx")), ["plain/no-props-snapshot"]);
+  assert.deepEqual(codes(check(resolveOnce, "Card.tsx")), ["PLAIN_E1112"]);
 
   const jsx = [
     "export function Card(props) {",
@@ -343,7 +343,7 @@ test("把 getter 存进变量 / JSX 忘了 resolve -> plain/no-props-snapshot", 
     "}",
   ].join("\n");
   const jsxIssues = check(jsx, "Card.tsx");
-  assert.deepEqual(codes(jsxIssues), ["plain/no-props-snapshot"]);
+  assert.deepEqual(codes(jsxIssues), ["PLAIN_E1112"]);
   assert.match(jsxIssues[0].message, /resolve\(props\.title\)/);
 
   const attr = [
@@ -351,7 +351,7 @@ test("把 getter 存进变量 / JSX 忘了 resolve -> plain/no-props-snapshot", 
     "  return <input value={props.title} />;",
     "}",
   ].join("\n");
-  assert.deepEqual(codes(check(attr, "Card.tsx")), ["plain/no-props-snapshot"]);
+  assert.deepEqual(codes(check(attr, "Card.tsx")), ["PLAIN_E1112"]);
 });
 
 test("不误伤：thunk / 内联 resolve / 事件透传 / 非组件", () => {
@@ -394,7 +394,7 @@ test("[回归] 不误报：把 on* 事件 prop 存进变量（编译器不给 on
   }
 });
 
-test("resolve on* 事件 prop -> plain/no-resolve-event-prop（会把处理器当场调用）", () => {
+test("resolve on* 事件 prop -> PLAIN_E1108（会把处理器当场调用）", () => {
   // 编译器对 on[A-Z] 的 prop 不包 getter，传进来的就是函数本身；
   // resolve(fn) = fn()，于是 resolve(props.onClick) 会当场调用处理器。
   const src = [
@@ -404,7 +404,7 @@ test("resolve on* 事件 prop -> plain/no-resolve-event-prop（会把处理器�
     "}",
   ].join("\n");
   const issues = check(src, "Card.tsx");
-  assert.deepEqual(codes(issues), ["plain/no-resolve-event-prop"]);
+  assert.deepEqual(codes(issues), ["PLAIN_E1108"]);
   assert.match(issues[0].message, /当场调用/);
   assert.ok(issues[0].fix, "去掉 resolve 是唯一正确改法，可自动修");
   assert.ok(autofix(src, issues).includes("const cb = props.onClick;"));
@@ -412,7 +412,7 @@ test("resolve on* 事件 prop -> plain/no-resolve-event-prop（会把处理器�
   // 下标形态的 on* 同样拦
   assert.deepEqual(
     codes(check('export function Card(props) { return <b onClick={resolve(props["onClick"])}>x</b>; }', "a.tsx")),
-    ["plain/no-resolve-event-prop"]
+    ["PLAIN_E1108"]
   );
 
   // 不误报：直接透传 / 直接调用 / 普通动态 props 的 resolve 都是对的
@@ -426,7 +426,7 @@ test("resolve on* 事件 prop -> plain/no-resolve-event-prop（会把处理器�
   }
 });
 
-test("赋值形态的快照：let t; t = props.title -> plain/no-props-snapshot", () => {
+test("赋值形态的快照：let t; t = props.title -> PLAIN_E1112", () => {
   const src = [
     "export function Card(props) {",
     "  let t;",
@@ -435,7 +435,7 @@ test("赋值形态的快照：let t; t = props.title -> plain/no-props-snapshot"
     "}",
   ].join("\n");
   const issues = check(src, "Card.tsx");
-  assert.deepEqual(codes(issues), ["plain/no-props-snapshot"]);
+  assert.deepEqual(codes(issues), ["PLAIN_E1112"]);
   assert.equal(issues[0].line, 3);
   assert.match(issues[0].message, /t = props\.title/);
   assert.equal(issues[0].fix, undefined, "两种改法语义不同，不自动改");
@@ -468,10 +468,10 @@ test("不误报：赋值写在 effect / 回调里会重跑；on* 赋值；signal
     "  return <h2>{s()}</h2>;",
     "}",
   ].join("\n");
-  assert.deepEqual(codes(check(signalAssign, "Card.tsx")), ["plain/signal-assign"]);
+  assert.deepEqual(codes(check(signalAssign, "Card.tsx")), ["PLAIN_E1101"]);
 });
 
-test("effect(async …) -> plain/no-async-effect", () => {
+test("effect(async …) -> PLAIN_E1109", () => {
   const src = [
     "import { effect, signal } from 'plain';",
     "const data = signal(null);",
@@ -481,14 +481,14 @@ test("effect(async …) -> plain/no-async-effect", () => {
     "});",
   ].join("\n");
   const issues = check(src, "a.tsx");
-  assert.deepEqual(codes(issues), ["plain/no-async-effect"]);
+  assert.deepEqual(codes(issues), ["PLAIN_E1109"]);
   assert.match(issues[0].message, /await/);
 
   // 函数在别处定义 —— 看不出来，不猜
   assert.deepEqual(check("effect(load);", "a.tsx"), []);
 });
 
-test("effect 里把同一个 signal 读了又写 -> plain/no-effect-loop", () => {
+test("effect 里把同一个 signal 读了又写 -> PLAIN_E1110", () => {
   const cases = [
     "const count = signal(0); effect(() => count.set(count() + 1));",
     "const items = signal([]); effect(() => { items.set([...items(), 1]); });",
@@ -496,7 +496,7 @@ test("effect 里把同一个 signal 读了又写 -> plain/no-effect-loop", () =>
   ];
   for (const src of cases) {
     const issues = check(src, "a.tsx");
-    assert.deepEqual(codes(issues), ["plain/no-effect-loop"], src);
+    assert.deepEqual(codes(issues), ["PLAIN_E1110"], src);
     assert.match(issues[0].message, /死循环/);
   }
 });
@@ -538,14 +538,14 @@ test("不误报：钳位写法 / 只写别的 signal / 回调里才写 / 函数�
   }
 });
 
-test("computed 里写 signal -> plain/no-computed-side-effect", () => {
+test("computed 里写 signal -> PLAIN_E1111", () => {
   const src = [
     "import { computed, signal } from 'plain';",
     "const count = signal(0);",
     "const doubled = computed(() => { count.set(1); return count() * 2; });",
   ].join("\n");
   const issues = check(src, "a.tsx");
-  assert.deepEqual(codes(issues), ["plain/no-computed-side-effect"]);
+  assert.deepEqual(codes(issues), ["PLAIN_E1111"]);
   assert.match(issues[0].message, /纯函数/);
 
   const ok = [
@@ -565,7 +565,7 @@ test("props 动态下标看不出来 -> 仍按 getter 报（不猜就不放行�
     "  return <h2>{t}</h2>;",
     "}",
   ].join("\n");
-  assert.deepEqual(codes(check(src, "Card.tsx")), ["plain/no-props-snapshot"]);
+  assert.deepEqual(codes(check(src, "Card.tsx")), ["PLAIN_E1112"]);
 });
 
 test("plain-ignore-line / plain-ignore-next-line：确认误报时的出口", () => {
@@ -600,7 +600,7 @@ test("plain-ignore-line / plain-ignore-next-line：确认误报时的出口", ()
     "// plain-ignore-next-line plain/other-rule",
     "count = count() + 1;",
   ].join("\n");
-  assert.deepEqual(codes(check(mismatch, "a.tsx")), ["plain/signal-assign"]);
+  assert.deepEqual(codes(check(mismatch, "a.tsx")), ["PLAIN_E1101"]);
 
   // 只影响挂了指令的那一行
   const scoped = [
@@ -611,7 +611,7 @@ test("plain-ignore-line / plain-ignore-next-line：确认误报时的出口", ()
     "a = 1;",
     "b = 2;",
   ].join("\n");
-  assert.deepEqual(codes(check(scoped, "a.tsx")), ["plain/signal-assign"]);
+  assert.deepEqual(codes(check(scoped, "a.tsx")), ["PLAIN_E1101"]);
   assert.equal(check(scoped, "a.tsx")[0].line, 6, "第 6 行那条照报");
 });
 
@@ -626,7 +626,7 @@ test("[回归] 示例文本不算指令：字符串里的 / 文档注释中间�
     "count = count() + 1;",
   ].join("\n");
   assert.equal(suppressionCount(docExample), 0, "注释中间引用的写法不算指令");
-  assert.deepEqual(codes(check(docExample, "a.tsx")), ["plain/signal-assign"]);
+  assert.deepEqual(codes(check(docExample, "a.tsx")), ["PLAIN_E1101"]);
 
   const inString = [
     "import { signal } from 'plain';",
@@ -635,7 +635,7 @@ test("[回归] 示例文本不算指令：字符串里的 / 文档注释中间�
     "count = count() + 1;",
   ].join("\n");
   assert.equal(suppressionCount(inString), 0, "字符串里的不算指令");
-  assert.deepEqual(codes(check(inString, "a.tsx")), ["plain/signal-assign"]);
+  assert.deepEqual(codes(check(inString, "a.tsx")), ["PLAIN_E1101"]);
 });
 
 test("抑制按「报错行」匹配（多行节点要把指令放在报出来的那一行）", () => {
@@ -656,7 +656,7 @@ test("抑制按「报错行」匹配（多行节点要把指令放在报出来�
   ].join("\n");
   assert.deepEqual(
     codes(check(inside, "a.tsx")),
-    ["plain/no-effect-loop"],
+    ["PLAIN_E1110"],
     "挂在内部那一行不生效 —— 指令认的是 CLI 打出来的行号"
   );
 });

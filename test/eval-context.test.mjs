@@ -32,7 +32,7 @@ test("eval --prompt --context：三档规则上下文都从 AGENTS.md 现读现�
 
   const full = run(["--prompt", "--context", "full"]);
   assert.match(full, /反模式目录/);
-  assert.match(full, /plain\/no-signal-mutate/);
+  assert.match(full, /PLAIN_E1106/);
 });
 
 test("--context 的值不会被当成任务过滤器", () => {

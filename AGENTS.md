@@ -26,20 +26,20 @@
 
 | # | 反模式（别写） | 正确写法 | 自动拦截？ | 评测任务 |
 | --- | --- | --- | --- | --- |
-| 1 | `count = 1` | `count.set(1)` | ✅ `plain/signal-assign`（可自动修） | — |
-| 2 | `{count}` / `checked={done}` | `{count()}` / `checked={done()}` | ✅ `plain/signal-not-called`（可自动修） | — |
-| 3 | `useState` / `useEffect` / `useMemo` / `useCallback` / `useRef` | `signal` / `effect` / `computed` | ✅ `plain/react-habit` | — |
-| 4 | `el.innerHTML = html` / `insertAdjacentHTML` | `{expr}` 插值 / `createTextNode` | ✅ `plain/no-inner-html` | — |
-| 5 | `const { title } = props` | `resolve(props.title)`，或 `const title = () => resolve(props.title)` | ✅ `plain/no-props-destructure` | — |
+| 1 | `count = 1` | `count.set(1)` | ✅ `PLAIN_E1101`（可自动修） | — |
+| 2 | `{count}` / `checked={done}` | `{count()}` / `checked={done()}` | ✅ `PLAIN_E1102`（可自动修） | — |
+| 3 | `useState` / `useEffect` / `useMemo` / `useCallback` / `useRef` | `signal` / `effect` / `computed` | ✅ `PLAIN_E1103` | — |
+| 4 | `el.innerHTML = html` / `insertAdjacentHTML` | `{expr}` 插值 / `createTextNode` | ✅ `PLAIN_E1104` | — |
+| 5 | `const { title } = props` | `resolve(props.title)`，或 `const title = () => resolve(props.title)` | ✅ `PLAIN_E1105` | — |
 | 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` | — |
-| 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ✅ `plain/no-signal-mutate` | 05 |
+| 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ✅ `PLAIN_E1106` | 05 |
 | 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` | 04（间接） |
-| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`；`t = props.title` 同样算） | `resolve(props.title)`；要响应式就写成 thunk | ✅ `plain/no-props-snapshot` | 06 |
+| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`；`t = props.title` 同样算） | `resolve(props.title)`；要响应式就写成 thunk | ✅ `PLAIN_E1107`/`PLAIN_E1112` | 06 |
 | 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ✅ `PLAIN_E1007` | 07 |
-| 11 | `effect(async () => { await … })` | 依赖收集在第一个 `await` 之后失效：把 `await` 提到 `effect` 外，或用 `resource()` | ✅ `plain/no-async-effect` | — |
-| 12 | `effect(() => count.set(count() + 1))`（读了又写同一个 signal） | 派生值用 `computed(fn)`；`effect` 里只写「没读过」的 signal | ✅ `plain/no-effect-loop` | — |
-| 13 | `computed(() => { s.set(…) })` | `computed` 必须是纯函数，副作用放 `effect` | ✅ `plain/no-computed-side-effect` | — |
-| 14 | `resolve(props.onClick)`（`on*` 事件 prop 不能 resolve） | `props.onClick(...)`：编译器不给 `on*` 包 getter，传进来的就是函数，`resolve` 会把它当场调用 | ✅ `plain/no-resolve-event-prop`（可自动修） | — |
+| 11 | `effect(async () => { await … })` | 依赖收集在第一个 `await` 之后失效：把 `await` 提到 `effect` 外，或用 `resource()` | ✅ `PLAIN_E1109` | — |
+| 12 | `effect(() => count.set(count() + 1))`（读了又写同一个 signal） | 派生值用 `computed(fn)`；`effect` 里只写「没读过」的 signal | ✅ `PLAIN_E1110` | — |
+| 13 | `computed(() => { s.set(…) })` | `computed` 必须是纯函数，副作用放 `effect` | ✅ `PLAIN_E1111` | — |
+| 14 | `resolve(props.onClick)`（`on*` 事件 prop 不能 resolve） | `props.onClick(...)`：编译器不给 `on*` 包 getter，传进来的就是函数，`resolve` 会把它当场调用 | ✅ `PLAIN_E1108`（可自动修） | — |
 | 15 | JSX 属性展开 `{...expr}` | 展开成显式属性：展开只做半套（不进响应式 + 绕过 class / style / value），会静默跑错 | ✅ `PLAIN_E1008` | — |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
@@ -53,12 +53,19 @@
 > 关于第 8 条：编译器只报「本文件里确实绑定了、但不在函数体内」的名字。
 > 全局对象（`process` / `Math` / `fetch` …）不在判定范围内 —— 不去猜全局，是为了不误报。
 >
+> 第 8 条还有一条**应用级约束**：`server()` 函数名在整个应用里必须唯一。清单是单文件
+> （`.plain/server.mjs`），多入口 / 多模块下同名会被**构建期拦下并报冲突**（点名两处来源），
+> 而不是静默互相覆盖。Vite 的多入口 / 分包配置照常透传，框架不介入。
+>
 > 关于第 12 条：只报**没有条件闸门**的自触发（`if (c() > 10) c.set(0)` 这种钳位会在
 > 第二轮收敛，不报）；回调定义在别处（`effect(load)`）看不出是不是 async / 纯的，也不猜。
 > 已知边界：表达式形式的自我收敛写法（`count.set(Math.min(count() + 1, 10))`）看不出闸门，
 > 会被报成死循环 —— 确认是规则判断错了，用第 4.1 节的抑制指令，不要绕开规则。
 
 ## 4. 错误码
+
+**一套编号**：编译器、lint、构建期共用 `PLAIN_Exxxx`，数字自带分类 ——
+`E10xx` 编译器内部 · `E11xx` lint（可抑制）· `E2xxx` 构建期闸门。
 
 | 码 | 含义 | 你该做什么 |
 | --- | --- | --- |
@@ -70,7 +77,21 @@
 | `PLAIN_E1006` | `server()` 的函数体引用了外部变量 | 在函数体内自己获取，或改成参数传入（闭包不会跟到服务端） |
 | `PLAIN_E1007` | `server()` 的调用参数无法 JSON 序列化 | 只传数据；把函数 / 校验逻辑写进 `server()` 函数体 |
 | `PLAIN_E1008` | JSX 属性展开 `{...expr}` | 展开成显式属性（展开只做半套，会静默跑错） |
+| `PLAIN_E1101` | 直接给 signal 变量赋值 | 改成 `.set(…)`（可自动修） |
+| `PLAIN_E1102` | JSX 里把 signal 当值用 | 补上调用 `()`（可自动修） |
+| `PLAIN_E1103` | React 肌肉记忆（`useState` 等） | 换 `signal` / `effect` / `computed` |
+| `PLAIN_E1104` | `innerHTML` / `outerHTML` | 用 `{expr}` 插值 / `createTextNode`（安全红线） |
+| `PLAIN_E1105` | 解构 props | `resolve(props.title)`，或写成 thunk |
+| `PLAIN_E1106` | 就地对 signal 值做修改 | 生成新值再 `.set` |
+| `PLAIN_E1107` / `PLAIN_E1112` | props getter 被存进变量 / 忘了 `resolve` | 内联 `resolve` 或 thunk（两码同一条规则的不同形态） |
+| `PLAIN_E1108` | `resolve(props.onClick)` | 去掉 `resolve` → `props.onClick`（可自动修） |
+| `PLAIN_E1109` | `effect(async () => …)` | 把 `await` 提到 `effect` 外，或用 `resource()` |
+| `PLAIN_E1110` | `effect` 自触发 | 派生值用 `computed`；`effect` 里只写没读过的 signal |
+| `PLAIN_E1111` | `computed` 里写 signal | `computed` 必须纯，副作用放 `effect` |
 | `PLAIN_E2001` | 契约检查未通过 | 跑 `npx plaindev check --fix <dir>` 自动修，再重新构建 |
+
+> `E11xx` 每条还带一个可读短名（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`。
+> 旧写法 `plain/no-props-snapshot` 在抑制指令里仍被接受（向后兼容），但输出统一走新码。
 
 错误对象带 `code` / `file` / `line` / `column` / `hint`，`JSON.stringify(error)` 可直接读，不用正则去刮 message。
 
@@ -81,10 +102,10 @@
 而不是把规则关掉、也不是为了过构建而把代码写扭曲：
 
 ```js
-// plain-ignore-next-line plain/no-effect-loop
+// plain-ignore-next-line PLAIN_E1110
 effect(() => count.set(Math.min(count() + 1, 10)));
 
-const t = props.title; // plain-ignore-line plain/no-props-snapshot
+const t = props.title; // plain-ignore-line PLAIN_E1112
 ```
 
 - 两种写法：`plain-ignore-line`（同一行）与 `plain-ignore-next-line`（下一行），`//` 与 `/* */` 都认。
@@ -119,6 +140,8 @@ npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE �
 | `src/compiler/` | TSX → 建 DOM 代码、服务端清单、契约提取、sourcemap |
 | `src/vite/` | Vite 插件：契约检查 → 类型剥离 → 编译 → `server()` 剥离 → HMR 注入 → 回传 sourcemap |
 | `src/lint.ts` | 契约检查与自动修复（反模式目录 1–5、7、9、11–13 的执行者） |
+| `src/errors.ts` | **错误码唯一来源**：`ERROR_CATALOG` 登记码 / 短名 / 可否抑制 / 说明；映射查询与抑制匹配 |
+| `src/testing/` | `plain/testing` 官方测试工具包（`render` / `fireEvent` / `flush`），独立子路径、非冻结 API |
 | `src/cli/` | `plaindev` |
 | `test/` | 测试（跑的是 `dist/`，不是 `src/`） |
 | `eval/` | AI 正确率评测：任务 + 验收断言 + 指标 |

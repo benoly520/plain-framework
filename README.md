@@ -39,7 +39,7 @@ mount("#app", App());
 - [边界与已知限制](#边界与已知限制)
 - [测试与质量](#测试与质量)
 - [常见场景配方 docs/patterns.md](docs/patterns.md)
-- [路线图 ROADMAP.md](ROADMAP.md) ｜ [给 AI 代理的说明 AGENTS.md](AGENTS.md) ｜ [AI 正确率评测 eval/](eval/README.md)
+- [路线图 ROADMAP.md](ROADMAP.md) ｜ [给 AI 代理的说明 AGENTS.md](AGENTS.md) ｜ [AI 正确率评测 eval/](eval/README.md) ｜ [安全说明 SECURITY.md](SECURITY.md)
 
 ---
 
@@ -227,10 +227,12 @@ function Card(props) {
 而不是悄悄丢掉其中一个。原因：keyed 复用下行只构建一次，回调捕获的 index 无法随位置更新，
 两者同时生效必然有一个语义是错的 —— 而**静默的语义降级**恰恰是本框架最想消灭的失败模式。
 
-### 编译错误码
+### 错误码（一套）
 
-编译期错误都带机器可读信息，便于 IDE / CI / AI 直接消费：
+编译器、lint、构建期**共用同一套** `PLAIN_Exxxx` 编号 —— 机器只需记一套前缀。
 `error.code` / `error.file` / `error.line` / `error.column` / `error.hint`，`JSON.stringify(error)` 即可拿到。
+
+编号自带分类：`E10xx` 编译器内部 · `E11xx` lint（可抑制）· `E2xxx` 构建期闸门。
 
 | 错误码 | 含义 |
 | --- | --- |
@@ -247,26 +249,29 @@ function Card(props) {
 **契约检查默认接在构建链路里**（`plainPlugin({ lint: "warn" | false })` 可调），
 所以下面那些 AI 常见错误会让**构建失败**，而不是拖到运行时才炸：
 
-| 契约规则 | 拦截的写法 | 能否自动修 |
+| 契约规则（错误码） | 拦截的写法 | 能否自动修 |
 | --- | --- | --- |
-| `plain/signal-assign` | `count = 1` | ✅ 改成 `count.set(1)` |
-| `plain/signal-not-called` | `{count}` / `checked={done}` | ✅ 补上调用 |
-| `plain/react-habit` | `useState` / `useEffect` / … | ❌ 语义不同，只报错 |
-| `plain/no-inner-html` | `el.innerHTML = …` | ❌ 安全红线，只报错 |
-| `plain/no-props-destructure` | `const { title } = props` / `function Card({ title })` | ❌ 两种改法语义不同，只报错 |
-| `plain/no-props-snapshot` | `const t = props.title` / `{props.title}` / `let t; t = props.title` | ❌ 内联 resolve 与 thunk 语义不同，只报错 |
-| `plain/no-signal-mutate` | `items().push(x)` / `todos()[0].done = true` / `const a = items(); a.push(x)` | ❌ 只报错 |
-| `plain/no-async-effect` | `effect(async () => { await … })` | ❌ 依赖收集在 await 后失效，只报错 |
-| `plain/no-effect-loop` | `effect(() => count.set(count() + 1))` | ❌ 自触发会栈溢出，只报错（钳位写法不报） |
-| `plain/no-computed-side-effect` | `computed(() => { s.set(…) })` | ❌ 派生值必须纯，只报错 |
-| `plain/no-resolve-event-prop` | `resolve(props.onClick)` | ✅ 去掉 resolve → `props.onClick` |
+| `PLAIN_E1101` | `count = 1` | ✅ 改成 `count.set(1)` |
+| `PLAIN_E1102` | `{count}` / `checked={done}` | ✅ 补上调用 |
+| `PLAIN_E1103` | `useState` / `useEffect` / … | ❌ 语义不同，只报错 |
+| `PLAIN_E1104` | `el.innerHTML = …` | ❌ 安全红线，只报错 |
+| `PLAIN_E1105` | `const { title } = props` / `function Card({ title })` | ❌ 两种改法语义不同，只报错 |
+| `PLAIN_E1106` | `items().push(x)` / `todos()[0].done = true` / `const a = items(); a.push(x)` | ❌ 只报错 |
+| `PLAIN_E1107` / `PLAIN_E1112` | `const t = props.title` / `{props.title}` / `let t; t = props.title` | ❌ 内联 resolve 与 thunk 语义不同，只报错 |
+| `PLAIN_E1108` | `resolve(props.onClick)` | ✅ 去掉 resolve → `props.onClick` |
+| `PLAIN_E1109` | `effect(async () => { await … })` | ❌ 依赖收集在 await 后失效，只报错 |
+| `PLAIN_E1110` | `effect(() => count.set(count() + 1))` | ❌ 自触发会栈溢出，只报错（钳位写法不报） |
+| `PLAIN_E1111` | `computed(() => { s.set(…) })` | ❌ 派生值必须纯，只报错 |
+
+> 每个码还有一个**可读短名**（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`；
+> 旧写法 `plain/no-props-snapshot` 在抑制指令里仍被接受（向后兼容），但输出统一走新码。
 
 给 AI 代理看的完整反模式目录在 [`AGENTS.md`](AGENTS.md)。编译器侧还会拦 `server()` 的参数与返回值里字面量函数 / 本文件类实例 / Stream（`PLAIN_E1007`）。
 
 规则是启发式，确认误报时用**行级抑制指令**（只对 lint 规则生效；编译器的 `PLAIN_E*` 压不住）：
 
 ```js
-const t = props.title; // plain-ignore-line plain/no-props-snapshot
+const t = props.title; // plain-ignore-line PLAIN_E1112
 // plain-ignore-next-line
 effect(() => count.set(count() + 1));
 ```
@@ -314,6 +319,10 @@ app.use(rpcMiddleware({ manifest: ".plain/server.mjs" }));
   这是刻意设计：让「跨端的数据依赖」暴露在明面上。
 - 参数与返回值走 JSON，**不要传函数、类实例、Stream**。
 - 鉴权请在 `server()` 里自己做（它就在你的服务端进程里）。
+- **函数名在整个应用里必须唯一**。清单是单文件（`.plain/server.mjs`），多入口 / 多模块下
+  同名 `server()` 函数会被**构建期拦下并报冲突**（点名两处来源文件），而不是静默互相覆盖 ——
+  客户端 RPC 桩还在调旧名字、服务端实现却已换成另一个，是这里最贵的失败模式。
+  Vite 侧的 entry `input`、shared chunk 等打包配置照常透传，框架不介入。
 
 ---
 
@@ -384,8 +393,8 @@ plaindev mcp                        # MCP stdio server：把 check / schema 交�
 ```bash
 $ plaindev check src
 src/Counter.tsx
-  x src/Counter.tsx:8:3   [plain/signal-assign]    不能直接给 signal 变量 "count" 赋值，要用 "count.set(...)"
-  x src/Counter.tsx:14:10 [plain/signal-not-called] signal 要调用取值："{count()}"
+  x src/Counter.tsx:8:3   [PLAIN_E1101]    不能直接给 signal 变量 "count" 赋值，要用 "count.set(...)"
+  x src/Counter.tsx:14:10 [PLAIN_E1102] signal 要调用取值："{count()}"
   -> 已自动修复并写回 src/Counter.tsx
 ```
 
@@ -393,10 +402,10 @@ src/Counter.tsx
 
 | 规则 | 代码 | 自动改成 |
 | --- | --- | --- |
-| `plain/signal-assign` | `count = v` | `count.set(v)` |
-| `plain/signal-not-called` | `{count}` / `checked={done}` | `{count()}` / `checked={done()}` |
-| `plain/react-habit` | `useState(...)` | 只报错（语义不同，不能瞎改） |
-| `plain/no-inner-html` | `el.innerHTML = ...` | 只报错（安全红线） |
+| `PLAIN_E1101` | `count = v` | `count.set(v)` |
+| `PLAIN_E1102` | `{count}` / `checked={done}` | `{count()}` / `checked={done()}` |
+| `PLAIN_E1103` | `useState(...)` | 只报错（语义不同，不能瞎改） |
+| `PLAIN_E1104` | `el.innerHTML = ...` | 只报错（安全红线） |
 
 ### `schema`：给 AI / CI / IDE 的机器可读契约
 
@@ -497,11 +506,14 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（137 项，`node:test`）：
+- `test/*.test.mjs`（160+ 项，`node:test`）：
   `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
+  `errors` 统一错误码目录（唯一性 / lint 产出码都在表里 / 新旧抑制名都命中）、
   `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
-  `cli` 子命令（含 `agent-context` / `mcp` 的 wire 层）、`vite` 插件的编译 / 剥离 / 契约检查拦截、
+  `cli` 子命令（含 `agent-context` / `mcp` 的 wire 层）、`vite` 插件的编译 / 剥离 / 契约检查拦截 /
+  多入口清单冲突、
   `server`（静态托管 / 目录穿越 / RPC / 一行起服）、
+  `testing`（`plain/testing` 自己的单测 + 真编译 TSX 的端到端）、
   `keyed` 列表复用语义、`PLAIN_E1005` / `PLAIN_E1006` / `PLAIN_E1007`（参数与返回值）的诊断与不误报、
   `eval` 上下文档位、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
@@ -514,6 +526,36 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 - 「JSX 属性里的 signal 漏调用」—— `autofix` 区间重叠会把源码改坏（`done()` → `done()()`）的回归点
 - 「多个文件各自有 `server()`」—— 服务端清单增量更新产出重复 `const` 声明的回归点
 - 「sourcemap 少算一行占位」—— helper import 行会让后续映射整体错位一行的回归点
+
+### 官方测试工具包（`plain/testing`）
+
+Plain 的产物是**纯 DOM**（无虚拟 DOM），所以测组件就是「挂进真实容器 → 点它 → 读它产出的 DOM」。
+`plain/testing` 把这几件事收成一组零依赖 API，**不引 @testing-library**（它靠可访问性角色 +
+语义查询，对直接产 DOM 的框架是过度设计）。
+
+```ts
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { render, fireEvent, expectText } from "plain/testing";
+import { Counter } from "./Counter.js";
+
+test("点一次加一", () => {
+  const ui = render(Counter);            // 挂进全新容器，返回查询/解挂 API
+  expectText(ui, "add0");                // 失败信息带实际文本 + HTML
+  fireEvent.click(ui.get("button"));     // 事件里的 signal 写入同步 flush
+  expectText(ui, "add1");
+  ui.unmount();                          // 回收 effect + 移除容器
+});
+```
+
+`render()` 返回 `container` / `html()` / `text()` / `get()` / `query()` / `queryAll()` /
+`getByText()` / `queryByText()` / `unmount()`；`fireEvent` 覆盖 `click` / `input(value)` /
+`change(value)` / `submit` / `focus` / `blur` / `keyDown` / `keyUp` / `fire(type)`。
+因为 `signal.set` 本就同步 flush，`fireEvent` 之后 DOM 已是最终态 —— **不需要 await**；
+异步数据（`resource`）用 `await flush()` 等微任务。
+
+测试环境要先有 DOM（推荐 `jsdom`）。`render()` 在缺 DOM 时抛**带安装指引**的错，不会丢个
+`document is not defined` 让你猜。
 
 ### AI 正确率评测（`eval/`）
 

@@ -5,22 +5,29 @@
 // 不做正则瞎替换，所以不会误伤多行声明。
 
 import ts from "typescript";
+import {
+  isSuppressed,
+  parseSuppressionCodes,
+  type PlainErrorCode,
+} from "./errors.js";
 
 export interface LintIssue {
   line: number;
   column: number;
   level: "error" | "warn";
-  code: string;
+  /** 统一错误码，如 `PLAIN_E1107`；与编译器 / 构建期码同一套编号 */
+  code: PlainErrorCode;
   message: string;
   fix?: { start: number; end: number; text: string };
 }
 
 /**
  * 抑制指令：行级，和 CLI 报出来的行号一一对应。
- *   count = 1;                                   // plain-ignore-line plain/signal-assign
+ *   count = 1;                                   // plain-ignore-line PLAIN_E1101
  *   // plain-ignore-next-line
  *   effect(() => count.set(count() + 1));
  * 不写规则码时抑制该行全部 lint 规则（多码用空格分隔）。
+ * 规则码既可写新码 `PLAIN_E1107`，也可写旧名 `plain/no-props-snapshot`（向后兼容）。
  * 只对 lint 规则生效 —— 编译器的 PLAIN_E* 是硬错（产物必坏），不接受抑制。
  */
 const DIRECTIVE_TEXT = /^\s*plain-ignore-(next-line|line)\b([^\n]*)/;
@@ -62,7 +69,7 @@ export function collectIgnores(source: string): Map<number, Set<string>> {
     const inner = source.slice(start + 2, multi ? end - 2 : end);
     const m = inner.match(DIRECTIVE_TEXT);
     if (!m) continue;
-    const codes = (m[2] || "").match(/plain\/[a-z-]+/g) || [];
+    const codes = parseSuppressionCodes(m[2] || "");
     const newlines = (inner.match(/\n/g) || []).length;
     const target = m[1] === "next-line" ? from + newlines + 1 : from;
     map.set(target, new Set(codes));
@@ -96,13 +103,13 @@ export function check(
   // 反模式 7 与「signal 读取结果存进变量」的交叉点：先存后改也要拦
   const aliases = collectSignalAliases(sf, signals);
   const ignores = collectIgnores(source);
-  const add = (node: ts.Node, level: "error" | "warn", code: string, message: string, fix?: { start: number; end: number; text: string }) => {
+  const add = (node: ts.Node, level: "error" | "warn", code: PlainErrorCode, message: string, fix?: { start: number; end: number; text: string }) => {
     const { line, character } = sf.getLineAndCharacterOfPosition(
       node.getStart(sf)
     );
     // 抑制指令按「报错行」匹配：CLI 打印的行号可以直接复制粘贴成指令所在行
     const allow = ignores.get(line + 1);
-    if (allow && (allow.size === 0 || allow.has(code))) return;
+    if (allow && isSuppressed(allow, code)) return;
     issues.push({
       line: line + 1,
       column: character + 1,
@@ -126,7 +133,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/signal-assign",
+        "PLAIN_E1101",
         `不能直接给 signal 变量 "${node.left.text}" 赋值，要用 "${node.left.text}.set(...)"`,
         {
           start: node.getStart(sf),
@@ -151,7 +158,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/signal-not-called",
+        "PLAIN_E1102",
         `signal 要调用取值："{${node.expression.text}()}"`,
         {
           start: node.expression.getStart(sf),
@@ -175,7 +182,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/signal-not-called",
+        "PLAIN_E1102",
         `属性里的 signal 要调用取值："{${id.text}()}"`,
         {
           start: id.getStart(sf),
@@ -192,7 +199,7 @@ export function check(
         add(
           node,
           "error",
-          "plain/react-habit",
+          "PLAIN_E1103",
           `Plain 没有 ${n}：状态用 signal()，副作用用 effect()，派生值用 computed()`
         );
       }
@@ -209,7 +216,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/no-inner-html",
+        "PLAIN_E1104",
         "禁止 innerHTML / insertAdjacentHTML：用 createTextNode / {expr} 插值"
       );
     }
@@ -222,7 +229,7 @@ export function check(
       ts.isObjectBindingPattern(node.name) &&
       isComponentPropsBinding(node)
     ) {
-      add(node, "error", "plain/no-props-destructure", propsDestructureMessage(node));
+      add(node, "error", "PLAIN_E1105", propsDestructureMessage(node));
     }
 
     // 反模式 7：对 signal 持有值就地改：items().push(x) / items()[0] = x
@@ -233,7 +240,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/no-signal-mutate",
+        "PLAIN_E1106",
         `不要就地修改 signal 的值（"${node.getText(sf)}"，signal 是 ${name}）：` +
           `请生成新值再 set，例如 ${name}.set([...${name}(), x])`
       );
@@ -257,7 +264,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/no-props-snapshot",
+        "PLAIN_E1112",
         snapshotMessage(node.name.text, propsAccessText(node.initializer))
       );
     }
@@ -277,7 +284,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/no-props-snapshot",
+        "PLAIN_E1112",
         snapshotMessage(node.left.text, propsAccessText(node.right))
       );
     }
@@ -297,7 +304,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/no-props-snapshot",
+        "PLAIN_E1112",
         `JSX 里的动态 props 要用 resolve："{resolve(${access})}"（直接写 {${access}} 拿到的是 getter 本身）`
       );
     }
@@ -311,7 +318,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/no-resolve-event-prop",
+        "PLAIN_E1108",
         `不要 resolve on* 事件 prop（"${node.getText(sf)}"）：` +
           `编译器不给 on[A-Z] 的 prop 包 getter，传进来的就是函数本身，` +
           `resolve(...) 会把它当场调用。直接写 ${arg.getText(sf)}(...)`,
@@ -327,7 +334,7 @@ export function check(
       add(
         node,
         "error",
-        "plain/no-async-effect",
+        "PLAIN_E1109",
         "不要在 effect 里用 async：依赖收集在第一个 await 之后就失效了（后续读到的 signal 不会订阅）。" +
           "把 await 提到 effect 外，或用 resource(() => …) 承载异步"
       );
@@ -340,7 +347,7 @@ export function check(
         add(
           node,
           "error",
-          "plain/no-effect-loop",
+          "PLAIN_E1110",
           `effect 里把 "${loop}()" 读出来又写回 "${loop}"，会自触发死循环：` +
             `派生值用 computed(() => …)，或在 effect 里只写「没读过」的 signal`
         );
@@ -355,7 +362,7 @@ export function check(
         add(
           node,
           "error",
-          "plain/no-computed-side-effect",
+          "PLAIN_E1111",
           `computed 里不要写 signal（"${written}.set(…)"）：派生值必须是纯函数，副作用放 effect 里`
         );
       }

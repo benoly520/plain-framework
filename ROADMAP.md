@@ -156,7 +156,9 @@ SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式
 - **误报的出口** ✅ 已落地：行级抑制指令 `plain-ignore-line` / `plain-ignore-next-line`
   （只作用于 lint 规则；编译器的 `PLAIN_E*` 是硬错，不可抑制），`plaindev check`
   会把抑制处数报出来，避免它变成静音开关。
-- **错误码统一**：`lint` 用 `plain/*`、编译器用 `PLAIN_E*`，两套并存，应收敛到一套。
+- **错误码统一** ✅ 已落地：lint 与编译器**共用一套 `PLAIN_Exxxx`**（`E10xx` 编译器内部 /
+  `E11xx` lint 可抑制 / `E2xxx` 构建期），单一事实来源 `src/errors.ts` 的 `ERROR_CATALOG`；
+  旧名 `plain/<rule>` 在抑制指令里仍被接受（向后兼容），输出统一走新码。详见 CHANGELOG。
 - **补齐目录里标 ❌ 的静态检查**（按价值排序）✅ 已落地：
   1. `const t = props.title` → `plain/no-props-snapshot`
   2. 对 signal 持有值就地改（`items().push(x)`）→ `plain/no-signal-mutate`
@@ -176,7 +178,7 @@ SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式
 - [x] MCP server 可被 AI IDE 连上，暴露 `schema` / `check` 两个工具
       （工具名 `plain_check` / `plain_schema`；wire 层已有脚本化会话测试，
       **真实 IDE 连通性尚未外部验证** —— 不在本仓自证范围内）
-- [ ] 编译器与 lint 使用同一套错误码前缀
+- [x] 编译器与 lint 使用同一套错误码前缀（`PLAIN_Exxxx`，见 `src/errors.ts`）
 
 ## M7 —— 生态与合规
 
@@ -184,15 +186,34 @@ SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式
   `package.json`（`SEE LICENSE IN LICENSE` → `MIT`）与 README「许可证」章节同步。
   原决策二选一（MIT / Apache-2.0）选了 MIT —— 与 JS 生态默认一致，采用摩擦最小；
   企业支持 / 商业合作降级为**可选增值项**，不再作为采用的前置条件。
-- 多入口 / 代码分割验证（当前只验证了单入口）
+- 多入口 / 代码分割 —— **拆成两半，边界说清**（此前一条笼统写「只验证了单入口」，容易误导）：
+  - **打包侧（非目标，框架不揽）**：多个 HTML 入口、`rollupOptions.input`、shared chunk 抽取、
+    `splitVendorChunk` 等，纯属 Vite/Rollup 配置，透传即可。框架不写这条的文档、也不实现。
+  - **框架侧（真问题，已根因定位）**：
+    1. **`server()` 清单是单文件**（`serverEntry` 单一 `.plain/server.mjs`）——多入口 / 多构建
+       时服务函数会写进同一个文件互相覆盖。 ✅ **已落地**：跨文件同名在构建期抛错并点名两处
+       来源（`assertNoNameCollision` + vite 插件按来源查重），同文件热更新不误报。
+    2. **懒加载子树**：`dynamic import()` 进来的 Plain 模块同样要能被 `__plainBeginModule(id)`
+       打标并注册 HMR（当前只在静态模块求值时打标）。
+    - **已排除的伪问题**：「同页多棵独立 App 根」不会串味 —— 认领游标按 `hydrate` 的
+      `container` 走，天然隔离（已用最小复现验证）。原先担心的「锚点 `plain-` 前缀冲突」不成立。
 - RPC 请求合并 / 防抖
-- 官方测试工具包（`render()` / `fireEvent` 之类）
-- `SECURITY.md`；Vite 插件里 `new Function` 求值 server 函数体的 CSP 问题
+- 官方测试工具包（`render()` / `fireEvent` 之类）✅ 已落地：`plain/testing` 独立子路径、零依赖 ——
+  `render`（挂载 + DOM 查询 + 干净解挂）/ `fireEvent`（click / input / change / submit / 键盘 /
+  自定义）/ `flush` / `expectText`；缺 DOM 时报带安装指引的错。测试与文档齐。
+- `SECURITY.md` ✅ 已落地：安全模型（`server()` 物理剥离 / 产物无 `innerHTML` / 运行时零 `eval`）、
+  CSP 影响（dev RPC 的 `new Function` 仅 dev，**build 已改为不求值函数体**）、已知边界与报告方式。
+  Vite 插件的 `new Function` 只在 dev 生效 —— 生产 CSP 无需 `unsafe-eval`。
 
 **验收标准**
 
 - [x] LICENSE 决策落地并同步 README
-- [ ] 一个多入口示例通过 `plaindev build` 并在浏览器跑通
+- [x] 验证「同页多棵 App 根」是否有锚点/游标串味 —— 结论：**不串味**（认领游标按容器隔离）
+- [x] `server()` 清单在多入口下按入口隔离（附「两个入口各有 `server()` 函数、互不覆盖」的测试）
+      —— 结论：同名跨文件在构建期报冲突（点名来源），不同名各自保留；同文件热更新替换函数体
+- [x] `SECURITY.md` 落地（安全模型 / CSP / 边界 / 报告方式），并把构建期 `new Function` 收敛到 dev
+- [x] 官方测试工具包 `plain/testing` 落地（`render` / `fireEvent` / `flush`），有测试与文档
+- [ ] 动态 `import()` 的 Plain 模块能注册 HMR 并热替换（附测试）
 
 ---
 

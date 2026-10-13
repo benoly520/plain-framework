@@ -7,6 +7,73 @@
 
 ### 新增
 
+- **`plain/testing` 官方测试工具包**（零依赖，独立子路径，不并入冻结的运行时 API 面）：
+  - `render(Component)` —— 挂进全新容器，返回 `container` / `html()` / `text()` /
+    `get()` / `query()` / `queryAll()` / `getByText()` / `queryByText()` / `unmount()`；
+    用 scope 兜住卸载，组件 effect 不串到下一个用例。
+  - `fireEvent` —— `click` / `input(value)` / `change(value)` / `submit` / `focus` /
+    `blur` / `keyDown` / `keyUp` / `fire(type)`，派发真实 DOM 事件并把回调里的 signal
+    写入合并成一轮刷新（`signal.set` 本就同步 flush，调用方无需 await）。
+  - `flush()` —— 等微任务（给 `resource` 这类异步）；`expectText(ui, s)` —— 失败信息带
+    实际文本与 HTML。
+  - 缺 DOM 环境时抛**带安装指引**的错，而非 `document is not defined`。
+  - 测试：`test/testing.test.mjs`（含真编译 TSX 的端到端 + 各事件变体）；覆盖率 100%。
+  - 文档：README「官方测试工具包」小节。
+
+- **`SECURITY.md`**：写清安全模型与边界 —— `server()` 编译期物理剥离、产物不生成 `innerHTML`、
+  运行时零 `eval` / `new Function`（生产 CSP 无需 `unsafe-eval`）；dev RPC 中间件的
+  `new Function` 只在 dev 生效；鉴权 / 限流不在框架职责内的说明；以及漏洞报告方式。
+  同步：**build 阶段不再求值 server 函数体**（此前 transform 在构建时也会 `new Function`
+  求值一遍，只为填充 registry）—— 清单只需要函数体文本，少一处构建期 `new Function`，
+  CSP 面更小、也避免构建机执行到只该跑在服务端运行时的代码。dev 仍求值（`/_plain/rpc` 需要），
+  且不依赖调用顺序（`configureServer` 会补求值已登记的 body）。
+
+### 修复
+
+- **`server()` 清单的多入口隔离**：`.plain/server.mjs` 是单文件清单，此前多入口 / 多模块下
+  **同名 `server()` 函数会静默互相覆盖** —— 客户端 RPC 桩还在调旧名字，服务端实现却已换成
+  另一个（最贵的「静默语义降级」）。现在：
+  - Vite 插件为每个 server 函数记录**来源模块**，跨文件同名时**构建期抛错**并点名两处来源路径；
+    同一文件重复 transform（HMR）不算冲突，函数体按最新版本替换。
+  - `src/compiler/manifest.ts` 新增 `assertNoNameCollision`：`renderServerManifest` 写盘前查重，
+    同名且来源不同（或来源都未知）即拒绝，避免任何一条静默覆盖路径。
+  - 边界同时写清：Vite 的多入口 entry / shared chunk / `splitVendorChunk` 等属**打包侧配置**，
+    框架透传不介入；框架侧只解决「单文件清单同名覆盖」这一个真问题。
+  - 测试：`test/vite-plugin.test.mjs`（跨文件冲突抛错 / 不同名各自保留 / 同文件热更新）+
+    `test/server.test.mjs`（`assertNoNameCollision` 三种情形）；`manifest.ts` 覆盖率 100%。
+
+### 变更（破坏性）
+
+- **错误码收敛到一套 `PLAIN_Exxxx`**：此前 lint 用字符串规则码（`plain/no-props-snapshot`）、
+  编译器用 `PLAIN_E1005` 这类码，两套并存 —— 机器要记两套前缀、IDE / CI / AI 也得写两套匹配。
+  现在 **编译器 / lint / 构建期共用一套编号**，数字自带分类：
+  `E10xx` 编译器内部 · `E11xx` lint（可抑制）· `E2xxx` 构建期闸门。
+  新增单一事实来源 [`src/errors.ts`](src/errors.ts)：`ERROR_CATALOG` 一处登记码 / 短名 /
+  可否抑制 / 说明，lint 规则从表里反查短名，杜绝两处各写各的。映射：
+
+  | 旧规则码 | 新错误码 |
+  | --- | --- |
+  | `plain/signal-assign` | `PLAIN_E1101` |
+  | `plain/signal-not-called` | `PLAIN_E1102` |
+  | `plain/react-habit` | `PLAIN_E1103` |
+  | `plain/no-inner-html` | `PLAIN_E1104` |
+  | `plain/no-props-destructure` | `PLAIN_E1105` |
+  | `plain/no-signal-mutate` | `PLAIN_E1106` |
+  | `plain/no-props-snapshot`（保留初值形态） | `PLAIN_E1107` |
+  | `plain/no-resolve-event-prop` | `PLAIN_E1108` |
+  | `plain/no-async-effect` | `PLAIN_E1109` |
+  | `plain/no-effect-loop` | `PLAIN_E1110` |
+  | `plain/no-computed-side-effect` | `PLAIN_E1111` |
+  | `plain/no-props-snapshot`（赋值 / JSX 形态） | `PLAIN_E1112` |
+
+  **兼容**：`plain-ignore-line` / `plain-ignore-next-line` 里的旧名 `plain/<rule>`
+  仍被接受（`parseSuppressionCodes` 新旧都收，`isSuppressed` 经短名映射命中），
+  但 CLI / vite 插件 / MCP 的输出统一走新码。`src/errors.ts` 的 `LINT_RULE_CODES` /
+  `ruleNameOf` / `codeOfRule` / `legacyCode` 为工具链提供映射查询。
+  测试见 `test/errors.test.mjs`（目录唯一性、lint 产出码都在表里、新旧抑制名都能命中）。
+
+### 新增
+
 - **HMR 热更新（M4 落地）**：`src/runtime/hmr.ts` 提供挂载点注册表与热替换内核；
   `src/vite/index.ts` 在 dev（`watchMode`）下为每个模块注入 `import.meta.hot.accept`，
   `handleHotUpdate` 让改动走 accept 管道而**不整页刷新**。改组件时只重建它产出的

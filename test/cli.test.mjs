@@ -65,7 +65,7 @@ test("check --no-fix：报错但不改文件，退出码 1", () => {
   const file = write(dir, "Bad.tsx", BAD);
   const r = runCli(["check", dir, "--no-fix"]);
   assert.equal(r.status, 1);
-  assert.match(r.stdout, /plain\/signal-assign/);
+  assert.match(r.stdout, /PLAIN_E1101/);
   assert.equal(fs.readFileSync(file, "utf8"), BAD, "文件不应被修改");
 });
 
@@ -112,7 +112,7 @@ test("agent-context：打印给 AI 的精简上下文（内容来自 AGENTS.md�
   const r = runCli(["agent-context"]);
   assert.equal(r.status, 0);
   assert.match(r.stdout, /反模式目录/);
-  assert.match(r.stdout, /plain\/no-signal-mutate/);
+  assert.match(r.stdout, /PLAIN_E1106/);
   assert.match(r.stdout, /PLAIN_E1007/);
   // 第 6 节之后是给框架维护者的，不该注入给应用作者
   assert.ok(!r.stdout.includes("仓库地图"), "应切掉维护者章节");
@@ -127,12 +127,12 @@ test("agent-context --write：落盘 AGENTS.md / copilot / cursor，且不覆盖
   // AGENTS.md 是跨工具标准，落盘的第一目标就是它自己
   const agents = fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8");
   assert.match(agents, /反模式目录/);
-  assert.match(agents, /plain\/no-signal-mutate/);
+  assert.match(agents, /PLAIN_E1106/);
   assert.ok(!agents.includes("仓库地图"), "不注入给维护者看的章节");
 
   const copilot = path.join(dir, ".github", "copilot-instructions.md");
   assert.ok(fs.existsSync(copilot), "应创建 .github 目录");
-  assert.match(fs.readFileSync(copilot, "utf8"), /plain\/no-effect-loop/);
+  assert.match(fs.readFileSync(copilot, "utf8"), /PLAIN_E1110/);
 
   const cursor = path.join(dir, ".cursor", "rules", "plain.mdc");
   assert.match(
@@ -177,7 +177,7 @@ test("check 报出被抑制的行数：抑制不该是隐形的", () => {
     [
       "import { signal } from 'plain';",
       "const count = signal(0);",
-      "count = count() + 1; // plain-ignore-line plain/signal-assign",
+      "count = count() + 1; // plain-ignore-line plain/signal-assign", // 旧名仍可抑制
       "",
     ].join("\n")
   );
@@ -253,7 +253,7 @@ test("mcp：initialize / tools/list / tools/call（stdio JSON-RPC）", () => {
   );
   assert.deepEqual(pong.result, {});
   assert.match(bad.result.content[0].text, /契约检查未通过/);
-  assert.match(bad.result.content[0].text, /plain\/signal-assign/);
+  assert.match(bad.result.content[0].text, /PLAIN_E1101/);
   assert.equal(bad.result.isError, undefined, "检查没通过不是工具错误");
   assert.match(good.result.content[0].text, /契约检查通过/);
   assert.equal(unknown.result.isError, true);

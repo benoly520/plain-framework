@@ -118,12 +118,90 @@ test("[回归] 多次增量 transform 后，清单仍是可被 Node 导入的合
   assert.equal(await prodMod.handle("a"), 1);
 });
 
+test("多入口：不同模块的同名 server() 函数必须报冲突，而不是静默覆盖", async () => {
+  const root = tmpRoot();
+  const p = plugin();
+  p.configResolved({ root });
+  // 两个入口各自定义了同名的 load() —— 单文件清单下会互相覆盖
+  await p.transform("export const load = server(() => 'A');", path.join(root, "a.tsx"));
+  await assert.rejects(
+    () =>
+      p.transform("export const load = server(() => 'B');", path.join(root, "b.tsx")),
+    (err) => {
+      assert.match(err.message, /server\(\) 函数名冲突/);
+      assert.match(err.message, /"load"/);
+      // 必须把两个来源文件都点出来，作者才知道改哪个
+      assert.match(err.message, /a\.tsx/);
+      assert.match(err.message, /b\.tsx/);
+      return true;
+    },
+    "跨文件同名应抛错"
+  );
+});
+
+test("多入口：不同名 server() 函数各自保留，互不覆盖", async () => {
+  const root = tmpRoot();
+  const p = plugin();
+  p.configResolved({ root });
+  await p.transform("export const loadA = server(() => 'A');", path.join(root, "a.tsx"));
+  await p.transform("export const loadB = server(() => 'B');", path.join(root, "b.tsx"));
+  p.buildEnd();
+
+  const mod = await import(
+    pathToFileURL(manifestOf(root)).href + `?t=multi${Date.now()}`
+  );
+  assert.deepEqual(Object.keys(mod.__plainHandlers).sort(), ["loadA", "loadB"]);
+  assert.equal(await mod.handle("loadA"), "A");
+  assert.equal(await mod.handle("loadB"), "B");
+});
+
+test("同一文件重新 transform（HMR）不算冲突：函数体被更新为最新版本", async () => {
+  const root = tmpRoot();
+  const p = plugin();
+  p.configResolved({ root });
+  const f = path.join(root, "s.tsx");
+  await p.transform("export const load = server(() => 1);", f);
+  // 同文件改动：应替换而非报冲突
+  await p.transform("export const load = server(() => 2);", f);
+  p.buildEnd();
+
+  const mod = await import(
+    pathToFileURL(manifestOf(root)).href + `?t=hmrc${Date.now()}`
+  );
+  assert.deepEqual(Object.keys(mod.__plainHandlers), ["load"]);
+  assert.equal(await mod.handle("load"), 2, "同文件热更新应替换函数体");
+});
+
 test("buildEnd 在没有 server 函数时不产生清单", async () => {
   const root = tmpRoot();
   const p = plugin();
   p.configResolved({ root });
   p.buildEnd();
   assert.ok(!fs.existsSync(manifestOf(root)));
+});
+
+test("build 模式不求值函数体（清单只要文本，构建期不执行 new Function）", async () => {
+  const root = tmpRoot();
+  const p = plugin();
+  p.configResolved({ root });
+  // 函数体里有只有在服务端运行时才该发生的副作用 —— build 不应触发它。
+  // 通过 globalThis 打点验证：build（无 watchMode）下 transform 不该执行函数体。
+  globalThis.__plainBuildSideEffect = 0;
+  await p.transform(
+    "export const probe = server(() => { globalThis.__plainBuildSideEffect++; return 1; });",
+    path.join(root, "s.tsx")
+  );
+  assert.equal(
+    globalThis.__plainBuildSideEffect,
+    0,
+    "build 阶段不应求值 server 函数体"
+  );
+  p.buildEnd();
+  // 清单里仍要有函数体文本（构建产物照常）
+  const src = fs.readFileSync(manifestOf(root), "utf8");
+  assert.match(src, /export const probe =/);
+  assert.match(src, /__plainBuildSideEffect/);
+  delete globalThis.__plainBuildSideEffect;
 });
 
 test("configureServer 注册 /_plain/rpc，POST 调用服务端函数成功", async () => {
@@ -191,8 +269,8 @@ test("[免疫系统] 默认让构建失败：AI 的典型错误在编译前就�
     () => p.transform(LINT_BAD, path.join(root, "Bad.tsx")),
     (e) => {
       assert.equal(e.code, "PLAIN_E2001", "应抛结构化编译错误");
-      assert.match(e.detail, /plain\/signal-assign/);
-      assert.match(e.detail, /plain\/signal-not-called/);
+      assert.match(e.detail, /PLAIN_E1101/);
+      assert.match(e.detail, /PLAIN_E1102/);
       assert.match(e.hint, /plaindev check --fix/);
       return true;
     }
@@ -209,7 +287,7 @@ test("lint: 'warn' 只告警不阻断；lint: false 完全关闭", async () => {
   const res = await pw.transform.call({ warn: (m) => warned.push(m) }, LINT_BAD, id);
   assert.ok(res && typeof res.code === "string", "warn 模式仍应产出代码");
   assert.equal(warned.length, 1);
-  assert.match(warned[0], /plain\/signal-assign/);
+  assert.match(warned[0], /PLAIN_E1101/);
 
   const pf = plugin({ lint: false });
   pf.configResolved({ root });
