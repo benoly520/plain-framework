@@ -9,6 +9,7 @@
 import type { Plugin } from "vite";
 import { compile, PlainCompileError } from "../compiler/index.js";
 import {
+  assertNoNameCollision,
   updateServerManifest,
   writeServerManifest,
 } from "../compiler/manifest.js";
@@ -41,7 +42,13 @@ export default function plainPlugin(options: {
     lint = "error",
     hmr = true,
   } = options;
-  const registry = new Map<string, any>(); // name -> 可执行的 server 函数
+  const registry = new Map<string, any>(); // name -> 可执行的 server 函数（仅 dev 需要）
+  /** name -> 函数体源码。清单只要文本，build 不解析函数体（见下方 transform 注释） */
+  const registryByBody = new Map<string, string>();
+  /** name -> 来源模块绝对路径。多入口下同名函数是「静默互相覆盖」的头号来源，靠它查重 */
+  const registryFrom = new Map<string, string>();
+  /** dev 下才需要把函数体求值成可调用对象（给 /_plain/rpc 用）；build 只要源码文本 */
+  let needsCallable = false;
   let root = process.cwd();
 
   // dev 下每次只合并「本文件新识别到的」函数，避免把别的模块挤掉
@@ -52,11 +59,13 @@ export default function plainPlugin(options: {
 
   // build 结束前整体重写一次，保证清单与产出完全一致
   const flushAll = () => {
-    if (!registry.size) return;
-    writeServerManifest(
-      Array.from(registry, ([name, fn]) => ({ name, body: fn.__plainBody })),
-      path.join(root, serverEntry)
-    );
+    if (!registryByBody.size) return;
+    const entries = Array.from(registryByBody, ([name, body]) => ({
+      name,
+      body,
+      from: registryFrom.get(name),
+    }));
+    writeServerManifest(entries, path.join(root, serverEntry));
   };
 
   return {
@@ -69,6 +78,13 @@ export default function plainPlugin(options: {
 
     configureServer(server: any) {
       if (options.rpc === false) return;
+      // dev 才需要可调用对象；标记后 transform 才会求值函数体
+      needsCallable = true;
+      // 不依赖调用顺序：把在 configureServer 之前已登记的 body 补求值一遍，
+      // 这样无论 transform 先来还是 configureServer 先来，RPC 都能调用到函数。
+      for (const [name, body] of registryByBody) {
+        if (!registry.has(name)) registry.set(name, evalFn(body, name));
+      }
       const handler = makeRpcHandler(registry);
       // 返回函数 => 中间件会被插到 Vite 内部中间件之前，避免被 SPA 兜底吞掉
       return () => {
@@ -81,6 +97,9 @@ export default function plainPlugin(options: {
       if (!include.test(id)) return null;
 
       const fileName = id.split("?")[0];
+      // dev（watchMode）下也要可调用对象：真实 dev 会先跑 configureServer，
+      // 但这里再兜一道，避免依赖调用顺序（HMR / 单测里 transform 可能先发生）。
+      if ((this as any).meta && (this as any).meta.watchMode) needsCallable = true;
 
       // 0) 契约检查（默认开启）：AI 常犯的错在编译前就拦掉
       if (lint) {
@@ -107,10 +126,26 @@ export default function plainPlugin(options: {
       if (result.serverFunctions.length) {
         const freshEntries: any[] = [];
         for (const fn of result.serverFunctions) {
-          const f = evalFn(fn.body, fn.name);
-          f.__plainBody = fn.body;
-          registry.set(fn.name, f);
-          freshEntries.push({ name: fn.name, body: fn.body });
+          const prevFrom = registryFrom.get(fn.name);
+          // 多入口 / 多模块下同名 server 函数会被静默合并成一条 —— 那是
+          // 最贵的失败（客户端还在调旧桩名，服务端实现已被另一个覆盖）。
+          // 同一文件重复 transform（HMR）不算冲突，只有跨文件才算。
+          if (prevFrom && prevFrom !== fileName) {
+            assertNoNameCollision([
+              { name: fn.name, body: "", from: prevFrom },
+              { name: fn.name, body: "", from: fileName },
+            ]);
+          }
+          // 清单只需要函数体文本；只有 dev 的 /_plain/rpc 需要「可调用的函数」。
+          // build 不求值 —— 少一处 new Function，CSP 面更小，也避免构建期执行到
+          // 任何非预期的代码（函数体本该只跑在服务端运行时，而不是构建机）。
+          if (needsCallable) {
+            const f = evalFn(fn.body, fn.name);
+            registry.set(fn.name, f);
+          }
+          registryByBody.set(fn.name, fn.body);
+          registryFrom.set(fn.name, fileName);
+          freshEntries.push({ name: fn.name, body: fn.body, from: fileName });
         }
         flushIncremental(freshEntries);
       }

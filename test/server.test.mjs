@@ -9,7 +9,7 @@ import path from "node:path";
 import { renderToString, renderToStringSync } from "../dist/server/render.js";
 import { installServerDOM, serializeNode } from "../dist/server/dom-shim.js";
 import { rpcMiddleware, staticMiddleware, serve } from "../dist/server/index.js";
-import { renderServerManifest } from "../dist/compiler/manifest.js";
+import { renderServerManifest, updateServerManifest } from "../dist/compiler/manifest.js";
 
 const tmpDir = (prefix = "plain-srv-") =>
   fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -242,8 +242,64 @@ test("rpcMiddleware：从 .plain/server.mjs 清单加载处理器", async () => 
   assert.equal(JSON.parse(r.body).result, "pong");
 });
 
-test("rpcMiddleware：清单缺失时给出可读的 500（而不是静默成功）", async () => {
-  const mw = rpcMiddleware({ manifest: path.join(tmpDir(), "nope.mjs") });
+test("renderServerManifest：同名 server 函数来自不同文件 -> 抛冲突错误并点名两处来源", () => {
+  assert.throws(
+    () =>
+      renderServerManifest([
+        { name: "load", body: "() => 1", from: "/app/routes/a.tsx" },
+        { name: "load", body: "() => 2", from: "/app/routes/b.tsx" },
+      ]),
+    (err) => {
+      assert.match(err.message, /函数名冲突/);
+      assert.match(err.message, /a\.tsx/);
+      assert.match(err.message, /b\.tsx/);
+      return true;
+    }
+  );
+});
+
+test("renderServerManifest：同名但同一来源（增量重复）不算冲突", () => {
+  const src = renderServerManifest([
+    { name: "load", body: "() => 1", from: "/app/a.tsx" },
+    { name: "load", body: "() => 2", from: "/app/a.tsx" },
+  ]);
+  assert.match(src, /export const load = \(\) => 2;/, "同来源取最后一条");
+});
+
+test("renderServerManifest：无来源信息的同名条目按冲突处理（兜底不静默覆盖）", () => {
+  assert.throws(
+    () =>
+      renderServerManifest([
+        { name: "load", body: "() => 1" },
+        { name: "load", body: "() => 2" },
+      ]),
+    /函数名冲突[\s\S]*未知来源/
+  );
+});
+
+test("updateServerManifest：跨文件同名的增量更新被拦下", () => {
+  const dir = tmpDir();
+  const manifest = path.join(dir, "server.mjs");
+  updateServerManifest(
+    [{ name: "load", body: "() => 1", from: "/app/a.tsx" }],
+    manifest
+  );
+  // 清单本身不携带来源，增量更新时来源信息来自调用方传入的 entries；
+  // 这里同一次调用里带上两条跨文件同名，应被 assertNoNameCollision 拦下。
+  assert.throws(
+    () =>
+      updateServerManifest(
+        [
+          { name: "x", body: "() => 1", from: "/app/a.tsx" },
+          { name: "x", body: "() => 2", from: "/app/b.tsx" },
+        ],
+        manifest
+      ),
+    /函数名冲突/
+  );
+});
+
+test("rpcMiddleware：清单缺失时给出可读的 500（而不是静默成功）", async () => {  const mw = rpcMiddleware({ manifest: path.join(tmpDir(), "nope.mjs") });
   const r = await call(mw, { method: "POST", url: "/_plain/rpc", payload: { name: "x" } });
   assert.equal(r.statusCode, 500);
   assert.match(JSON.parse(r.body).error, /找不到服务端清单/);
