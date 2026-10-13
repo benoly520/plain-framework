@@ -13,6 +13,7 @@ import {
   withOwner,
   stringify,
   resolve,
+  untracked,
 } from "./signal.js";
 
 export { resolve } from "./signal.js";
@@ -179,44 +180,94 @@ export function when(
   }, owner);
 }
 
+/** each 内部的行记录：keyed 模式下 key 用来认领同一行 */
+interface Row {
+  key: unknown;
+  rowSignal: any;
+  cleanups: Set<() => void>;
+  nodes: any[];
+}
+
 // ---------------------------------------------------------------------------
 // each —— 列表渲染：行级响应式 + 完整回收
+//
+// 两种复用策略：
+//   1) index 模式（默认，兼容旧行为）：行按位置复用，数据变化就地更新；
+//   2) keyed 模式：编译器在 JSX 顶层元素上发现 key={...} 时传入 keyFn，
+//      按 key 复用行 —— 头部插入/重排不会重建已有行，节点的 DOM 身份跟着数据走。
+//
+// 为什么 keyed 模式要禁用 index：keyed 下行只构建一次，回调里捕获的 index
+// 无法随位置更新。所以编译器在「回调用到了 index」时会自动放弃 key（退回
+// index 模式），保证 index 永远准确 —— 见 compiler/index.ts 的 detectMap。
 // ---------------------------------------------------------------------------
 export function each(
   parent: Node,
   getter: () => readonly any[] | null,
   itemFn: (item: any, index: number) => Renderable,
+  keyFn?: ((item: any, index: number) => unknown) | null,
   owner?: Owner
 ): void {
   const [start, end] = markers(parent, "#", "/#");
-  const rows: any[] = [];
+  let rows: Row[] = [];
+
+  /** 建立一行：独立 signal 承载该行数据，effect 归入该行自己的 owner */
+  const buildRow = (item: any, index: number): Row => {
+    const rowSignal = signal(item);
+    const cleanups = new Set<() => void>();
+    let built: any = null;
+    withOwner(cleanups, () => {
+      built = itemFn(rowProxy(() => rowSignal()), index);
+    });
+    return { key: undefined, rowSignal, cleanups, nodes: toNodes(built) as any[] };
+  };
+
+  /** 回收一行：先跑清理回调（回收该行的 effect），再摘除它的 DOM 节点 */
+  const dropRow = (row: any) => {
+    row.cleanups.forEach((f: () => void) => f());
+    row.cleanups.clear();
+    row.nodes.forEach((n: any) => n.remove && n.remove());
+    row.nodes = [];
+  };
 
   effect(() => {
     const arr = getter() || [];
 
-    while (rows.length < arr.length) {
-      const rowSignal = signal(arr[rows.length]);
-      const cleanups = new Set<() => void>();
-      let built: any = null;
-      withOwner(cleanups, () => {
-        built = itemFn(rowProxy(() => rowSignal()), rows.length);
-      });
-      rows.push({ rowSignal, cleanups, nodes: toNodes(built) });
+    if (typeof keyFn !== "function") {
+      // ---- index 模式 ----
+      while (rows.length < arr.length) rows.push(buildRow(arr[rows.length], rows.length));
+      while (rows.length > arr.length) {
+        const r = rows.pop();
+        if (r) dropRow(r);
+      }
+      for (let i = 0; i < arr.length; i++) rows[i].rowSignal.set(arr[i]);
+    } else {
+      // ---- keyed 模式 ----
+      // key 在 untracked 里算：读值但不订阅，避免 key 字段变化引起额外重算
+      const keys = untracked(() => arr.map((item, i) => (keyFn as any)(item, i)));
+      const pool = new Map<unknown, any>();
+      for (const row of rows) if (!pool.has(row.key)) pool.set(row.key, row);
+
+      const next: any[] = [];
+      for (let i = 0; i < arr.length; i++) {
+        const key = keys[i];
+        const reused = pool.get(key);
+        if (reused) {
+          pool.delete(key);
+          reused.rowSignal.set(arr[i]); // 同一 key：只换数据，节点与 effect 都留着
+          next.push(reused);
+        } else {
+          const row = buildRow(arr[i], i);
+          row.key = key;
+          next.push(row);
+        }
+      }
+      pool.forEach((row) => dropRow(row)); // 消失的 key：整行回收
+      rows = next;
     }
 
-    while (rows.length > arr.length) {
-      const r = rows.pop();
-      r.cleanups.forEach((f: () => void) => f());
-      r.cleanups.clear();
-      r.nodes.forEach((n: any) => n.remove && n.remove());
-      r.nodes = [];
-    }
-
-    for (let i = 0; i < arr.length; i++) rows[i].rowSignal.set(arr[i]);
-
-    const next: Node[] = [];
-    rows.forEach((r: any) => r.nodes.forEach((n: Node) => next.push(n)));
-    syncRange(start, end, next);
+    const flat: Node[] = [];
+    rows.forEach((r: any) => r.nodes.forEach((n: Node) => flat.push(n)));
+    syncRange(start, end, flat);
   }, owner);
 }
 

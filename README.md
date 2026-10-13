@@ -37,6 +37,7 @@ mount("#app", App());
 - [面向 AI 的设计](#面向-ai-的设计)
 - [边界与已知限制](#边界与已知限制)
 - [测试与质量](#测试与质量)
+- [路线图 ROADMAP.md](ROADMAP.md)
 
 ---
 
@@ -68,7 +69,9 @@ __effect(() => { __t3.nodeValue = __stringify(double()); });
    派生用 `computed(fn)`，读法完全一样。没有 `useState` / `ref` / `reactive` / `.value` / `.get()` 这些分支。
 2. **组件就是「返回 JSX 的函数」**，必须是 `return (<jsx />)` 的形式（编译期会把它展开成建 DOM 的代码）。
 3. **列表用 `arr.map(x => <li/>)`，条件用 `{cond ? <a/> : <b/>}` 或 `{cond && <a/>}`。**
-   编译成 `each()` / `when()`，行级响应式自动生效，不用写 key、不用 memo。
+   编译成 `each()` / `when()`，行级响应式自动生效，不用 memo。
+   想让**节点跟着数据走**（头部插入 / 重排时不重建）就给顶层元素写 key：
+   `arr.map(x => <li key={x.id}>…</li>)`。不写 key 则按位置复用 —— 两种都对，语义不同而已。
 4. **副作用用 `effect(fn)`**，依赖自动收集；随组件/列表行一起被回收，需要额外清理时用 `onCleanup`。
 5. **要跑在服务端的代码，用 `server()` 包起来。** 客户端产物里只剩 RPC 桩。
 
@@ -141,7 +144,7 @@ export default defineConfig({
 | `mount(selOrEl, node)` | 挂载，返回卸载函数 |
 | `insert(parent, get)` | 插入任意表达式结果（编译器生成，手写也可用） |
 | `when(parent, cond, then, else)` | 条件渲染（编译器生成） |
-| `each(parent, list, itemFn)` | 列表渲染，行级响应式（编译器生成） |
+| `each(parent, getter, itemFn, keyFn?)` | 列表渲染（编译器生成）。传了 `keyFn` 走按 key 复用，否则按位置复用 |
 | `createSlot(label?)` | 带锚点的插槽：组件要**事后整体替换自己的内容**时返回它 |
 | `place(parent, node)` | 编译器挂载组件的统一入口（兼容 Node / Fragment / Slot） |
 | `ErrorBoundary` | 子树报错就地降级 |
@@ -188,8 +191,8 @@ function Card(props) {
   return (<section className="card">{props.children()}</section>);
 }
 
-// 2. 列表
-<ul>{todos().map(t => <li className={t.done ? "done" : ""}>{t.text}</li>)}</ul>
+// 2. 列表（带 key 时按 key 复用节点；不带则按位置复用）
+<ul>{todos().map(t => <li key={t.id} className={t.done ? "done" : ""}>{t.text}</li>)}</ul>
 
 // 3. 条件（可无限嵌套）
 {loading() ? <p>加载中</p> : error() ? <p>{error().message}</p> : <div>{data().name}</div>}
@@ -214,6 +217,27 @@ function Card(props) {
 
 编译器最后有一道**自检**：产物里若残留任何未处理的 JSX，或代码无法解析，直接抛错。
 **不会**把坏代码悄悄交给打包器。
+
+**一个刻意的例外**：列表里同时写 `key=` 和 index 参数时不报错，而是**静默放弃 key**、退回按位置复用。
+原因：keyed 复用下行只构建一次，回调捕获的 index 无法随位置更新，两者同时生效必然导致 index 过期。
+「index 永远正确」优先于「key 生效」，所以二者只能选一个。
+
+### 编译错误码
+
+编译期错误都带机器可读信息，便于 IDE / CI / AI 直接消费：
+`error.code` / `error.file` / `error.line` / `error.column` / `error.hint`，`JSON.stringify(error)` 即可拿到。
+
+| 错误码 | 含义 |
+| --- | --- |
+| `PLAIN_E1001` | 有 JSX 落在编译器不认识的写法里（附正确写法提示） |
+| `PLAIN_E1002` | 产物无法解析（通常是输入没先剥离 TS 类型） |
+| `PLAIN_E1003` | 产物里残留 JSX（编译器 bug） |
+| `PLAIN_E1004` | 遇到不支持的语法节点（编译器 bug） |
+
+```
+[PLAIN_E1001] Counter.tsx:8:11 这些位置的 JSX 编译器还不认识：Counter.tsx:8
+  提示：组件用 'return (<jsx/>)'；列表用 'arr.map(x => <jsx/>)'；条件用 '{cond ? <a/> : <b/>}' 或 '{cond && <a/>}'
+```
 
 ---
 
@@ -349,20 +373,26 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ SSR 输出（`renderToStringSync` / `renderToString`）
 - ✅ CLI：check / schema / dev / build / serve
 - ✅ TypeScript 类型（含 JSX 类型，`tsc --noEmit` 通过）
-- ✅ 单测 101 项（内核 19 + 单元 82）+ 真实 Chromium 端到端 23 项
+- ✅ 列表 keyed 复用（`key={...}`）：头部插入 / 重排不重建已有节点
+- ✅ 结构化编译错误（`PLAIN_E100x` + 文件/行列/hint，可 JSON 序列化）
+- ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
+- ✅ 单测 117 项（内核 19 + 单元 98）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
 
-| 缺口 | 影响 | 现状建议 |
+分阶段计划与验收标准见 [`ROADMAP.md`](ROADMAP.md)。当前状态：
+
+| 缺口 | 影响 | 优先级 |
 | --- | --- | --- |
-| **注水（hydration）** | SSR 只有首屏 HTML，客户端会重新渲染一次 | 需要 SSR 交互的项目先只用 CSR |
-| **HMR / 热更新** | dev 下改文件会整页刷新 | 不影响正确性，只影响手感 |
-| **Source map** | 框架自身产物已开 tsc sourceMap（覆盖率/调试可映射回 `src`）；但编译器未向 vite 回传用户代码的 map，用户断点仍落在编译产物上 | 产物本身可读，暂可接受 |
-| **列表 keyed diff** | 当前按 index 复用行；大列表 `unshift` 会有多余更新 | 尾部增删无影响 |
-| **多入口 / 代码分割** | 只验证了单入口 | 路由懒加载用动态 `import()` |
-| **并发渲染 / 时间切片** | 没有 | 典型业务不需要 |
-| **RPC 请求防抖 / 批量** | 高频调用会各发一次请求 | 用 `computed` 收敛后再调 |
+| **HMR / 热更新** | dev 下改文件整页刷新；Plain 的核心场景是「AI 写 → 人看」，这条最伤反馈环 | P0 |
+| **注水（hydration）** | SSR 只有首屏 HTML，客户端会重新渲染一次 | P0 |
+| **AI 原生工具（MCP）** | `schema` / `check` 还不能被 AI IDE 直接调用 | P1 |
+| **RPC 请求合并 / 防抖** | 高频调用会各发一次请求 | P1 |
+| **多入口 / 代码分割** | 只验证了单入口 | P1 |
+| **并发渲染 / 时间切片** | 没有 | P2 |
+
+> 需要 SSR 交互的项目请先只用 CSR —— 这是当前唯一会影响正确性的缺口（hydration）。
 
 ### 明确的设计取舍（不是缺陷）
 
@@ -376,7 +406,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 82 项
+pnpm test              # 构建 + 内核 19 项 + 单元 98 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -384,9 +414,10 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（82 项，`node:test`）：`lint` 规则与自动修复、`schema` 契约提取、
-  `compiler` 报错兜底、`cli` 子命令、`vite` 插件的编译与剥离、
-  `server`（静态托管与目录穿越防护、RPC、一行起服）、SSR 序列化、运行时边界分支。
+- `test/*.test.mjs`（98 项，`node:test`）：
+  `lint` 规则与自动修复、`schema` 契约提取、`compiler` 报错兜底与 sourcemap、
+  `cli` 子命令、`vite` 插件的编译与剥离、`server`（静态托管 / 目录穿越 / RPC / 一行起服）、
+  `keyed` 列表复用语义、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
   路由跳转、详情参数、`server()` 往返、404、ErrorBoundary 降级与重试，以及**控制台零报错**。
 
@@ -396,15 +427,16 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 - 「切换分支 / 删除行后 effect 泄漏」—— owner 作用域回收的回归点
 - 「JSX 属性里的 signal 漏调用」—— `autofix` 区间重叠会把源码改坏（`done()` → `done()()`）的回归点
 - 「多个文件各自有 `server()`」—— 服务端清单增量更新产出重复 `const` 声明的回归点
+- 「sourcemap 少算一行占位」—— helper import 行会让后续映射整体错位一行的回归点
 
 覆盖率由 c8 度量、由 CI 强制（配置见 `.c8rc.json`）：
 
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
-| 语句 | 90% | 93.6% |
-| 分支 | 82% | 85.8% |
-| 函数 | 85% | 89.8% |
-| 行 | 90% | 93.6% |
+| 语句 | 90% | 93.9% |
+| 分支 | 82% | 85.9% |
+| 函数 | 85% | 90.5% |
+| 行 | 90% | 93.9% |
 
 > 唯一明显偏低的是 `src/cli`（约 69%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
 > 目前只在示例端到端里被间接验证。
@@ -412,7 +444,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 82 / fail 0    # 单元
+# pass 98 / fail 0    # 单元
 
 $ pnpm run test:browser
 通过 23 / 23
@@ -460,7 +492,7 @@ node dist/cli/index.js dev examples/todo
 src/
   runtime/
     signal.ts    响应式内核：signal / computed / effect / batch / 作用域回收 / rowProxy
-    dom.ts       建 DOM：insert / when / each / Slot 锚点 / 最小重排
+    dom.ts       建 DOM：insert / when / each（index 或 keyed 复用）/ Slot 锚点 / 最小重排
     async.ts     resource（竞态安全）/ rpc / server
     router.ts    路由（history / hash / :param / *）
     error.ts     ErrorBoundary
@@ -484,6 +516,9 @@ test/
   browser.mjs              真实浏览器端到端（手动触发）
 .c8rc.json                 覆盖率门槛配置
 .github/workflows/ci.yml   构建 + 单测 + 覆盖率门禁
+ROADMAP.md                 分阶段计划与验收标准
+CHANGELOG.md               更新日志
+CONTRIBUTING.md            贡献与提交约定（Conventional Commits）
 ```
 
 ---

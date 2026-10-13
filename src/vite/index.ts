@@ -67,8 +67,10 @@ export default function plainPlugin(options: {
         target: "es2022",
       });
 
-      // 2) Plain 编译
-      const result = compile(stripped.code, id.split("/").pop() || "module.jsx");
+      // 2) Plain 编译。mapSource 用真实模块路径，devtools 才能把产物定位回源文件
+      const result = compile(stripped.code, id.split("/").pop() || "module.jsx", {
+        mapSource: id,
+      });
 
       // 3) 登记 server 函数（物理剥离）
       if (result.serverFunctions.length) {
@@ -82,7 +84,8 @@ export default function plainPlugin(options: {
         flushIncremental(freshEntries);
       }
 
-      return { code: result.code, map: null };
+      // 把编译器产出的 line 级 sourcemap 交给 vite 链式合并
+      return { code: result.code, map: result.map ?? null };
     },
 
     buildEnd() {

@@ -24,6 +24,21 @@ export function getCurrentEffect(): any {
   return activeEffect;
 }
 
+/**
+ * untracked(fn) —— 执行 fn 但「不建立依赖」。
+ * 用于列表 key 计算这类「需要读值、但读值本身不该触发重算」的场景。
+ * 仅框架内部使用，不进公开 API（见 runtime/index.ts）。
+ */
+export function untracked<T>(fn: () => T): T {
+  const prev = activeEffect;
+  activeEffect = null;
+  try {
+    return fn();
+  } finally {
+    activeEffect = prev;
+  }
+}
+
 export function cleanup(effect: any): void {
   effect.deps.forEach((s: any) => s.subs.delete(effect));
   effect.deps.clear();

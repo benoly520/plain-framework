@@ -68,6 +68,10 @@ function Counter() {
 - 控制流用**普通函数**，不发明新的模板 DSL（避免"框架方言"增加 AI 的学习与出错面）：
   - `when(cond, thenFn, elseFn)` —— 条件
   - `each(items, keyFn, itemFn)` —— keyed 列表，按 key 复用未变节点
+    - 落地形态（见 `src/compiler` + `src/runtime/dom.ts`）：用户写 `key={...}`，
+      编译器把 `arr.map(x => <li key={x.id}/>)` 编译成 `each(parent, getter, itemFn, keyFn)`。
+    - 边界：同一条 map 回调里若用到 index 参数，key 会被忽略（退回按位置复用）——
+      keyed 复用下行只构建一次，捕获的 index 无法随位置更新；「index 永远正确」优先。
 - 事件：`onclick=${fn}` 等，编译期转 `addEventListener`。
 - 布尔属性（`checked`/`disabled`/...）按属性语义处理，不依赖字符串 `"false"` 的歧义。
 

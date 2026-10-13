@@ -85,9 +85,12 @@ test("transform 产出无 JSX 的代码，并把 server() 剥离成 rpc 桩", as
     "export function App(){ return <p>{count()}</p>; }",
   ].join("\n");
 
-  const res = await p.transform(code, path.join(root, "App.tsx"));
+  const id = path.join(root, "App.tsx");
+  const res = await p.transform(code, id);
   assert.ok(res && typeof res.code === "string");
   assert.ok(!res.code.includes("<p>"), "产物里不得残留 JSX");
+  assert.ok(res.map && res.map.version === 3, "应回传 sourcemap");
+  assert.deepEqual(res.map.sources, [id], "sources 应是真实模块路径");
   assert.ok(res.code.includes('rpc("getSecret"'));
   assert.ok(!res.code.includes("s3cr3t"), "服务端函数体不得留在客户端产物");
 
