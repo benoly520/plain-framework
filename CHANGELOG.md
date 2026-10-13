@@ -16,8 +16,13 @@
   新增选项 `plainPlugin({ lint: "warn" | false })`。
 - **新增契约规则 `plain/no-props-destructure`**：解构 props（`const { title } = props`）
   会拿到 getter 本身并丢失响应性 —— 这是 AI 从 React / Solid 带过来的头号反模式。
+- **`server()` 自包含校验**：新增编译错误 `PLAIN_E1006`。`server()` 的函数体会被物理搬到
+  `.plain/server.mjs`，那个文件里没有 import、也没有模块作用域，所以引用「本文件里绑定了、
+  却不在函数体内」的名字（模块变量 / import / 外层参数）到了服务端必然 ReferenceError。
+  此前要等运行时才炸，现在编译期就报出来。
+  实现上**只报确知被文件绑定的名字**，不去猜全局变量 —— 避免误报，误报会毁掉免疫系统的可信度。
 - **结构化编译错误**：`PlainCompileError` 带
-  `code`（`PLAIN_E1001`–`PLAIN_E1005`、`PLAIN_E2001`）/ `file` / `line` / `column` / `hint`，
+  `code`（`PLAIN_E1001`–`PLAIN_E1006`、`PLAIN_E2001`）/ `file` / `line` / `column` / `hint`，
   可 `JSON.stringify`，供 IDE / CI / AI 直接消费（`SPEC.md` §7「自解释错误」）。
 - **编译产物 sourcemap**：`compile()` 返回 line 级 `map`，vite 插件会链式回传给 devtools，
   断点与堆栈可定位回 `.tsx` 源文件。

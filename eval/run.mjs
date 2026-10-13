@@ -77,7 +77,8 @@ async function runTask(name) {
       name,
       status: "失败",
       reason: String(e.message || e).split("\n")[0],
-      lintBlocked: !!e.lintWouldFailBuild,
+      // 带 code 的失败 = 在构建期就被拦下了（便宜的错误）
+      blockCode: e.code || null,
       meta,
     };
   }
@@ -107,9 +108,11 @@ async function main() {
   console.log("-".repeat(78));
   for (const r of rows) {
     const attempts = r.meta && r.meta.attempts ? String(r.meta.attempts) : "-";
+    // message 首行已经带了 [PLAIN_E1006] 前缀，这里去掉避免和 blockCode 重复
+    const reason = (r.reason || "").replace(/^\[PLAIN_\w+\]\s*/, "");
     const note =
       r.status === "失败"
-        ? (r.lintBlocked ? "[被契约检查拦下] " : "") + (r.reason || "")
+        ? (r.blockCode ? `[构建期拦下 ${r.blockCode}] ` : "") + reason
         : r.status === "通过" && attempts === "1"
         ? "首次即通过"
         : "";
@@ -127,6 +130,15 @@ async function main() {
     console.log(
       `通过率：${passed.length} / ${provided.length} = ` +
         `${((passed.length / provided.length) * 100).toFixed(0)}%`
+    );
+  }
+  const failed = provided.filter((r) => r.status === "失败");
+  if (failed.length) {
+    const blocked = failed.filter((r) => r.blockCode);
+    console.log(
+      `拦截率：${blocked.length} / ${failed.length} = ` +
+        `${((blocked.length / failed.length) * 100).toFixed(0)}%` +
+        `（失败中被构建期拦下的比例 —— 越高说明错误越便宜）`
     );
   }
   if (withMeta.length) {

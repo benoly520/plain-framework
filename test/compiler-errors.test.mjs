@@ -56,6 +56,54 @@ test("PLAIN_E1005：key 与 index 同时使用（不再静默丢掉其中一个�
   assert.match(err.hint, /二者选一/);
 });
 
+test("PLAIN_E1006：server() 引用模块作用域变量 / import / 闭包参数", () => {
+  const cases = [
+    [
+      "模块作用域 const",
+      ["const secret = 1;", "export const f = server(async () => secret);"].join("\n"),
+      "secret",
+    ],
+    [
+      "import 绑定",
+      ['import { db } from "./db.js";', "export const f = server(async () => db.q());"].join("\n"),
+      "db",
+    ],
+    [
+      "外层函数参数（闭包）",
+      "export function make(db) { return server(async () => db.q()); }",
+      "db",
+    ],
+    [
+      "普通模块函数",
+      ["function helper(){}", "export const f = server(async () => helper());"].join("\n"),
+      "helper",
+    ],
+  ];
+  for (const [label, src, leaked] of cases) {
+    const err = catchCompile(src, "s.jsx");
+    assert.equal(err.code, "PLAIN_E1006", label);
+    assert.equal(err.file, "s.jsx", label);
+    assert.match(err.detail, new RegExp(leaked), label);
+    assert.match(err.hint, /闭包不会跟过去/, label);
+  }
+});
+
+test("PLAIN_E1006 不误报：局部 / 参数 / 全局 / 其它 server 函数 / 属性名 / 动态 import", () => {
+  const ok = [
+    "export const f = server(async () => { const x = 1; return x; });",
+    "export const f = server(async (n) => n * 2);",
+    'export const f = server(async () => ({ a: Math.floor(1), b: process.env.X, c: JSON.stringify({}) }));',
+    "const a = server(async () => 1);\nconst b = server(async () => a());",
+    "export const f = server(async () => f());",
+    'const name = 1;\nexport const f = server(async () => ({ name: "x" }));',
+    'export const f = server(async () => import("./db.js"));',
+    "export const f = server(async ({ id }) => id);",
+  ];
+  for (const src of ok) {
+    assert.doesNotThrow(() => compile(src, "ok.jsx"), src);
+  }
+});
+
 test("错误可 JSON 序列化，便于 CI / AI 直接消费", () => {
   const err = catchCompile("const x = <p/>;", "a.jsx");
   const json = JSON.parse(JSON.stringify(err));

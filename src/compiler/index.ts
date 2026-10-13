@@ -24,6 +24,7 @@ export interface ServerFunction {
  * - `PLAIN_E1003` 生成的产物里残留 JSX（编译器 bug）
  * - `PLAIN_E1004` 遇到不支持的语法节点（编译器 bug）
  * - `PLAIN_E1005` 列表元素的 key 与 index 参数同时使用（语义二选一）
+ * - `PLAIN_E1006` `server()` 的函数体引用了外部变量（闭包不会跟到服务端）
  * - `PLAIN_E2001` 契约检查未通过（由构建链路抛出，见 vite 插件）
  */
 export type PlainErrorCode =
@@ -32,6 +33,7 @@ export type PlainErrorCode =
   | "PLAIN_E1003"
   | "PLAIN_E1004"
   | "PLAIN_E1005"
+  | "PLAIN_E1006"
   | "PLAIN_E2001";
 
 export interface PlainCompileErrorInit {
@@ -166,6 +168,9 @@ export function compile(
 
   const edits: any[] = [];
   const serverFunctions: ServerFunction[] = [];
+  // server() 的物理剥离要先知道「文件里存在哪些名字」——只有这些名字
+  // 才可能在服务端变成 ReferenceError（见 assertServerSelfContained）
+  const ambient = serverAmbientNames(sf);
 
   const walk = (node: any) => {
     // 1) server(fn) -> RPC 桩 + 物理剥离
@@ -178,6 +183,7 @@ export function compile(
       const arg = node.arguments[0];
       if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
         const name = serverVarName(node);
+        assertServerSelfContained(arg, ambient, fileName);
         serverFunctions.push({ name, body: arg.getText(sf) });
         edits.push({
           start: node.getStart(sf),
@@ -457,6 +463,141 @@ function buildSourceMap(
     names: [],
     mappings: lines.join(";"),
   };
+}
+
+// ---------------------------------------------------------------------------
+// server() 自包含校验（PLAIN_E1006）
+//
+// 函数体会被物理搬进 .plain/server.mjs —— 那个文件里**只有函数体本身**：
+// 没有 import，也没有模块作用域。所以任何「在本文件里声明过、却不在函数体内」的
+// 引用，到了服务端都是 ReferenceError。这是纯静态可判定的。
+//
+// 刻意不去猜全局变量（process / Math / fetch …）：只报「我们确知文件里绑定了这个
+// 名字、但它不在这段函数体里」的情况。猜全局必然误报，而误报会毁掉整个免疫系统的可信度。
+// ---------------------------------------------------------------------------
+
+/** 收集一棵子树里所有「声明」出来的名字（变量 / 参数 / 函数 / 类 / catch / import 绑定） */
+function collectDeclaredNames(root: any, out: Set<string>): Set<string> {
+  const bind = (name: any) => {
+    if (!name) return;
+    if (ts.isIdentifier(name)) out.add(name.text);
+    else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+      name.elements.forEach((el: any) => {
+        if (ts.isBindingElement(el)) bind(el.name);
+      });
+    }
+  };
+  const visit = (n: any) => {
+    if (ts.isVariableDeclaration(n) || ts.isParameter(n)) bind(n.name);
+    else if (ts.isCatchClause(n) && n.variableDeclaration) bind(n.variableDeclaration.name);
+    else if (
+      (ts.isFunctionDeclaration(n) ||
+        ts.isClassDeclaration(n) ||
+        ts.isFunctionExpression(n)) &&
+      n.name
+    ) {
+      out.add(n.name.text);
+    } else if (ts.isImportClause(n) && n.name) out.add(n.name.text);
+    else if (ts.isImportSpecifier(n) || ts.isNamespaceImport(n)) out.add(n.name.text);
+    else if (ts.isImportEqualsDeclaration(n)) out.add(n.name.text);
+    ts.forEachChild(n, visit);
+  };
+  visit(root);
+  return out;
+}
+
+/** 这个标识符是「引用」还是仅仅是个名字（属性名 / 键名 / JSX 属性名 / import 别名） */
+function isNamePosition(n: any): boolean {
+  const p = n.parent;
+  if (!p) return false;
+  if (ts.isPropertyAccessExpression(p) && p.name === n) return true;
+  if (ts.isPropertyAssignment(p) && p.name === n) return true;
+  if (ts.isJsxAttribute(p) && p.name === n) return true;
+  if (ts.isImportSpecifier(p)) return true;
+  if (ts.isBindingElement(p) && p.propertyName === n) return true;
+  if (ts.isQualifiedName(p) && p.right === n) return true;
+  return false;
+}
+
+/**
+ * 算出「会被搬走的那些函数体之外、文件里绑定了的名字」集合。
+ * 注意要排除：
+ *   - 其它 server() 函数名 —— 它们都会出现在同一份清单里，互相引用是合法的
+ *   - 各 server() 函数体内的局部声明 —— 否则 A 的局部变量会误伤 B
+ */
+function serverAmbientNames(sf: any): Set<string> {
+  const serverFns: any[] = [];
+  const scan = (n: any) => {
+    if (
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === "server" &&
+      n.arguments.length &&
+      (ts.isArrowFunction(n.arguments[0]) || ts.isFunctionExpression(n.arguments[0]))
+    ) {
+      serverFns.push(n.arguments[0]);
+    }
+    ts.forEachChild(n, scan);
+  };
+  scan(sf);
+
+  const serverBound = new Set<string>();
+  for (const fn of serverFns) {
+    let cur = fn.parent;
+    while (cur) {
+      if (ts.isVariableDeclaration(cur) && ts.isIdentifier(cur.name)) {
+        serverBound.add(cur.name.text);
+        break;
+      }
+      cur = cur.parent;
+    }
+  }
+
+  const inBodies = new Set<string>();
+  for (const fn of serverFns) collectDeclaredNames(fn, inBodies);
+
+  const ambient = collectDeclaredNames(sf, new Set<string>());
+  for (const name of inBodies) ambient.delete(name);
+  for (const name of serverBound) ambient.delete(name);
+  return ambient;
+}
+
+/** 报出 server() 里引用外部变量的地方 */
+function assertServerSelfContained(
+  fn: any,
+  ambient: Set<string>,
+  fileName: string
+): void {
+  const local = collectDeclaredNames(fn, new Set<string>());
+  const leaks: string[] = [];
+  const visit = (n: any) => {
+    if (
+      ts.isIdentifier(n) &&
+      !isNamePosition(n) &&
+      !local.has(n.text) &&
+      ambient.has(n.text) &&
+      !leaks.includes(n.text)
+    ) {
+      leaks.push(n.text);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(fn);
+  if (!leaks.length) return;
+
+  const sf = fn.getSourceFile();
+  const at = sf.getLineAndCharacterOfPosition(fn.getStart(sf));
+  throw new PlainCompileError({
+    code: "PLAIN_E1006",
+    file: fileName,
+    line: at.line + 1,
+    column: at.character + 1,
+    detail: `server() 的函数体引用了外部变量：${leaks.join(", ")}`,
+    hint:
+      "函数体会被物理搬到服务端，闭包不会跟过去。" +
+      "请在函数体内自己获取（如 process.env.DB_URL、await import(\"./db.js\")），" +
+      "或把值作为参数传进来",
+  });
 }
 
 function serverVarName(node: any): string {

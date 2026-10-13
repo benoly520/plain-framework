@@ -32,12 +32,15 @@
 | 5 | `const { title } = props` | `resolve(props.title)`，或 `const title = () => resolve(props.title)` | ✅ `plain/no-props-destructure` |
 | 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` |
 | 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ❌ 未拦截，自己保证 |
-| 8 | `server()` 函数里引用外部闭包变量 | 在函数体内自己获取（如 `process.env.DB_URL`） | ❌ 未拦截，运行时才 ReferenceError |
+| 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` |
 | 9 | 把 getter 存进变量：`const t = props.title` | `resolve(props.title)`；要响应式就写成 thunk | ❌ 未拦截，自己保证 |
 | 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ❌ 未拦截 |
 
-> 第 7–10 条还没有静态检查（见 [ROADMAP.md](ROADMAP.md) M4）。
+> 第 7、9、10 条还没有静态检查（见 [ROADMAP.md](ROADMAP.md) M6）。
 > **不要因为它们「不报错」就以为是对的** —— 它们目前是最容易静默出错的地方。
+>
+> 关于第 8 条：编译器只报「本文件里确实绑定了、但不在函数体内」的名字。
+> 全局对象（`process` / `Math` / `fetch` …）不在判定范围内 —— 不去猜全局，是为了不误报。
 
 ## 4. 错误码
 
@@ -48,6 +51,7 @@
 | `PLAIN_E1003` | 产物里残留 JSX | 编译器 bug，附最小复现提 issue |
 | `PLAIN_E1004` | 遇到不支持的语法节点 | 同上 |
 | `PLAIN_E1005` | 列表的 key 与 index 同时使用 | 二者选一 |
+| `PLAIN_E1006` | `server()` 的函数体引用了外部变量 | 在函数体内自己获取，或改成参数传入（闭包不会跟到服务端） |
 | `PLAIN_E2001` | 契约检查未通过 | 跑 `npx plaindev check --fix <dir>` 自动修，再重新构建 |
 
 错误对象带 `code` / `file` / `line` / `column` / `hint`，`JSON.stringify(error)` 可直接读，不用正则去刮 message。

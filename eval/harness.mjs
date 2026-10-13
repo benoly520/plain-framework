@@ -50,7 +50,8 @@ export async function loadCandidate(file) {
         path.basename(file)
       )}`
     );
-    err.lintWouldFailBuild = true;
+    // 与 vite 插件保持一致：契约检查失败 = PLAIN_E2001
+    err.code = "PLAIN_E2001";
     throw err;
   }
 

@@ -234,6 +234,7 @@ function Card(props) {
 | `PLAIN_E1003` | 产物里残留 JSX（编译器 bug） |
 | `PLAIN_E1004` | 遇到不支持的语法节点（编译器 bug） |
 | `PLAIN_E1005` | 列表的 `key` 与 index 参数同时使用（二者选一） |
+| `PLAIN_E1006` | `server()` 的函数体引用了外部变量（闭包不会跟到服务端） |
 | `PLAIN_E2001` | 契约检查未通过（由构建链路抛出，`plaindev check --fix` 可自动修） |
 
 **契约检查默认接在构建链路里**（`plainPlugin({ lint: "warn" | false })` 可调），
@@ -390,11 +391,12 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ TypeScript 类型（含 JSX 类型，`tsc --noEmit` 通过）
 - ✅ 列表 keyed 复用（`key={...}`）：头部插入 / 重排不重建已有节点
 - ✅ 结构化编译错误（`PLAIN_E100x` + 文件/行列/hint，可 JSON 序列化）
+- ✅ `server()` 自包含校验（`PLAIN_E1006`）：引用了外部变量在**编译期**报错，不再等运行时 `ReferenceError`
 - ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
 - ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
 - ✅ `AGENTS.md` + 反模式目录（明确标注哪些已被静态检查、哪些还没有）
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 124 项（内核 19 + 单元 105）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 126 项（内核 19 + 单元 107）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -424,7 +426,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 105 项
+pnpm test              # 构建 + 内核 19 项 + 单元 107 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -432,11 +434,11 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（105 项，`node:test`）：
+- `test/*.test.mjs`（107 项，`node:test`）：
   `lint` 规则与自动修复、`schema` 契约提取、`compiler` 报错兜底与 sourcemap、
   `cli` 子命令、`vite` 插件的编译 / 剥离 / 契约检查拦截、
   `server`（静态托管 / 目录穿越 / RPC / 一行起服）、
-  `keyed` 列表复用语义与 `PLAIN_E1005`、SSR 序列化、运行时边界分支。
+  `keyed` 列表复用语义、`PLAIN_E1005` / `PLAIN_E1006` 的诊断与不误报、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
   路由跳转、详情参数、`server()` 往返、404、ErrorBoundary 降级与重试，以及**控制台零报错**。
 
@@ -466,10 +468,10 @@ node eval/run.mjs --reference  # 跑参考实现（自检 harness，不算指标
 
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
-| 语句 | 90% | 94.0% |
-| 分支 | 82% | 85.7% |
-| 函数 | 85% | 90.9% |
-| 行 | 90% | 94.0% |
+| 语句 | 90% | 94.3% |
+| 分支 | 82% | 85.6% |
+| 函数 | 85% | 91.2% |
+| 行 | 90% | 94.3% |
 
 > 唯一明显偏低的是 `src/cli`（约 69%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
 > 目前只在示例端到端里被间接验证。
@@ -477,7 +479,7 @@ node eval/run.mjs --reference  # 跑参考实现（自检 harness，不算指标
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 105 / fail 0   # 单元
+# pass 107 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23

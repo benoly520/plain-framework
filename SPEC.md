@@ -109,8 +109,10 @@ const loadUser = server((id) => db.users.find(id)); // 只跑在服务端
 > **落地状态**（详见 [README](README.md) 与 [AGENTS.md](AGENTS.md)）：
 > 1 已实现（`plaindev schema`，但 props 仍是"推断"而非"声明"，待补）；
 > 2 已实现（`PLAIN_E100x` / `PLAIN_E2001` + `hint`，可 JSON 序列化）；
-> 3 已实现 5 条规则并**默认接入构建链路**（构建即失败），目录见 `AGENTS.md`；
-> 尚未覆盖的坑（如 `server()` 闭包误用）已逐条列在 `AGENTS.md` 反模式目录里并标注"未拦截"。
+> 3 已实现 5 条 lint 规则并**默认接入构建链路**（构建即失败），另有编译器侧的语义校验
+> `PLAIN_E1005`（key/index 冲突）与 `PLAIN_E1006`（`server()` 引用外部变量）。
+> 尚未覆盖的坑（就地改数据、把 getter 存进变量、给 `server()` 传不可序列化参数）
+> 已逐条列在 `AGENTS.md` 反模式目录里并明确标注"未拦截"。
 
 ---
 
