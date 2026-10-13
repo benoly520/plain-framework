@@ -23,19 +23,23 @@
 
 「自动拦截」那一列告诉你哪些错误**构建时就会失败**。标 ❌ 的必须自己保证正确。
 
-| # | 反模式（别写） | 正确写法 | 自动拦截？ |
-| --- | --- | --- | --- |
-| 1 | `count = 1` | `count.set(1)` | ✅ `plain/signal-assign`（可自动修） |
-| 2 | `{count}` / `checked={done}` | `{count()}` / `checked={done()}` | ✅ `plain/signal-not-called`（可自动修） |
-| 3 | `useState` / `useEffect` / `useMemo` / `useCallback` / `useRef` | `signal` / `effect` / `computed` | ✅ `plain/react-habit` |
-| 4 | `el.innerHTML = html` / `insertAdjacentHTML` | `{expr}` 插值 / `createTextNode` | ✅ `plain/no-inner-html` |
-| 5 | `const { title } = props` | `resolve(props.title)`，或 `const title = () => resolve(props.title)` | ✅ `plain/no-props-destructure` |
-| 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` |
-| 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ❌ 未拦截，自己保证 |
-| 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` |
-| 9 | 把 getter 存进变量：`const t = props.title` | `resolve(props.title)`；要响应式就写成 thunk | ❌ 未拦截，自己保证 |
-| 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ❌ 未拦截 |
+| # | 反模式（别写） | 正确写法 | 自动拦截？ | 评测任务 |
+| --- | --- | --- | --- | --- |
+| 1 | `count = 1` | `count.set(1)` | ✅ `plain/signal-assign`（可自动修） | — |
+| 2 | `{count}` / `checked={done}` | `{count()}` / `checked={done()}` | ✅ `plain/signal-not-called`（可自动修） | — |
+| 3 | `useState` / `useEffect` / `useMemo` / `useCallback` / `useRef` | `signal` / `effect` / `computed` | ✅ `plain/react-habit` | — |
+| 4 | `el.innerHTML = html` / `insertAdjacentHTML` | `{expr}` 插值 / `createTextNode` | ✅ `plain/no-inner-html` | — |
+| 5 | `const { title } = props` | `resolve(props.title)`，或 `const title = () => resolve(props.title)` | ✅ `plain/no-props-destructure` | — |
+| 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` | — |
+| 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ❌ 未拦截，自己保证 | 05 |
+| 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` | 04（间接） |
+| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`） | `resolve(props.title)`；要响应式就写成 thunk | ❌ 未拦截，自己保证 | 06 |
+| 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ❌ 未拦截 | 07 |
 
+> 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
+> **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
+> 也没被拦住，那就是最贵的失败）。跑法见 [eval/README.md](eval/README.md)。
+>
 > 第 7、9、10 条还没有静态检查（见 [ROADMAP.md](ROADMAP.md) M6）。
 > **不要因为它们「不报错」就以为是对的** —— 它们目前是最容易静默出错的地方。
 >

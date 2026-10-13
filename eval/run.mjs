@@ -8,7 +8,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadCandidate, mountBox, setupDom, tick } from "./harness.mjs";
+import {
+  evalServerFn,
+  loadCandidate,
+  mountBox,
+  setupDom,
+  tick,
+} from "./harness.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TASKS_DIR = path.join(HERE, "tasks");
@@ -70,15 +76,17 @@ async function runTask(name) {
     const { mod, code, out } = await loadCandidate(candidate);
     const checkPath = path.join(dir, "check.mjs");
     const check = (await import(pathToFileURL(checkPath).href)).default;
-    await check({ mod, code, out, mount: mountBox, tick });
+    await check({ mod, code, out, mount: mountBox, tick, evalServerFn });
     return { name, status: "通过", meta };
   } catch (e) {
     return {
       name,
       status: "失败",
       reason: String(e.message || e).split("\n")[0],
-      // 带 code 的失败 = 在构建期就被拦下了（便宜的错误）
-      blockCode: e.code || null,
+      // 只有 PLAIN_* 才算「构建期被拦下」——断言失败是 AssertionError(ERR_ASSERTION)，
+      // 那是「运行时才发现的错」，代价高得多，不能混进拦截率
+      blockCode:
+        typeof e.code === "string" && e.code.startsWith("PLAIN_") ? e.code : null,
       meta,
     };
   }

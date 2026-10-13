@@ -71,6 +71,18 @@ export async function loadCandidate(file) {
   return { mod, code, out };
 }
 
+/**
+ * evalServerFn(entry) —— 把编译器物理剥离出来的服务端函数**单独执行**。
+ *
+ * 这与 vite 插件 dev 模式下的 `evalFn` 是同一条路径（都是 `new Function`），
+ * 所以断言到的是「服务端真正会跑的那段代码」，而不是客户端产物里的 RPC 桩。
+ * 能这么干的前提，正是编译器保证函数体自包含（`PLAIN_E1006`）。
+ */
+export function evalServerFn(entry) {
+  // eslint-disable-next-line no-new-func
+  return new Function(`return (${entry.body});`)();
+}
+
 /** 造一个干净的挂载容器（每个任务一个，互不污染） */
 export function mountBox() {
   const box = document.createElement("div");

@@ -44,11 +44,14 @@ node eval/run.mjs --reference  # 跑 reference 实现 —— 自检 harness 本�
 - `task.md`：**只写需求**，说清「要什么」和「可外部观测的接口名」，不说「怎么写」。
 - 一个好的任务应当测到一条**真实的 AI 失败模式**：如果代理不用某个特性也能蒙对，这个任务就没有价值。
   （比如 `02-keyed-list` 只断言 DOM 节点身份 —— 不写 `key=` 就不可能通过。）
-- `check.mjs`：`export default async ({ mod, code, out, mount, tick }) => { ... }`
+- `check.mjs`：`export default async ({ mod, code, out, mount, tick, evalServerFn }) => { ... }`
   - `mod`：编译后模块（组件、状态、导出函数）
   - `code`：客户端产物源码（测「不该出现的东西」用）
   - `out`：`compile()` 的原始返回（含 `serverFunctions` / `map`）
   - `mount()`：返回 `{ box }`，一个干净的挂载容器
+  - `evalServerFn(entry)`：**把物理剥离出来的服务端函数单独执行**（与 dev 模式下 `evalFn`
+    同一条路径）。断言 `server()` 的真实行为时用它 —— 比查产物里有没有某个字符串可靠得多。
+    注意服务端函数通常是 async，要 `await`。
   - 断言用 `node:assert/strict`，抛错即失败。
 - `reference.tsx`：参考实现，用来自检 harness。**不算指标。**
 
