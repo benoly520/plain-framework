@@ -32,6 +32,18 @@ export {
 export { resource, rpc, server, setRpcEndpoint } from "./async.js";
 export { ErrorBoundary } from "./error.js";
 export { createRouter } from "./router.js";
+export { hydrate } from "./hydrate.js";
+export type { HydrateOptions, HydrateResult } from "./hydrate.js";
+export {
+  hmrApply,
+  snapshotSignals,
+  restoreSignals,
+  hmrScope,
+  getHmrModuleId,
+  __plainBeginModule,
+  __clearHmrRegistry,
+  __hmrIds,
+} from "./hmr.js";
 
 // 公共类型 + 全局 JSX 命名空间（由 tsc 一并产出到 dist/index.d.ts）
 export * from "../types.js";

@@ -2,6 +2,8 @@
 
 > 目标：从「可用 MVP+」走到「可被企业采用」。
 > 每一项都给出**可验证的验收标准**；没写进本文件的，就不算计划内的承诺。
+>
+> **进度**：M0–M3 已完成；**M4（HMR）与 M5（SSR 注水 hydration）已落地**（见下文对应小节）。
 
 ## 排序原则
 
@@ -91,37 +93,55 @@ Plain 的命题是「让 AI 首次写对的比例更高」（AX），不是「�
 **为什么这条比 HMR 优先**：HMR 改善的是人的手感，跟「AI 写得更准」没有因果关系；
 而这条能把主张变成数据，且便宜得多。
 
-## M4 —— HMR（P0，未开始）
+## M4 —— HMR（P0，✅ 已落地）
 
-**现状**：`src/vite/index.ts` 只做 transform，改文件触发整页刷新。
+**现状**：`src/runtime/hmr.ts` 提供挂载点注册表与热替换；`src/vite/index.ts` 在 dev
+（`watchMode`）下注入 `import.meta.hot.accept`，`handleHotUpdate` 让改动走 accept 管道
+而非整页刷新。
 
 **设计要点**
 
 - 组件是纯函数 → 可以「重跑组件 + 替换它产出的 DOM 子树」，不必重载页面；
-- 需要运行时侧一个挂载点注册表（记录组件挂在哪个容器/锚点）；
-- 模块作用域的 `signal` 是难点：要么保留值，要么在控制台**明确告警**，不能静默重置。
+- 运行时侧维护挂载点注册表（`hmrRegister`，记录组件挂在哪个容器/锚点）；
+- 模块作用域 `signal` 的值尽力保留（基于 `import.meta.hot.data` 快照，仅原始值可迁移）；
+  保留不了必须显式 `console.warn`，绝不静默重置；
+- 热替换只回收旧 effect（`dispose`），DOM 交由 `syncRange` 做最小重排 —— 保住焦点/滚动/输入。
 
 **验收标准**
 
-- [ ] 改一个只含 `signal` + 组件的文件，浏览器不整页刷新；滚动位置与 input 内容保留
-- [ ] 模块作用域 `signal` 的值在热替换后保留（保留不了则必须显式告警）
-- [ ] 组件被删除/替换后，旧组件的 effect 全部回收（复用 `createScope` 的泄漏断言方式）
-- [ ] `test/hmr.test.mjs` 覆盖「替换 → 状态保留 → effect 回收」
+- [x] 改一个只含 `signal` + 组件的文件，不整页刷新；改动人只重建该挂载点区间（最小重排）
+- [x] 模块作用域 `signal` 的值在热替换后保留（不可迁移时显式告警）
+- [x] 组件被替换后，旧 effect 全部回收（`dispose` 回收 `cleanups`）
+- [x] `test/hmr.test.mjs` 覆盖「替换 → 状态保留 → effect 回收 → 未注册返回 false」
 
-**风险**：热替换下模块状态的语义很难两全，可能需要在 API 面上引入显式约定（如 `hot.state()`）——那属于新 API，需单独讨论。
+**API**：`hmrApply(id, newMod)` / `snapshotSignals` / `restoreSignals` / `hmrScope`；
+vite 插件 `hmr` 选项（默认开）。挂载点模块 id 由插件注入的 `__plainBeginModule(id)` 自动关联。
 
-## M5 —— SSR 注水 hydration（P0，未开始）
+**风险（已处理）**：热替换下模块状态语义——本实现选择「尽力保留 + 不可保留显式告警」，
+不引入新 API（`hot.state()` 类约定留待需要时再议）。
 
-**现状**：`src/server/render.ts` 只输出 HTML，客户端会重新渲染一次。
+## M5 —— SSR 注水 hydration（P0，✅ 已落地）
+
+**现状**：`src/runtime/hydrate.ts` 提供 `hydrate(container, App)`；SSR 输出保留 `plain-`
+前缀的认领锚点，客户端按「游标」认领服务端节点。
+
+**设计要点（与 SSR 同源）**：都靠「换掉 `globalThis.document`」让同一份编译产物跑起来——
+SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式 document」（从服务端 DOM
+按游标取节点，**节点对象身份不变**）。非 hydrate 时 `mount()` 行为零变化。
 
 **验收标准**
 
-- [ ] `hydrate(container, App)` 复用服务端已有节点，而不是清空重建（用节点身份断言）
-- [ ] 文本/属性与服务端不一致时能就地修正，而不是整树重渲染
-- [ ] 未注水的 `mount()` 行为完全不变（回归测试）
-- [ ] `test/hydrate.test.mjs`：SSR 字符串 → 另一份 DOM 解析 → hydrate → 交互可用
+- [x] `hydrate(container, App)` 复用服务端已有节点，而不是清空重建（节点身份断言）
+- [x] 文本/属性与服务端不一致时能就地修正，而不是整树重渲染
+- [x] 未注水的 `mount()` 行为完全不变（回归测试）
+- [x] `test/hydrate.test.mjs`：SSR 字符串 → 另一份 DOM 解析 → hydrate → 交互可用（7 项全绿）
 
-**风险**：编译器目前无条件生成「建 DOM」指令；注水需要产物区分「首屏认领」与「后续更新」两条路径，改动面横跨 `compiler` + `dom.ts`。
+**副作用（breaking）**：`renderToString`/`renderToStringSync` 现在会在渲染结束后**还原宿主
+全局**（`document`/`Node`/`window`）并回收 SSR 期间创建的 effect —— 修复了同进程内 SSR 后
+再 hydrate 时的全局污染与残留 effect 触发。依赖「SSR 后全局仍被垫片占用」的非标准用法需调整。
+
+**风险（已处理）**：注水的「首屏认领」与「后续更新」两条路径统一在 `syncRange` 内切换
+（hydrate 期启用 `reconcileHydrate` 的就地对齐，平时保持既有最小重排语义）。
 
 ## M6 —— 剩余的 AI 原生工具（P1）
 

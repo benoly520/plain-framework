@@ -7,6 +7,29 @@
 
 ### 新增
 
+- **HMR 热更新（M4 落地）**：`src/runtime/hmr.ts` 提供挂载点注册表与热替换内核；
+  `src/vite/index.ts` 在 dev（`watchMode`）下为每个模块注入 `import.meta.hot.accept`，
+  `handleHotUpdate` 让改动走 accept 管道而**不整页刷新**。改组件时只重建它产出的
+  DOM 子树（`syncRange` 最小重排），保住焦点/滚动/输入；模块级 `signal` 值尽力保留
+  （基于 `import.meta.hot.data` 快照，仅原始值可迁移），保留不了**显式 `console.warn`**。
+  新增运行时 API：`hmrApply(id, newMod)` / `snapshotSignals` / `restoreSignals` /
+  `hmrScope` / `getHmrModuleId`；vite 插件新增 `hmr` 选项（默认开）。
+- **SSR 注水 hydration（M5 落地）**：`hydrate(container, App)` 复用服务端已渲染的节点，
+  **节点对象身份不变**（不整树重建）；文本/属性不一致时就地修正；未注水的 `mount()`
+  行为完全不变。机制与 SSR 同源——都靠「换掉 `globalThis.document`」跑同一份编译产物，
+  hydrate 换成「认领式 document」按游标从服务端 DOM 取节点。SSR 序列化时保留 `plain-`
+  前缀的认领锚点（普通注释仍丢弃）。新增 types：`HydrateOptions` / `HydrateResult`。
+
+### 修复
+
+- **SSR 不再污染宿主全局**：`renderToString` / `renderToStringSync` 渲染结束后会还原
+  `globalThis.document` / `Node` / `window`，并回收 SSR 期间创建的 effect。
+  此前 SSR 会把这些全局永久占成服务端垫片、且残留 effect 仍在订阅信号——同一进程里
+  随后做 hydrate 时，点击等更新会同时触发「SSR 残留 effect（锚点是垫片节点）+ hydrate
+  effect」，在垫片节点上做 DOM 操作直接抛错。**属行为修正，依赖旧行为的非标准用法需调整。**
+- **`mount` 的 HMR 热替换**：`dispose` 改为只回收 effect（不再连带移除锚点/子树 DOM），
+  由 `rebuild` 经 `syncRange` 做最小重排替换——修复热替换后挂载点被清空的问题。
+
 - **契约规则 `plain/no-signal-mutate`**：就地改 signal 持有值（`items().push(x)` /
   `items()[0] = x`）不会触发更新。构建期报错，不自动修。
   覆盖面按「源码上看得出的可变操作」铺开：深层路径（`todos()[0].done = true`、

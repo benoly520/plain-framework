@@ -56,21 +56,24 @@ async function call(mw, { method = "GET", url = "/", payload } = {}) {
 // dom-shim + SSR
 // ---------------------------------------------------------------------------
 
-test("SSR 序列化：文本/属性转义、void 标签、样式、注释锚点不输出", () => {
+test("SSR 序列化：文本/属性转义、void 标签、样式、认领锚点输出而普通注释不输出", () => {
   const doc = installServerDOM();
   const box = doc.createElement("div");
   box.setAttribute("class", 'a"b');
   box.appendChild(doc.createTextNode("<b>&</b>"));
   box.appendChild(doc.createElement("input"));
   box.appendChild(doc.createElement("br"));
+  // 普通注释：丢弃
   box.appendChild(doc.createComment("[anchor]"));
+  // 认领锚点（plain- 前缀）：必须原样输出，hydrate 靠它定位
+  box.appendChild(doc.createComment("plain-["));
   const img = doc.createElement("img");
   img.style.backgroundColor = "red";
   box.appendChild(img);
 
   assert.equal(
     renderToStringSync(box),
-    '<div class="a&quot;b">&lt;b&gt;&amp;&lt;/b&gt;<input><br><img style="background-color:red"></div>'
+    '<div class="a&quot;b">&lt;b&gt;&amp;&lt;/b&gt;<input><br><!--plain-[--><img style="background-color:red"></div>'
   );
 });
 

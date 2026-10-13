@@ -113,9 +113,11 @@ npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE �
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/runtime/` | signal / dom / async / router / error —— 运行时（**对外 API 面冻结**） |
+| `src/runtime/` | signal / dom / async / router / error / hydrate / hmr —— 运行时（**对外 API 面冻结**） |
+| `src/runtime/hydrate.ts` | SSR 注水：认领式 document 复用服务端节点（`claim-document.ts` / `hydration-context.ts` 为内核） |
+| `src/runtime/hmr.ts` | HMR 挂载点注册表与热替换（`hmrApply` / 模块级 signal 快照） |
 | `src/compiler/` | TSX → 建 DOM 代码、服务端清单、契约提取、sourcemap |
-| `src/vite/` | Vite 插件：契约检查 → 类型剥离 → 编译 → `server()` 剥离 → 回传 sourcemap |
+| `src/vite/` | Vite 插件：契约检查 → 类型剥离 → 编译 → `server()` 剥离 → HMR 注入 → 回传 sourcemap |
 | `src/lint.ts` | 契约检查与自动修复（反模式目录 1–5、7、9、11–13 的执行者） |
 | `src/cli/` | `plaindev` |
 | `test/` | 测试（跑的是 `dist/`，不是 `src/`） |

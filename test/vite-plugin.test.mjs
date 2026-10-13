@@ -233,3 +233,58 @@ test("通过契约检查的模块不受影响", async () => {
   const res = await p.transform(good, path.join(root, "Good.tsx"));
   assert.ok(res && typeof res.code === "string");
 });
+
+// ---------------------------------------------------------------------------
+// HMR 注入（M4-2）：仅 dev（watchMode）注入，prod 构建不注入
+// ---------------------------------------------------------------------------
+test("dev(watchMode) 下注入 HMR 头尾；prod 构建不注入", async () => {
+  const root = tmpRoot();
+  const p = plugin();
+  p.configResolved({ root });
+  const code = [
+    "import { signal } from 'plain';",
+    "export const n = signal(0);",
+    "export function App(){ return <p>{n()}</p>; }",
+  ].join("\n");
+  const id = path.join(root, "Hmr.tsx");
+
+  // dev：this.meta.watchMode = true
+  const dev = await p.transform.call({ meta: { watchMode: true } }, code, id);
+  assert.ok(dev && typeof dev.code === "string");
+  assert.match(dev.code, /__plainBegin\(/, "dev 应注入模块标记");
+  assert.match(dev.code, /import\.meta\.hot\.accept\(/, "dev 应注入 accept 回调");
+  assert.match(dev.code, /hmrApply/, "dev 应引入 hmrApply");
+  assert.ok(
+    dev.code.includes(JSON.stringify(id)),
+    "注入的模块 id 应为文件路径"
+  );
+
+  // prod：无 watchMode
+  const prod = await p.transform(code, id);
+  assert.ok(prod && typeof prod.code === "string");
+  assert.ok(!prod.code.includes("__plainBegin("), "prod 不应注入 HMR 代码");
+  assert.ok(!prod.code.includes("import.meta.hot"), "prod 不应引用 import.meta.hot");
+});
+
+test("hmr:false 关闭 HMR 注入", async () => {
+  const root = tmpRoot();
+  const p = plugin({ hmr: false });
+  p.configResolved({ root });
+  const code = "export function App(){ return <p>hi</p>; }";
+  const id = path.join(root, "NoHmr.tsx");
+  const res = await p.transform.call({ meta: { watchMode: true } }, code, id);
+  assert.ok(res && typeof res.code === "string");
+  assert.ok(!res.code.includes("__plainBegin("), "关闭后不应注入");
+});
+
+test("handleHotUpdate：命中 Plain 模块时不强制整页刷新", async () => {
+  const root = tmpRoot();
+  const p = plugin();
+  p.configResolved({ root });
+  // 我们的实现返回 undefined => 交给 vite 默认 HMR 管道（走 accept，不 full-reload）
+  const r = p.handleHotUpdate({ file: path.join(root, "App.tsx") });
+  assert.equal(r, undefined);
+  // 非 Plain 文件同样不特殊处理
+  const r2 = p.handleHotUpdate({ file: path.join(root, "style.css") });
+  assert.equal(r2, undefined);
+});

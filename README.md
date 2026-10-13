@@ -32,7 +32,8 @@ mount("#app", App());
 - [API 全表](#api-全表)
 - [编译器支持 / 不支持的写法](#编译器支持--不支持的写法)
 - [server()：显式执行边界](#server显式执行边界)
-- [SSR](#ssr)
+- [SSR 与注水](#ssr-与注水)
+- [HMR 热更新](#hmr-热更新)
 - [工具链 plaindev](#工具链-plaindev)
 - [面向 AI 的设计](#面向-ai-的设计)
 - [边界与已知限制](#边界与已知限制)
@@ -149,6 +150,8 @@ export default defineConfig({
 | `createSlot(label?)` | 带锚点的插槽：组件要**事后整体替换自己的内容**时返回它 |
 | `place(parent, node)` | 编译器挂载组件的统一入口（兼容 Node / Fragment / Slot） |
 | `ErrorBoundary` | 子树报错就地降级 |
+| `hydrate(el, App, opts?)` | SSR 注水：复用服务端节点，返回 `{ dispose, warnings }` |
+| `hmrApply(id, newMod)` | 热替换指定模块的挂载点（一般由 vite 插件调，无需手写） |
 
 ### 异步与跨端
 
@@ -314,7 +317,7 @@ app.use(rpcMiddleware({ manifest: ".plain/server.mjs" }));
 
 ---
 
-## SSR
+## SSR 与注水
 
 Plain 编译产物是「直接建 DOM + effect 首次同步执行」，所以 SSR 不需要独立渲染器 ——
 **换一个 `document` 实现即可**（`src/server/dom-shim.ts`，零依赖）。
@@ -326,7 +329,40 @@ const html = renderToStringSync(App);                    // 同步部分
 const html2 = await renderToString(App, { wait: 20 });   // 等异步 resource
 ```
 
-> **只提供 SSR 输出，不含注水**。见下方限制表。
+服务端输出会在客户端**注水**：`hydrate` 复用服务端已渲染的真实节点（**节点对象身份
+不变**，不整树重建），文本/属性不一致时就地修正，随后事件与响应式照常工作。
+
+```js
+import { hydrate } from "plain";
+
+const { dispose, warnings } = hydrate(document.getElementById("app"), App);
+```
+
+SSR 序列化时会保留 `plain-` 前缀的注释锚点（`<!--plain-[-->…<!--plain-]-->`），
+注水靠它们定位动态区间；普通注释仍会被丢弃。注水与 SSR 同源：都靠「换掉
+`globalThis.document`」跑同一份编译产物，`mount()`（未注水）行为完全不变。
+
+> `renderToString` / `renderToStringSync` 渲染结束后会**还原宿主全局**
+> （`document`/`Node`/`window`）并回收 SSR 期间创建的 effect——避免同进程内 SSR 后
+> 再 hydrate 时被污染。
+
+---
+
+## HMR 热更新
+
+dev（vite）下改动 Plain 模块**不整页刷新**：只重建该模块对应挂载点的 DOM 子树
+（`syncRange` 最小重排），保住滚动位置、焦点与输入内容；模块级 `signal` 的值尽力
+保留（保留不了会在控制台**显式告警**，绝不静默重置）。vite 插件默认开启，可用
+`plain({ hmr: false })` 关闭。
+
+```js
+// vite.config.js
+import plain from "plain/vite";
+export default { plugins: [plain()] };              // dev 即具备 HMR
+```
+
+底层运行时 API（一般无需手写）：`hmrApply(id, newMod)` / `snapshotSignals` /
+`restoreSignals`；插件会为每个模块注入 `import.meta.hot.accept` 并自动关联模块 id。
 
 ---
 
@@ -410,6 +446,8 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ `ErrorBoundary` 就地降级
 - ✅ `server()` 编译期物理剥离 + dev / 生产 RPC 链路
 - ✅ SSR 输出（`renderToStringSync` / `renderToString`）
+- ✅ **SSR 注水**：`hydrate(container, App)` 复用服务端节点（身份不变）、就地修正、交互可用
+- ✅ **HMR 热更新**：dev 下改组件只热替换 DOM 子树（不整页刷新），模块级 signal 值尽力保留
 - ✅ CLI：check / schema / dev / build / serve
 - ✅ TypeScript 类型（含 JSX 类型，`tsc --noEmit` 通过）
 - ✅ 列表 keyed 复用（`key={...}`）：头部插入 / 重排不重建已有节点
@@ -432,14 +470,12 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 
 | 缺口 | 影响 | 优先级 |
 | --- | --- | --- |
-| **HMR / 热更新** | dev 下改文件整页刷新；Plain 的核心场景是「AI 写 → 人看」，这条最伤反馈环 | P0 |
-| **注水（hydration）** | SSR 只有首屏 HTML，客户端会重新渲染一次 | P0 |
 | **AI 原生工具（余下部分）** | `plaindev mcp` / `agent-context` 已可用；仍缺 **LSP 实时诊断**（编辑器里写时就报，而不是等 dev/build）与错误码统一 | P1 |
 | **RPC 请求合并 / 防抖** | 高频调用会各发一次请求 | P1 |
 | **多入口 / 代码分割** | 只验证了单入口 | P1 |
 | **并发渲染 / 时间切片** | 没有 | P2 |
 
-> 需要 SSR 交互的项目请先只用 CSR —— 这是当前唯一会影响正确性的缺口（hydration）。
+> HMR 与 SSR 注水（hydration）均已落地（见上文两节与 [`ROADMAP.md`](ROADMAP.md) M4/M5）。
 
 ### 明确的设计取舍（不是缺陷）
 
@@ -553,7 +589,8 @@ node dist/cli/index.js dev examples/todo
 | `pnpm run dev:example` | 8100 | 是（含 `serverEntry` / `root` 配置） | 与示例配置完全一致，推荐 |
 | `node dist/cli/index.js dev examples/todo` | 5173 | 否（`configFile: false`，用插件默认配置） | 适合体验 plaindev CLI 自身 |
 
-> 改了源码后需重新 `pnpm run build` 再刷新（目前无 HMR，dev 下整页刷新，见「已知限制」）。
+> 改了源码后需重新 `pnpm run build` 再刷新（框架自身源码的构建；示例应用的组件改动
+> 在 dev 下走 HMR，无需整页刷新）。
 
 ---
 

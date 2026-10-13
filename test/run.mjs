@@ -613,11 +613,16 @@ test("SSR：同一份组件在 Node 里渲染出 HTML 字符串", async () => {
     pathToFileURL(path.join(ROOT, "dist/server/render.js")).href
   );
   const html = renderToStringSync(mod.App);
+  // SSR 输出保留认领锚点（plain- 前缀的注释），比较时先剥掉它们，
+  // 只校验「文本/结构」是否正确 —— 锚点本身由 hydrate 测试单独覆盖。
+  const bare = html.replace(/<!--plain-[^>]*-->/g, "");
   ok(html.includes('<section class="page">'), "SSR 应输出 section：" + html);
-  ok(html.includes("<h1>Plain</h1>"), "SSR 应含插值文本：" + html);
-  ok(html.includes('<li>a</li>') && html.includes('<li>b</li>'), "SSR 应渲染列表：" + html);
-  ok(html.includes("<b>默认</b>"), "SSR 应渲染条件分支：" + html);
-  ok(html.includes('<div class="card">hi Plain</div>'), "SSR 应渲染子组件：" + html);
+  ok(bare.includes("<h1>Plain</h1>"), "SSR 应含插值文本：" + html);
+  ok(bare.includes("<li>a</li>") && bare.includes("<li>b</li>"), "SSR 应渲染列表：" + html);
+  ok(bare.includes("<b>默认</b>"), "SSR 应渲染条件分支：" + html);
+  ok(bare.includes('<div class="card">hi Plain</div>'), "SSR 应渲染子组件：" + html);
+  // 认领锚点必须存在于输出中（hydrate 依赖）
+  ok(html.includes("<!--plain-#-->") && html.includes("<!--plain-?-->"), "SSR 应保留认领锚点：" + html);
 });
 
 // ---------------------------------------------------------------------------

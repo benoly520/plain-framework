@@ -26,6 +26,21 @@ class SNode {
   get firstChild(): any {
     return this.childNodes[0] || null;
   }
+  get lastChild(): any {
+    return this.childNodes[this.childNodes.length - 1] || null;
+  }
+  get nextSibling(): any {
+    const p = this.parentNode;
+    if (!p) return null;
+    const i = p.childNodes.indexOf(this);
+    return i >= 0 && i + 1 < p.childNodes.length ? p.childNodes[i + 1] : null;
+  }
+  get previousSibling(): any {
+    const p = this.parentNode;
+    if (!p) return null;
+    const i = p.childNodes.indexOf(this);
+    return i > 0 ? p.childNodes[i - 1] : null;
+  }
   appendChild(n: any): any {
     if (n.parentNode) n.parentNode.removeChild(n);
     // 文档片段：把子节点搬进来（与浏览器行为一致）
@@ -160,6 +175,17 @@ class SFragment extends SNode {
   }
 }
 
+/**
+ * 认领锚点前缀。运行时用注释锚点定位动态区间（insert / when / each / slot），
+ * 这些锚点必须在 SSR 输出里保留，客户端 hydrate 才能按锚点认领已有 DOM。
+ * 其余注释（如用户或第三方插入的）仍然丢弃 —— 只输出我们自己的锚点。
+ */
+export const CLAIM_PREFIX = "plain-";
+
+function isClaimMarker(value: any): boolean {
+  return typeof value === "string" && value.startsWith(CLAIM_PREFIX);
+}
+
 function escapeText(s: any): string {
   return String(s).replace(/[&<>"]/g, (c) => TEXT_ESCAPE[c]);
 }
@@ -171,7 +197,9 @@ function escapeAttr(s: any): string {
 export function serializeNode(node: any): string {
   if (!node) return "";
   if (node.nodeType === 3) return escapeText(node.nodeValue);
-  if (node.nodeType === 8) return ""; // 锚点注释不输出
+  // 认领锚点必须原样输出（客户端 hydrate 按它定位动态区间）；普通注释丢弃
+  if (node.nodeType === 8)
+    return isClaimMarker(node.nodeValue) ? `<!--${node.nodeValue}-->` : "";
   if (node.nodeType === 11) return node.childNodes.map(serializeNode).join("");
   if (node.nodeType !== 1) return "";
 
@@ -217,11 +245,31 @@ export function createDocument(): ServerDocument {
   };
 }
 
-/** 安装到 globalThis.document / window，供编译产物在 Node 里直接运行 */
+/**
+ * 安装到 globalThis.document / window，供编译产物在 Node 里直接运行。
+ *
+ * 返回的 document 上挂了一个 `__restore()`：SSR 结束后调用它可把全局
+ * document / Node / window 还原成安装前的值。**务必还原**——否则 SSR 会污染
+ * 宿主进程（典型后果：同进程里再做 hydrate / 无头 DOM 渲染时，全局 document
+ * 仍是服务端垫片，运行时新建的节点会变成 shim 节点）。
+ */
 export function installServerDOM(): ServerDocument {
   const doc = createDocument();
-  (globalThis as any).document = doc;
-  (globalThis as any).Node = SNode;
-  if (!globalThis.window) (globalThis as any).window = undefined;
+  const g = globalThis as any;
+  const prev = {
+    document: g.document,
+    Node: g.Node,
+    window: g.window,
+    hasWindow: "window" in g,
+  };
+  g.document = doc;
+  g.Node = SNode;
+  if (!g.window) g.window = undefined;
+  (doc as any).__restore = () => {
+    g.document = prev.document;
+    g.Node = prev.Node;
+    if (prev.hasWindow) g.window = prev.window;
+    else delete g.window;
+  };
   return doc;
 }

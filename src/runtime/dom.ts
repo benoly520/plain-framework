@@ -15,6 +15,8 @@ import {
   resolve,
   untracked,
 } from "./signal.js";
+import { getHydrationCtx, claimPair, suspendHydrate } from "./hydration-context.js";
+import { hmrRegister } from "./hmr.js";
 
 export { resolve } from "./signal.js";
 
@@ -32,9 +34,53 @@ export function mount(
   const el =
     typeof target === "string" ? document.querySelector(target) : target;
   if (!el) throw new Error(`[plain] mount 找不到目标：${target}`);
-  const n = typeof node === "function" ? node() : node;
-  toNodes(n).forEach((x: Node) => el.appendChild(x));
-  return () => toNodes(n).forEach((x: Node) => (x as any).remove && (x as any).remove());
+  const isComp = typeof node === "function";
+  // 用 Slot 锚点承载，使挂载点可被 HMR 整树替换（保住焦点/滚动/输入）。
+  const startMark = document.createComment(`${A}root]`);
+  const endMark = document.createComment(`${A}/root]`);
+  el.appendChild(startMark);
+  el.appendChild(endMark);
+  let current: Node[] = [];
+  // 组件渲染产生的一切 effect 归入 cleanups：HMR 热替换只需回收它们（不动 DOM）
+  let cleanups = new Set<() => void>();
+  const render = () => {
+    const n = isComp
+      ? withOwner(cleanups, () => (node as () => Renderable)())
+      : node;
+    const nodes = toNodes(n);
+    syncRange(startMark, endMark, nodes);
+    current = nodes; // 记录「已插入的实际节点」，卸载时按它们移除（fragment 已被抽干）
+  };
+  render();
+
+  const unmount = () => {
+    current.forEach((x: any) => x.remove && x.remove());
+    startMark.remove && startMark.remove();
+    endMark.remove && endMark.remove();
+  };
+
+  // HMR：仅对「组件形式」的挂载注册热替换（普通节点无可替换的 comp）
+  if (isComp) {
+    const unregister = hmrRegister({
+      container: el,
+      comp: node as () => Renderable,
+      // 热替换时只回收旧 effect（DOM 交给 rebuild 的 syncRange 做最小重排）
+      dispose: () => {
+        cleanups.forEach((f) => f());
+        cleanups.clear();
+        cleanups = new Set<() => void>();
+      },
+      rebuild: (comp) => {
+        (node as any) = comp;
+        render();
+      },
+    });
+    return () => {
+      unregister();
+      unmount();
+    };
+  }
+  return unmount;
 }
 
 // ---------------------------------------------------------------------------
@@ -51,12 +97,37 @@ export function toNodes(v: any): Node[] {
 }
 
 function markers(parent: any, open: string, close: string): [any, any] {
-  const start = document.createComment(open);
-  const end = document.createComment(close);
+  // hydrate：认领服务端已有的一对锚点，并把锚点之间的内容原样放回两者之间。
+  // 这样 syncRange 计算 cur 时看到的就是同一批被认领的服务端节点 ——
+  // 配合 hydrate 期启用的「同类型就地更新」，即可做到不改节点身份、零重建。
+  const ctx = getHydrationCtx();
+  if (ctx) {
+    const pair = claimPair(open, close);
+    if (pair) {
+      // 认领成功：把锚点与内容按原顺序重新挂回父级（content 已从服务端父级摘下）。
+      // 顺序严格保持 start → content… → end，与「新建」路径一致。
+      parent.appendChild(pair.start);
+      for (const c of pair.content) parent.appendChild(c);
+      parent.appendChild(pair.end);
+      return [pair.start, pair.end];
+    }
+    // 锚点对不匹配：退化为新建锚点（recover 语义）
+  }
+  // 用父节点的 ownerDocument 新建锚点，而非全局 document：
+  // 这样即使在 SSR 垫片污染全局、或跨文档（iframe/多窗口）场景下也不会串文档。
+  const doc: Document = parent?.ownerDocument || (globalThis as any).document;
+  const start = doc.createComment(open);
+  const end = doc.createComment(close);
   parent.appendChild(start);
   parent.appendChild(end);
   return [start, end];
 }
+
+/**
+ * 认领锚点前缀：所有运行时注释锚点都带这个前缀，SSR 序列化时才保留它们
+ * （见 server/dom-shim.ts 的 serializeNode）。hydrate 靠锚点定位动态区间。
+ */
+const A = "plain-";
 
 /**
  * createSlot —— 带锚点的插槽。
@@ -65,11 +136,29 @@ function markers(parent: any, open: string, close: string): [any, any] {
  * 抽干，之后往里写就全丢了。Slot 用两个注释锚点动态定位真实父节点。
  */
 export function createSlot(label = ""): Slot {
-  const start = document.createComment(label ? `[${label}]` : "[");
-  const end = document.createComment(label ? `[/${label}]` : "[/]");
+  const open = label ? `${A}${label}]` : `${A}[`;
+  const close = label ? `${A}/${label}]` : `${A}/]`;
+  let start: any;
+  let end: any;
   const fragment = document.createDocumentFragment();
-  fragment.appendChild(start);
-  fragment.appendChild(end);
+
+  // hydrate：认领服务端已有的锚点对（及其间内容），把锚点与内容按原顺序放进 fragment
+  const ctx = getHydrationCtx();
+  const pair = ctx ? claimPair(open, close) : null;
+  if (pair) {
+    start = pair.start;
+    end = pair.end;
+    fragment.appendChild(start);
+    for (const c of pair.content) fragment.appendChild(c);
+    fragment.appendChild(end);
+  } else {
+    const doc: Document =
+      (fragment as any).ownerDocument || (globalThis as any).document || document;
+    start = doc.createComment(open);
+    end = doc.createComment(close);
+    fragment.appendChild(start);
+    fragment.appendChild(end);
+  }
   return {
     __plainSlot: true,
     fragment,
@@ -110,6 +199,15 @@ export function syncRange(start: any, end: any, next: Node[]): void {
     cur.push(n);
     n = n.nextSibling;
   }
+
+  // hydrate 期：把「被认领的服务端节点」与「新算出的节点」按位置对齐，
+  // 同类型则把新内容就地并入旧节点（保住节点对象身份），只对多出/缺失的做增删。
+  // 这是「复用服务端已有节点」的核心；普通更新不启用（保持既有语义）。
+  if (getHydrationCtx()) {
+    reconcileHydrate(start, end, cur, next);
+    return;
+  }
+
   cur.forEach((x: any) => {
     if (next.indexOf(x) === -1 && x.remove) x.remove();
   });
@@ -123,11 +221,99 @@ export function syncRange(start: any, end: any, next: Node[]): void {
   }
 }
 
+/**
+ * hydrate 期的区间对齐：把服务端已有节点与客户端新节点按位置配对。
+ * - 同类型 → 就地更新（复用旧节点，节点身份不变）
+ * - 多余的旧节点 → 摘除；多余的新节点 → 插入
+ */
+function reconcileHydrate(start: any, end: any, cur: any[], next: Node[]): void {
+  const parent = start.parentNode;
+  if (!parent) return;
+  const n = Math.min(cur.length, next.length);
+  for (let i = 0; i < n; i++) {
+    if (sameKind(cur[i], next[i])) {
+      inPlaceUpdate(cur[i], next[i]);
+    } else {
+      // 类型不符：用新节点替换旧节点（就地修正）
+      parent.insertBefore(next[i], cur[i]);
+      if (cur[i].remove) cur[i].remove();
+    }
+  }
+  // 多出的旧节点摘除
+  for (let i = n; i < cur.length; i++) {
+    if (cur[i].remove) cur[i].remove();
+  }
+  // 多出的新节点追加到 end 之前
+  for (let i = n; i < next.length; i++) {
+    parent.insertBefore(next[i], end);
+  }
+}
+
+/** 两个节点是否可视为「同类型」而做就地更新（文本 vs 文本、同名元素 vs 同名元素） */
+function sameKind(a: any, b: any): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.nodeType === 3 && b.nodeType === 3) return true;
+  if (
+    a.nodeType === 1 &&
+    b.nodeType === 1 &&
+    String(a.tagName).toLowerCase() === String(b.tagName).toLowerCase()
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 把 b（新算出的节点）的内容同步进 a（已就位的节点），不替换 a 本身。
+ * - 文本节点：把 a.nodeValue 改成 b 的值
+ * - 元素节点：把 b 的属性/子节点搬进 a（a 保持自身身份）
+ */
+function inPlaceUpdate(a: any, b: any): void {
+  if (a === b) return;
+  if (a.nodeType === 3 && b.nodeType === 3) {
+    if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue;
+    return;
+  }
+  if (a.nodeType === 1 && b.nodeType === 1) {
+    // 属性：以 b 为准（先删 a 上多余的，再补 b 的）
+    const aAttrs = a.attributes || [];
+    const bAttrs = b.attributes || [];
+    const bNames = new Set<string>();
+    for (const at of Array.from(bAttrs) as any[]) {
+      bNames.add(at.name);
+      if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+    }
+    for (const at of Array.from(aAttrs) as any[]) {
+      if (!bNames.has(at.name)) a.removeAttribute(at.name);
+    }
+    // 子节点：用 syncRange 的最小重排把 b 的子节点同步进 a
+    syncChildren(a, b);
+  }
+}
+
+/** 用最小重排把 b 的子节点同步进 a（a 自身保留） */
+function syncChildren(a: any, b: any): void {
+  const want = Array.from(b.childNodes) as Node[];
+  const cur = Array.from(a.childNodes) as Node[];
+  cur.forEach((c) => {
+    if (want.indexOf(c) === -1 && (c as any).remove) (c as any).remove();
+  });
+  let ref = a.firstChild;
+  for (const w of want) {
+    if (ref === w) {
+      ref = w.nextSibling;
+      continue;
+    }
+    a.insertBefore(w, ref);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // insert —— 任意表达式的响应式插入
 // ---------------------------------------------------------------------------
 export function insert(parent: Node, get: () => unknown, owner?: Owner): void {
-  const [start, end] = markers(parent, "[", "]");
+  const [start, end] = markers(parent, `${A}[`, `${A}]`);
   let cleanups: Set<() => void> | null = null;
   effect(() => {
     // 每次重算都换一个新的 owner：这样「动态组件」的结果被替换时，
@@ -138,11 +324,20 @@ export function insert(parent: Node, get: () => unknown, owner?: Owner): void {
     }
     const set = new Set<() => void>();
     let v: any;
-    withOwner(set, () => {
-      v = get();
-    });
+    let built: Node[] = [];
+    // hydrate：锚点对已认领，内部内容应由运行时新建，再与已认领内容对齐 ——
+    // 故 `get()` 与 `toNodes()` 全程挂起认领（否则新建会重复消费游标）。
+    const resume = suspendHydrate();
+    try {
+      withOwner(set, () => {
+        v = get();
+      });
+      built = toNodes(v);
+    } finally {
+      resume();
+    }
     cleanups = set;
-    syncRange(start, end, toNodes(v));
+    syncRange(start, end, built);
   }, owner);
 }
 
@@ -156,7 +351,7 @@ export function when(
   elseFn?: (() => Renderable) | null,
   owner?: Owner
 ): void {
-  const [start, end] = markers(parent, "?", "/?");
+  const [start, end] = markers(parent, `${A}?`, `${A}/?`);
   let currentKey: string | null = null;
   let cleanups: Set<() => void> | null = null;
 
@@ -171,12 +366,20 @@ export function when(
     currentKey = key;
     const set = new Set<() => void>();
     let node: Renderable = null;
-    withOwner(set, () => {
-      const branch = cond ? thenFn : elseFn;
-      node = branch ? branch() : null;
-    });
+    let built: Node[] = [];
+    // hydrate：锚点对已认领，分支节点应新建后与已认领内容对齐（挂起认领）
+    const resume = suspendHydrate();
+    try {
+      withOwner(set, () => {
+        const branch = cond ? thenFn : elseFn;
+        node = branch ? branch() : null;
+      });
+      built = toNodes(node);
+    } finally {
+      resume();
+    }
     cleanups = set;
-    syncRange(start, end, toNodes(node));
+    syncRange(start, end, built);
   }, owner);
 }
 
@@ -207,7 +410,7 @@ export function each(
   keyFn?: ((item: any, index: number) => unknown) | null,
   owner?: Owner
 ): void {
-  const [start, end] = markers(parent, "#", "/#");
+  const [start, end] = markers(parent, `${A}#`, `${A}/#`);
   let rows: Row[] = [];
 
   /** 建立一行：独立 signal 承载该行数据，effect 归入该行自己的 owner */
@@ -215,10 +418,19 @@ export function each(
     const rowSignal = signal(item);
     const cleanups = new Set<() => void>();
     let built: any = null;
-    withOwner(cleanups, () => {
-      built = itemFn(rowProxy(() => rowSignal()), index);
-    });
-    return { key: undefined, rowSignal, cleanups, nodes: toNodes(built) as any[] };
+    let nodes: Node[] = [];
+    // hydrate：列表锚点对已认领、其内容被放回锚点之间 —— 因此行节点应新建，
+    // 由 syncRange 与已认领的服务端行做对齐复用（挂起认领）。
+    const resume = suspendHydrate();
+    try {
+      withOwner(cleanups, () => {
+        built = itemFn(rowProxy(() => rowSignal()), index);
+      });
+      nodes = toNodes(built) as any[];
+    } finally {
+      resume();
+    }
+    return { key: undefined, rowSignal, cleanups, nodes };
   };
 
   /** 回收一行：先跑清理回调（回收该行的 effect），再摘除它的 DOM 节点 */
