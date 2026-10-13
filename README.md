@@ -400,7 +400,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
 - ✅ `AGENTS.md` + 反模式目录（10 条均有静态检查；看不出类型的不猜）
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 126 项（内核 19 + 单元 107）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 136 项（内核 19 + 单元 117）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -430,7 +430,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 107 项
+pnpm test              # 构建 + 内核 19 项 + 单元 117 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -438,7 +438,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（107 项，`node:test`）：
+- `test/*.test.mjs`（117 项，`node:test`）：
   `lint` 规则与自动修复、`schema` 契约提取、`compiler` 报错兜底与 sourcemap、
   `cli` 子命令、`vite` 插件的编译 / 剥离 / 契约检查拦截、
   `server`（静态托管 / 目录穿越 / RPC / 一行起服）、
@@ -480,8 +480,8 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
 | 语句 | 90% | 94.3% |
-| 分支 | 82% | 85.6% |
-| 函数 | 85% | 91.2% |
+| 分支 | 82% | 86.2% |
+| 函数 | 85% | 91.7% |
 | 行 | 90% | 94.3% |
 
 > 唯一明显偏低的是 `src/cli`（约 69%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
@@ -490,7 +490,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 107 / fail 0   # 单元
+# pass 117 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23

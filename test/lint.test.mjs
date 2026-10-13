@@ -1,7 +1,9 @@
 // lint.ts 单测：契约规则 + 自动修复
 //
 // 覆盖点：signal-assign / signal-not-called（插值与属性两个分支）/ react-habit /
-//        no-inner-html（三种写法）/ resource 解构识别 / 不误伤 / formatIssues / 多修复
+//        no-inner-html（三种写法）/ no-props-destructure / no-props-snapshot
+//        （声明 / 赋值 / JSX 三种形态，含 on* 不误报）/ no-signal-mutate /
+//        resource 解构识别 / 不误伤 / formatIssues / 多修复
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { check, autofix, formatIssues } from "../dist/lint.js";
@@ -267,4 +269,79 @@ test("不误伤：thunk / 内联 resolve / 事件透传 / 非组件", () => {
   for (const [src, why] of cases) {
     assert.deepEqual(check(src, "a.tsx"), [], why);
   }
+});
+
+test("[回归] 不误报：把 on* 事件 prop 存进变量（编译器不给 on* 包 getter）", () => {
+  const cases = [
+    [
+      "export function Card(props) { const cb = props.onClick; return <button onClick={cb}>x</button>; }",
+      "on* prop 存的本来就是函数，快照不丢响应性",
+    ],
+    [
+      "export function Card(props) { const cb = resolve(props.onClick); return <button onClick={cb}>x</button>; }",
+      "resolve 包一层的 on* prop 同样不报",
+    ],
+    [
+      'export function Card(props) { const cb = props["onClick"]; return <button onClick={cb}>x</button>; }',
+      "下标形态的 on* prop 也算事件",
+    ],
+  ];
+  for (const [src, why] of cases) {
+    assert.deepEqual(check(src, "a.tsx"), [], why);
+  }
+});
+
+test("赋值形态的快照：let t; t = props.title -> plain/no-props-snapshot", () => {
+  const src = [
+    "export function Card(props) {",
+    "  let t;",
+    "  t = props.title;",
+    "  return <h2>{t}</h2>;",
+    "}",
+  ].join("\n");
+  const issues = check(src, "Card.tsx");
+  assert.deepEqual(codes(issues), ["plain/no-props-snapshot"]);
+  assert.equal(issues[0].line, 3);
+  assert.match(issues[0].message, /t = props\.title/);
+  assert.equal(issues[0].fix, undefined, "两种改法语义不同，不自动改");
+});
+
+test("不误报：赋值写在 effect / 回调里会重跑；on* 赋值；signal 赋值归 signal-assign", () => {
+  const cases = [
+    [
+      "import { effect } from 'plain'; export function Card(props) { let t; effect(() => { t = props.title; }); return <h2>{t}</h2>; }",
+      "effect 会随依赖重跑，赋值是正确用法",
+    ],
+    [
+      "export function Card(props) { let t; const save = () => { t = props.title; }; return <button onClick={save}>x</button>; }",
+      "事件回调里赋值同样会重跑",
+    ],
+    [
+      "export function Card(props) { let cb; cb = props.onClick; return <button onClick={cb}>x</button>; }",
+      "on* 事件 prop 赋值不按快照报",
+    ],
+  ];
+  for (const [src, why] of cases) {
+    assert.deepEqual(check(src, "a.tsx"), [], why);
+  }
+
+  const signalAssign = [
+    "import { signal } from 'plain';",
+    "export function Card(props) {",
+    "  const s = signal(0);",
+    "  s = props.count;",
+    "  return <h2>{s()}</h2>;",
+    "}",
+  ].join("\n");
+  assert.deepEqual(codes(check(signalAssign, "Card.tsx")), ["plain/signal-assign"]);
+});
+
+test("props 动态下标看不出来 -> 仍按 getter 报（不猜就不放行）", () => {
+  const src = [
+    "export function Card(props) {",
+    "  const t = props[key];",
+    "  return <h2>{t}</h2>;",
+    "}",
+  ].join("\n");
+  assert.deepEqual(codes(check(src, "Card.tsx")), ["plain/no-props-snapshot"]);
 });

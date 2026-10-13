@@ -33,7 +33,7 @@
 | 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` | — |
 | 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ✅ `plain/no-signal-mutate` | 05 |
 | 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` | 04（间接） |
-| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`） | `resolve(props.title)`；要响应式就写成 thunk | ✅ `plain/no-props-snapshot` | 06 |
+| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`；`t = props.title` 同样算） | `resolve(props.title)`；要响应式就写成 thunk | ✅ `plain/no-props-snapshot` | 06 |
 | 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ✅ `PLAIN_E1007` | 07 |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是

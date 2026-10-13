@@ -48,7 +48,7 @@ export function check(
   };
 
   const visit = (node: ts.Node) => {
-    // 1) 给 signal 变量直接赋值：count = count() + 1
+    // 反模式 1：给 signal 变量直接赋值：count = count() + 1
     if (
       ts.isBinaryExpression(node) &&
       node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
@@ -70,9 +70,9 @@ export function check(
       );
     }
 
-    // 2) JSX 里把 signal 当值用：<p>{count}</p>
+    // 反模式 2（插值分支）：JSX 里把 signal 当值用：<p>{count}</p>
     // 注意：属性值 checked={done} 的 JsxExpression 也满足下面的条件，
-    // 但那条由规则 3 负责。这里必须排除，否则同一个标识符会被报两次，
+    // 但那条由下面的「属性分支」负责。这里必须排除，否则同一个标识符会被报两次，
     // 且两条 fix 覆盖同一区间，autofix 会把源码改成 done()() 形式的坏代码。
     if (
       ts.isJsxExpression(node) &&
@@ -95,7 +95,7 @@ export function check(
       );
     }
 
-    // 3) JSX 属性里同理：checked={done}
+    // 反模式 2（属性分支）同理：JSX 属性里漏调用 signal：checked={done}
     if (
       ts.isJsxAttribute(node) &&
       node.initializer &&
@@ -119,7 +119,7 @@ export function check(
       );
     }
 
-    // 4) React 肌肉记忆
+    // 反模式 3：React 肌肉记忆
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
       const n = node.expression.text;
       if (["useState", "useEffect", "useMemo", "useCallback", "useRef"].includes(n)) {
@@ -132,7 +132,7 @@ export function check(
       }
     }
 
-    // 5) innerHTML / outerHTML —— 框架的安全红线
+    // 反模式 4：innerHTML / outerHTML —— 框架的安全红线
     if (
       (ts.isPropertyAccessExpression(node) &&
         ["innerHTML", "outerHTML"].includes(node.name.text)) ||
@@ -148,7 +148,7 @@ export function check(
       );
     }
 
-    // 6) 解构 props —— 动态属性在编译器里是 getter，解构拿到的是函数本身，
+    // 反模式 5：解构 props —— 动态属性在编译器里是 getter，解构拿到的是函数本身，
     //    响应性会静默丢失（这是 AI 从 React/Solid 带过来的头号反模式）
     if (
       ts.isVariableDeclaration(node) &&
@@ -167,30 +167,63 @@ export function check(
       );
     }
 
-    // 7) 把 props 的 getter 存进变量 / 忘了 resolve
-    //    const t = props.title           —— 拿到函数本身
-    //    const t = resolve(props.title)  —— 初次对、之后不更新（快照）
+    // 反模式 7：对 signal 持有值就地改：items().push(x) / items()[0] = x
+    //    signal 用 Object.is 比较，就地改不会触发更新 —— 静默失败。
+    if (isMutatingSignalCall(node, signals)) {
+      const name = signalReadName(node);
+      add(
+        node,
+        "error",
+        "plain/no-signal-mutate",
+        `不要就地修改 signal 的值（"${name}().…"）：` +
+          `请生成新值再 set，例如 ${name}.set([...${name}(), x])`
+      );
+    }
+
+    // 反模式 9：把 props 的 getter 存进变量 / 忘了 resolve
+    //    const t = props.title            —— 拿到函数本身
+    //    const t = resolve(props.title)   —— 初次对、之后不更新（快照）
+    //    let t; t = props.title           —— 赋值形态同理（见下面第二条）
     //    {props.title} / title={props.title} —— JSX 里忘了 resolve
     //    正确：在会重跑的上下文里 resolve，或写成 thunk。
-    //    on* 事件 prop 编译器不包 getter，透传不报。
+    //    on* 事件 prop 编译器不包 getter（存进变量、透传都合法），一律不报。
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
       node.initializer &&
+      isPropsSnapshotExpr(node.initializer) &&
       !isThunk(node.initializer) &&
-      isPropsSnapshotExpr(node.initializer)
+      !isEventPropsAccess(node.initializer)
     ) {
-      const access = propsAccessText(node.initializer);
       add(
         node,
         "error",
         "plain/no-props-snapshot",
-        `不要把 props 取值快照进变量（"${node.name.text} = ${access}"）：` +
-          `动态属性是 getter，这样会丢掉响应性。` +
-          `在 JSX / effect 里写 resolve(${access})，或写成 thunk：const ${node.name.text} = () => resolve(${access})`
+        snapshotMessage(node.name.text, propsAccessText(node.initializer))
       );
     }
 
+    // 反模式 9（赋值形态）：let t; t = props.title
+    //    只报「直接写在组件函数体里」的赋值 —— 写在 effect / 事件回调里的赋值
+    //    会随依赖重跑，属于正确用法，不报。
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.left) &&
+      !signals.has(node.left.text) &&
+      isPropsSnapshotExpr(node.right) &&
+      !isEventPropsAccess(node.right) &&
+      isDirectlyInComponentBody(node)
+    ) {
+      add(
+        node,
+        "error",
+        "plain/no-props-snapshot",
+        snapshotMessage(node.left.text, propsAccessText(node.right))
+      );
+    }
+
+    // 反模式 9（JSX 形态）：JSX 里忘了 resolve
     if (
       ts.isJsxExpression(node) &&
       node.expression &&
@@ -207,19 +240,6 @@ export function check(
         "error",
         "plain/no-props-snapshot",
         `JSX 里的动态 props 要用 resolve："{resolve(${access})}"（直接写 {${access}} 拿到的是 getter 本身）`
-      );
-    }
-
-    // 8) 对 signal 持有值就地改：items().push(x) / items()[0] = x
-    //    signal 用 Object.is 比较，就地改不会触发更新 —— 静默失败。
-    if (isMutatingSignalCall(node, signals)) {
-      const name = signalReadName(node);
-      add(
-        node,
-        "error",
-        "plain/no-signal-mutate",
-        `不要就地修改 signal 的值（"${name}().…"）：` +
-          `请生成新值再 set，例如 ${name}.set([...${name}(), x])`
       );
     }
 
@@ -340,6 +360,55 @@ function propsAccessText(n: ts.Node): string {
     return unwrapExpr(e.arguments[0]).getText();
   }
   return e.getText();
+}
+
+/** 把 props 取值快照进变量时的统一提示（声明形态 / 赋值形态共用） */
+function snapshotMessage(name: string, access: string): string {
+  return (
+    `不要把 props 取值快照进变量（"${name} = ${access}"）：` +
+    `动态属性是 getter，这样会丢掉响应性。` +
+    `在 JSX / effect 里写 resolve(${access})，或写成 thunk：const ${name} = () => resolve(${access})`
+  );
+}
+
+/**
+ * 取「直接挂在 props 上的第一个属性名」：props.onClick / props["onClick"] -> "onClick"。
+ * 动态下标（props[key]）看不出来，返回 null —— 不猜，也就不按事件 prop 放行。
+ */
+function propsHeadPropName(n: ts.Node): string | null {
+  let e: ts.Node = unwrapExpr(n);
+  let head: string | null = null;
+  while (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e)) {
+    if (ts.isPropertyAccessExpression(e)) head = e.name.text;
+    else if (ts.isStringLiteralLike(e.argumentExpression)) head = e.argumentExpression.text;
+    else return null;
+    e = unwrapExpr(e.expression);
+  }
+  return head;
+}
+
+/**
+ * 取值是否来自「编译器不包 getter」的 on* 事件 prop（props.onClick / resolve(props.onClick)）。
+ * 这类 prop 存的本来就是函数，快照不会丢响应性 —— 按反模式 9 报就是误报。
+ */
+function isEventPropsAccess(n: ts.Node): boolean {
+  const e = unwrapExpr(n);
+  const target = isResolveCall(e) && ts.isCallExpression(e) ? e.arguments[0] : e;
+  const name = propsHeadPropName(target);
+  return !!name && isEventAttrName(name);
+}
+
+/**
+ * 是否直接写在组件函数体里（中间不隔着 effect / 事件回调等会重跑的上下文）。
+ * 只有这种位置的赋值才是「快照」；写在回调里的赋值会随依赖重跑，属正确用法。
+ */
+function isDirectlyInComponentBody(node: ts.Node): boolean {
+  let cur: ts.Node | undefined = node.parent;
+  while (cur) {
+    if (ts.isFunctionLike(cur)) return isComponentFn(cur);
+    cur = cur.parent;
+  }
+  return false;
 }
 
 const MUTATING_METHODS = new Set([

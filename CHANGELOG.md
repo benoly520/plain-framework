@@ -10,8 +10,10 @@
 - **契约规则 `plain/no-signal-mutate`**：就地改 signal 持有值（`items().push(x)` /
   `items()[0] = x`）不会触发更新。构建期报错，不自动修。
 - **契约规则 `plain/no-props-snapshot`**：把动态 props 的 getter 存进变量
-  （`const t = props.title` / `const t = resolve(props.title)`）或 JSX 里忘了 `resolve`
-  （`{props.title}`）。`on*` 事件透传与 thunk 写法不报。
+  （`const t = props.title` / `const t = resolve(props.title)`）、赋值形态（`let t; t = props.title`，
+  只报组件函数体顶层的赋值，写在 `effect` / 回调里的会重跑、不报）或 JSX 里忘了 `resolve`
+  （`{props.title}`）。`on*` 事件 prop 编译器不包 getter（存进变量、透传都合法）与 thunk 写法不报；
+  动态下标（`props[key]`）看不出来，仍按 getter 报。
 - **`server()` 参数可序列化校验**：新增编译错误 `PLAIN_E1007`。调用 `server()` 产物时
   传入字面量函数、本文件的类实例、或 `ReadableStream` / `FormData` 等，编译期失败。
   看不出类型的标识符、`new Date()`、spread **不猜**，避免误报。
