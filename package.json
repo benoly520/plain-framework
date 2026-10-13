@@ -39,13 +39,18 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/runtime/router.js"
     },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
     "./types": "./dist/index.d.ts"
   },
   "files": [
     "dist",
     "README.md",
     "CHANGELOG.md",
-    "AGENTS.md"
+    "AGENTS.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "build": "tsc",
