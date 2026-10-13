@@ -2,7 +2,8 @@
 
 > 这个文件是给 AI 代理看的（人请看 [README.md](README.md)）。
 > 目标：让代理**一次写对**，而不是写完再靠人排查。
-> 纪律：**先读第 3 节的反模式目录，再动手写代码。**
+> 纪律：**先读第 3 节的反模式目录，再动手写代码。** 写表单 / 提交 / 校验这类常见场景前，
+> 先看 [`docs/patterns.md`](docs/patterns.md)（每个场景只有一种推荐写法）。
 
 ## 1. Plain 是什么
 
@@ -116,6 +117,7 @@ npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE �
 | `src/cli/` | `plaindev` |
 | `test/` | 测试（跑的是 `dist/`，不是 `src/`） |
 | `eval/` | AI 正确率评测：任务 + 验收断言 + 指标 |
+| `docs/patterns.md` | 常见场景（表单 / 异步提交 / 列表内表单 / 校验）的**唯一推荐写法** |
 
 ## 7. 改动约束
 

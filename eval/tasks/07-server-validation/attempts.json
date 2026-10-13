@@ -1,0 +1,5 @@
+{
+  "attempts": 1,
+  "model": "deepseek-v4.1-flash",
+  "note": "单轮单次提交；注意：本模型在写 candidate 前已读过 check.mjs，非协议干净实验"
+}
