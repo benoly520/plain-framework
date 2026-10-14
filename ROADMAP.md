@@ -172,9 +172,15 @@ SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式
 - **评测的上下文档位** ✅ 已落地：`eval/run.mjs --prompt --context task|minimal|full`。
   这条是自变量，不记下来三次跑的数字就没法比（见 `eval/README.md`）。
   真实 agent 结果仍待跑 —— 评测的诚实性优先于「有个数字」。
-- **契约从「推断」变成「声明」**：`schema.ts` 的 props 来自「代码读了什么 + 调用点传了什么」，
-  `<Card {...rest}/>` 就推不出来。让 AI 显式声明再校验，契约才可信。
-- **JSX 类型收紧**：`src/types.ts` 里 `[attr: string]: any` 让「类型即校验」在组件边界失效。
+- **契约从「推断」变成「声明」** ✅ 已落地：`schema.ts` 的 props 改以组件**声明的类型**为事实来源
+  （`optional` 来自 `?`、`type` 来自注解），新增 `propsSource` 如实标注来源
+  （`declared` / `declared-unresolved` / `inferred`）；解析不了（跨文件、`Pick<…>` 等）就退回推断
+  并附 `declaredType`，不假装。「少传 / 多传 prop」的校验**刻意不重复实现** —— 见下一条。
+- **JSX 类型收紧** ✅ 已落地：去掉 `CommonAttributes` 的 `[attr: string]: any`，属性名拼错 /
+  类型写错（`scr` / `checked="yes"` / `onClikc`）在编辑器与 `tsc` 下当场报错；`data-*` / `aria-*`
+  与常用属性、事件一并补全，未知标签保持宽松。防回归见 `test/types.test.mjs`。
+  这也是「契约声明化」那块**不**再自己做调用点校验的原因：JSX 类型收紧后 `tsc` 已覆盖，
+  按判据（平台 / 已有工具优先）不该再造一个类型检查器。
 
 **验收标准**
 
@@ -196,8 +202,13 @@ SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式
     1. **`server()` 清单是单文件**（`serverEntry` 单一 `.plain/server.mjs`）——多入口 / 多构建
        时服务函数会写进同一个文件互相覆盖。 ✅ **已落地**：跨文件同名在构建期抛错并点名两处
        来源（`assertNoNameCollision` + vite 插件按来源查重），同文件热更新不误报。
-    2. **懒加载子树**：`dynamic import()` 进来的 Plain 模块同样要能被 `__plainBeginModule(id)`
-       打标并注册 HMR（当前只在静态模块求值时打标）。
+    2. **懒加载子树** ✅ **已落地（根因与原先的诊断不同）**：`dynamic import()` 进来的模块
+       **本来就被打标**（vite 对按需加载的模块同样会跑 transform）。真正的根因在 `hmrApply`：
+       它只处理「改动模块 == 挂载模块且导出 `App` / `default`」，其余一律打一句 warning 就返回 ——
+       于是改独立组件文件 / 懒加载模块时**静默保持旧代码**。现在补成「精确替换（挂载模块）＋
+       重跑兜底（改动被别处使用的模块时重跑各挂载点的根组件，取到新版本、不整页刷新）」，
+       认不出根组件时明确告警并整页刷新。测试见 `test/hmr.test.mjs`。
+       剩余粒度边界（组件级细粒度热替换）另记为 P2。
     - **已排除的伪问题**：「同页多棵独立 App 根」不会串味 —— 认领游标按 `hydrate` 的
       `container` 走，天然隔离（已用最小复现验证）。原先担心的「锚点 `plain-` 前缀冲突」不成立。
 - RPC 请求合并 / 防抖

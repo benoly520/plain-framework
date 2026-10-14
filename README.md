@@ -531,6 +531,9 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
   未知标签保持宽松。`test/types.test.mjs` 用真 `tsc` 钉住（防索引签名被加回来）
 - ✅ **契约「声明化」**：`plaindev schema` 的 props 以组件**声明的类型**为准（带 `type` 与 `optional`），
   解析不了就标 `declared-unresolved` 并退回推断 —— 不假装；「少传 / 多传 prop」交给 `tsc`，不重复造检查器
+- ✅ **HMR 覆盖所有模块**：此前只有「挂载模块 + 导出 `App` / `default`」能热替换，改独立组件文件或
+  `import()` 懒加载模块会**静默留旧代码**；现在走「重跑挂载点根组件」（不整页刷新），
+  认不出根组件时明确告警并整页刷新
 - ✅ 结构化编译错误（`PLAIN_E100x` + 文件/行列/hint，可 JSON 序列化）
 - ✅ `server()` 自包含校验（`PLAIN_E1006`）：引用了外部变量在**编译期**报错，不再等运行时 `ReferenceError`
 - ✅ `server()` 参数与返回值可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
@@ -542,7 +545,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；`plaindev lsp` 把**同一条规则链**做成
   **编辑器实时诊断**（写时就报，不必等 dev / build）；确认误报可用行级抑制指令
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 242 项（内核 19 + 单元 223）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 244 项（内核 19 + 单元 225）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -551,7 +554,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 
 | 缺口 | 影响 | 优先级 |
 | --- | --- | --- |
-| **`dynamic import()` 的 HMR 注册** | 懒加载进来的模块热替换没接上（也是「按路由自动分包」的技术前提） | P1 |
+| **组件级（细粒度）热替换** | 现在最细的粒度是「挂载点」：改动被别处使用的模块时会把挂载点的根组件全部重跑（会丢焦点 / 滚动），而不是只换那一棵子树 | P2 |
 | **RPC 请求合并 / 防抖** | 高频调用会各发一次请求 | P1 |
 | **多入口 / 代码分割** | 只验证了单入口 | P1 |
 | **并发渲染 / 时间切片** | 没有 | P2 |
@@ -570,7 +573,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 223 项
+pnpm test              # 构建 + 内核 19 项 + 单元 225 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -578,7 +581,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（223 项，`node:test`）：
+- `test/*.test.mjs`（225 项，`node:test`）：
   `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
   `errors` 统一错误码目录（唯一性 / lint 产出码都在表里 / 新旧抑制名都命中）、
   `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
@@ -592,6 +595,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
   `lsp` 子命令（Content-Length 分帧 / 诊断往返 / 未知方法）、
   `types`（用真 `tsc` 钉住 JSX 类型收紧：拼错属性名 / 写错类型要报、合法写法不报）、
   `schema` 的 props 声明化（`type` 别名 / 内联字面量 / `extends` 与 `&` 合并 / 解析不了如实标记）、
+  HMR（挂载点精确替换 / 非挂载模块重跑兜底 / 认不出根组件时明确告警）、
   异步资源生命周期与 context getter（`PLAIN_E1113` / `PLAIN_E1114`）、
   `eval` 上下文档位、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
@@ -660,10 +664,10 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
-| 语句 | 90% | 93.5% |
-| 分支 | 82% | 86.1% |
+| 语句 | 90% | 93.6% |
+| 分支 | 82% | 86.2% |
 | 函数 | 85% | 91.6% |
-| 行 | 90% | 93.5% |
+| 行 | 90% | 93.6% |
 
 > 覆盖率最低的是 `src/cli/index.ts`（约 77%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
 > 目前只在示例端到端里被间接验证（`src/cli` 目录整体约 87%）。
@@ -671,7 +675,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 223 / fail 0   # 单元
+# pass 225 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23
