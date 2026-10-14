@@ -5,6 +5,8 @@
 //   [x] 热替换：dispose 旧 effect → 重跑新组件 → 最小重排替换子树（保住身份/顺序）
 //   [x] 模块作用域 signal 值尽力保留；不可保留必须显式 console.warn（绝不静默）
 //   [x] moduleId 关联：hmrScope / __plainBeginModule 让挂载点与模块自动绑定
+//   [x] 非挂载模块（独立组件文件 / import() 懒加载）改动也要生效：重跑所有挂载点
+//   [x] 认不出根组件时明确告警并交给整页刷新（绝不静默留旧代码）
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -222,5 +224,72 @@ test("unmount 后挂载点从注册表移除", async () => {
     unmount();
     const applied = hmrApply("/src/m6.jsx", { App: mod.App });
     assert.equal(applied, false, "卸载后不应再命中");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. 改动「被别处使用」的模块（独立组件文件 / import() 懒加载）也要生效
+// ---------------------------------------------------------------------------
+test("hmrApply：改动非挂载模块时重跑所有挂载点（不再静默留旧代码）", async () => {
+  __clearHmrRegistry();
+  const { mod } = await compileModule(
+    `
+    import { onCleanup } from "plain";
+    export let runs = 0;
+    export let cleans = 0;
+    export function App() {
+      runs++;
+      onCleanup(() => { cleans++; });
+      return <div class="app">run{runs}</div>;
+    }
+    `,
+    "m7"
+  );
+  await inDom("<div id='root'></div>", async (dom) => {
+    const root = dom.window.document.getElementById("root");
+    __plainBeginModule("/src/m7.jsx");
+    mount(root, mod.App);
+    assert.equal(mod.runs, 1);
+    assert.equal(root.querySelector("div.app").textContent, "run1");
+
+    // 改动的不是挂载模块：比如 import() 懒加载进来的组件文件
+    const applied = hmrApply("/src/child.jsx", { Child: () => null });
+    assert.equal(applied, true, "应重跑挂载点");
+    assert.equal(mod.cleans, 1, "旧 effect 应先被回收");
+    assert.equal(mod.runs, 2, "根组件应重跑一次（从而取到新代码）");
+    assert.equal(root.querySelector("div.app").textContent, "run2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. 挂载模块的新版本认不出根组件：明确告警 + 交给整页刷新（绝不静默）
+// ---------------------------------------------------------------------------
+test("hmrApply：挂载模块认不出根组件时明确告警并交给整页刷新", async () => {
+  __clearHmrRegistry();
+  const { mod } = await compileModule(
+    `export function App() { return <p class="a">a</p>; }`,
+    "m8"
+  );
+  await inDom("<div id='root'></div>", async (dom) => {
+    const root = dom.window.document.getElementById("root");
+    __plainBeginModule("/src/m8.jsx");
+    mount(root, mod.App);
+
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    let applied;
+    try {
+      // 新版本里没有 App / default（例如作者改了导出名）
+      applied = hmrApply("/src/m8.jsx", { Helper: () => null });
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.equal(applied, false, "应交给整页刷新");
+    assert.ok(
+      warnings.some((w) => w.includes("整页刷新")),
+      "必须明确告警：" + JSON.stringify(warnings)
+    );
+    assert.equal(root.querySelector("p.a").textContent, "a", "不应破坏既有 DOM");
   });
 });

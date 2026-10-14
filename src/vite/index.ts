@@ -188,7 +188,11 @@ export default function plainPlugin(options: {
  *      这样该模块里调用的 mount()/hydrate() 会自动与该 id 关联（零配置）。
  *   2) 顶部 import 到运行时入口的 HMR 辅助（hmrApply / snapshot / restore）。
  *   3) 尾部：注册 import.meta.hot.accept —— 改动时把模块级 signal 快照恢复到
- *      新模块、再 hmrApply 精确热替换该模块的挂载点；dispose 里快照 signal 现值。
+ *      新模块、再 hmrApply 热替换/重跑受影响的挂载点；dispose 里快照 signal 现值。
+ *      hmrApply 返回 false（认不出根组件 / 没有挂载点）时调用 invalidate()，
+ *      让 vite 退回整页刷新 —— 绝不静默留在旧代码上。
+ *      这条路径也让**懒加载（`import()`）进来的模块**改动能生效：它不是挂载模块，
+ *      但 hmrApply 会把挂载点的根组件全部重跑，从而取到新版本。
  *
  * 注意：**不能把整个模块体包进闭包**（export 语句不允许出现在函数体内）。
  * 因此这里只在首尾追加代码，模块体本身保持原样。
@@ -205,8 +209,9 @@ if (import.meta.hot) {
     if (!__newMod) { import.meta.hot.invalidate(); return; }
     const __snap = import.meta.hot.data.__plainSnap || {};
     __plainRestore(__newMod, __snap, ${JSON.stringify(moduleId)});
-    __plainApply(${JSON.stringify(moduleId)}, __newMod);
+    const __applied = __plainApply(${JSON.stringify(moduleId)}, __newMod);
     import.meta.hot.data.__plainSnap = __plainSnap(__newMod);
+    if (!__applied) import.meta.hot.invalidate();
   });
 }
 `;

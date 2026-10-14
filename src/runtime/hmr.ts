@@ -75,23 +75,50 @@ export function hmrRegister(record: Omit<MountRecord, "id"> & { id?: string }): 
 
 /**
  * hmrApply(id, newMod) —— 热替换入口（由 vite 插件注入的 import.meta.hot.accept 调用）。
- * 约定根组件名为 `App`（与 SSR 一致），回退 `default`。
- * 返回是否有挂载点被替换。
+ *
+ * 两条路，都不是「什么都不做」：
+ *
+ * 1. **精确替换**：改动的模块自己就是挂载模块（`mount()` 写在它里面），且新版本导出了
+ *    根组件（`App`，回退 `default`）—— 只替换它的子树，别的子树 / 焦点 / 滚动都不动。
+ * 2. **重跑兜底**：改动的是**被别处使用**的模块（独立组件文件、`import()` 懒加载进来的模块）。
+ *    vite 的 HMR 已经把新版本接进了导入方，所以把这些挂载点的**根组件重跑一遍**就能取到新代码。
+ *    代价是这些子树会被重建（丢焦点 / 滚动），但**不会整页刷新**，模块作用域 signal 值也留着。
+ *
+ * 以前这里只有第 1 条，其余情况打一句 warning 就返回 false —— 结果是**静默保持旧代码**
+ * （改了组件、界面纹丝不动，且没有任何提示）。这是最坏的失败模式。
+ *
+ * 返回「是否有挂载点被替换 / 重跑」。返回 false 时调用方应退化到整页刷新。
  */
 export function hmrApply(id: string, newMod: any): boolean {
-  const comp = pickComponent(newMod);
-  if (!comp) {
-    console.warn(`[plain hmr] 模块 ${id} 没有可热替换的组件（需要导出 App 或 default）`);
-    return false;
-  }
-  const affected: MountRecord[] = [];
-  for (const rec of registry) if (rec.id === id) affected.push(rec);
-  if (!affected.length) return false; // 没挂载过：无需替换，不是错误
+  if (!registry.size) return false; // 一个挂载点都没有：没什么可替换（也不是错误）
 
-  for (const rec of affected) {
-    rec.dispose(); // 回收旧 effect（等价 createScope 的泄漏断言方式）
-    rec.comp = comp;
-    rec.rebuild(comp);
+  const exact: MountRecord[] = [];
+  for (const rec of registry) if (rec.id === id) exact.push(rec);
+  const comp = pickComponent(newMod);
+
+  if (exact.length) {
+    if (!comp) {
+      // 这个模块明明是挂载点，新版本里却找不到根组件 —— 无法用新代码重建，
+      // 明说并交给整页刷新，绝不留在旧代码上。
+      console.warn(
+        `[plain hmr] 模块 ${id} 是挂载点，但新版本里没有根组件（导出 App 或 default）——` +
+          `无法精确热替换，改为整页刷新`
+      );
+      return false;
+    }
+    for (const rec of exact) {
+      rec.dispose(); // 回收旧 effect（等价 createScope 的泄漏断言方式）
+      rec.comp = comp;
+      rec.rebuild(comp);
+    }
+    return true;
+  }
+
+  // 重跑兜底：改动的模块被别的挂载点使用。哪些子树用到了它，运行时无法廉价地知道，
+  // 所以按「全部重跑根组件」处理 —— 正确性优先于少重建几棵树。
+  for (const rec of Array.from(registry)) {
+    rec.dispose();
+    rec.rebuild(rec.comp);
   }
   return true;
 }
