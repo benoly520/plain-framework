@@ -429,6 +429,7 @@ plaindev serve [dist] [--port n]    # 生产托管 + RPC
 plaindev agent-context [--write]    # 打印给 AI 的规则上下文（取自 AGENTS.md）
                                     # --write 落盘 AGENTS.md / copilot / cursor，不覆盖已有文件
 plaindev mcp                        # MCP stdio server：把 check / schema 交给 AI IDE
+plaindev lsp                        # LSP stdio server：编辑器里实时诊断（didOpen/didChange）
 ```
 
 ### `check`：把 AI 的典型错误直接改掉
@@ -516,9 +517,10 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ `AGENTS.md` + 反模式目录（20 条均有静态检查；看不出类型的不猜）
 - ✅ AI 可发现性：`plaindev agent-context [--write]` 把规则落盘成跨工具标准 `AGENTS.md`
   （外加 `.github/copilot-instructions.md` 与 `.cursor/rules/*.mdc` 兜底，已有文件不覆盖）；
-  `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；确认误报可用行级抑制指令
+  `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；`plaindev lsp` 把**同一条规则链**做成
+  **编辑器实时诊断**（写时就报，不必等 dev / build）；确认误报可用行级抑制指令
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 232 项（内核 19 + 单元 213）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 234 项（内核 19 + 单元 215）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -527,7 +529,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 
 | 缺口 | 影响 | 优先级 |
 | --- | --- | --- |
-| **AI 原生工具（余下部分）** | `plaindev mcp` / `agent-context` 已可用；仍缺 **LSP 实时诊断**（编辑器里写时就报，而不是等 dev/build）与错误码统一 | P1 |
+| **类型与契约收紧** | `schema` 的 props 仍是「推断」而非「声明」（`<Card {...rest}/>` 推不出来）；JSX 类型 `[attr: string]: any` 让组件边界的类型校验失效 | P1 |
 | **RPC 请求合并 / 防抖** | 高频调用会各发一次请求 | P1 |
 | **多入口 / 代码分割** | 只验证了单入口 | P1 |
 | **并发渲染 / 时间切片** | 没有 | P2 |
@@ -546,7 +548,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 213 项
+pnpm test              # 构建 + 内核 19 项 + 单元 215 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -554,7 +556,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（213 项，`node:test`）：
+- `test/*.test.mjs`（215 项，`node:test`）：
   `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
   `errors` 统一错误码目录（唯一性 / lint 产出码都在表里 / 新旧抑制名都命中）、
   `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
@@ -565,6 +567,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
   `keyed` 列表复用语义、`PLAIN_E1005` / `PLAIN_E1006` / `PLAIN_E1007`（参数与返回值）的诊断与不误报、
   `ref` 命令式逃逸口（编译正反例 + 连接 / 清理 / 列表 / 条件 / SSR 跳过 / 注水）、
   `context` 跨层传值（默认值 / 嵌套遮蔽 / 兄弟隔离 / 响应性 / effect 路径 / 回收 / SSR 隔离 / 注水）、
+  `lsp` 子命令（Content-Length 分帧 / 诊断往返 / 未知方法）、
   异步资源生命周期与 context getter（`PLAIN_E1113` / `PLAIN_E1114`）、
   `eval` 上下文档位、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
@@ -634,8 +637,8 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
 | 语句 | 90% | 93.3% |
-| 分支 | 82% | 86.6% |
-| 函数 | 85% | 91.3% |
+| 分支 | 82% | 86.2% |
+| 函数 | 85% | 91.5% |
 | 行 | 90% | 93.3% |
 
 > 覆盖率最低的是 `src/cli/index.ts`（约 77%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
@@ -644,7 +647,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 213 / fail 0   # 单元
+# pass 215 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23

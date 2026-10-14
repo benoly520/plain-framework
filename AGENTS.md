@@ -151,6 +151,7 @@ npx plaindev schema <dir>   # 产出机器可读的组件 / server / 路由契�
 npx plaindev agent-context  # 打印本文件里「给 AI 的部分」
                             # --write 落盘 AGENTS.md / copilot / cursor（已存在的文件不覆盖）
 npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE 可直接调
+npx plaindev lsp            # LSP stdio server：把契约检查接进编辑器，写代码时就报
 ```
 
 ## 6. 仓库地图

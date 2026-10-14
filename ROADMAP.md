@@ -149,8 +149,9 @@ SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式
 
 - **MCP server** ✅ 已落地（`plaindev mcp`，零依赖 stdio JSON-RPC）：把 `plain_check` /
   `plain_schema` 暴露成 MCP 工具，AI IDE 可直接调用。
-  仍缺 **LSP 实时诊断**（编辑器里写时就报，而不是等 dev / build）—— 那是另一套投入
-  （要维护 tsserver 插件），先做 MCP 是因为成本低、收益同构。
+  仍缺 **LSP 实时诊断** ✅ **已落地**（`plaindev lsp`，零依赖 stdio LSP）：**不写 tsserver 插件** ——
+  直接把契约检查的同一条规则链做成 `textDocument/publishDiagnostics`，于是**编辑器里报的**与
+  **构建时拦的**是同一套 `PLAIN_Exxxx` 与同一份修法提示。先做 MCP 是因为成本更低，这里是同构补全。
 - **让 AI 找得到规则** ✅ 已落地：`plaindev agent-context [--write]` 把 `AGENTS.md` §1–5
   现读现切，`--write` 时落盘成跨工具标准 `AGENTS.md`，外加 `.github/copilot-instructions.md`
   与 `.cursor/rules/*.mdc` 兜底（已有文件默认不覆盖，`--force` 才覆盖）。
