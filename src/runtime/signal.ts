@@ -216,6 +216,16 @@ export function getOwner(): Owner | null {
 }
 
 /**
+ * 当前作用域链（从外到内）。context 靠它「从内到外找最近的 Provider」。
+ * 创建期用 ownerStack；effect 重跑期 ownerStack 已空，改用其创建时快照的 ownerChain
+ * （与 ErrorBoundary 查最近边界的做法一致）。
+ */
+export function getOwnerChain(): readonly any[] {
+  if (activeEffect && activeEffect.ownerChain) return activeEffect.ownerChain;
+  return ownerStack;
+}
+
+/**
  * resolve(v) —— 编译器对动态 props 一律传 getter；组件里统一用 resolve 取值。
  * （on* 开头的事件类 prop 编译器不包 getter，直接使用。）
  */

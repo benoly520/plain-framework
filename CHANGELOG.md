@@ -7,6 +7,21 @@
 
 ### 新增
 
+- **Context（跨层传值）+ SSR 请求级隔离**：新增 `createContext` / `useContext` 两个导出与
+  `Context<T>` 类型；`<Ctx.Provider value={…}>` 是普通组件标签（**无需改编译器**）。
+  - `useContext(Ctx)` 返回**可调用 getter**（读法 `useContext(Ctx)()`，与 `signal` 一致）：
+    结构上不可能「存进变量 → 快照住旧值」。`const x = useContext(Ctx)` 纳入 lint 的 signal 识别，
+    `{x}` 会被 `PLAIN_E1102` 自动修；对返回值直接取属性由新规则 `no-context-getter-property`
+    （`PLAIN_E1114`）拦下 —— 否则会静默取到 `Function.name` / `length` 这类函数成员
+    （esbuild 不做类型检查，这类错构建期不会报）。
+  - 机制复用 `ErrorBoundary` 的 owner 作用域链：Provider 开一个嵌套作用域，把 `ctx -> getter`
+    挂在作用域上；作用域挂在父 owner 上 → 卸载 / 列表行回收 / 分支切换时子树 effect 一并回收。
+  - **SSR 请求级隔离**：Provider 作用域**每次渲染现建现收**，下一个请求拿到的是全新作用域，
+    不可能读到上一个请求的 Provide 值 —— 于是「请求级数据」终于有了正确的位置
+    （此前只能放模块作用域 signal，会在同进程多请求之间串味）。
+  - 文档：README「跨层传值（Context）」、`AGENTS.md` 反模式 20 与错误码表、`docs/patterns.md` §10、
+    `SPEC.md` §2、提案 `docs/rfcs/context-and-ssr-isolation.md`；测试 `test/context.test.mjs`（9 项）。
+  - **属对外 API 面扩面**（新增导出，非 breaking，但改变了「API 恒定」的约定）。
 - **契约规则 `no-module-scope-resource`（`PLAIN_E1113`）**：在**模块作用域**创建 `resource()`。
   `resource()` 内部是 effect，放模块作用域会在**模块被 import 的那一刻立刻执行** —— 立刻发起请求
   （App 还没挂载；SSR 下更是在服务端「导入模块」时就发请求），而且没有 owner 可回收。

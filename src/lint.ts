@@ -111,6 +111,8 @@ export function check(
   const signals = collectSignals(sf);
   // 反模式 7 与「signal 读取结果存进变量」的交叉点：先存后改也要拦
   const aliases = collectSignalAliases(sf, signals);
+  // 反模式 20：const x = useContext(Ctx) —— x 是 getter，直接取属性会静默取到函数成员
+  const ctxGetters = collectContextGetters(sf);
   const ignores = collectIgnores(source);
   const add = (node: ts.Node, level: "error" | "warn", code: PlainErrorCode, message: string, fix?: { start: number; end: number; text: string }) => {
     const { line, character } = sf.getLineAndCharacterOfPosition(
@@ -316,6 +318,29 @@ export function check(
         "PLAIN_E1112",
         `JSX 里的动态 props 要用 resolve："{resolve(${access})}"（直接写 {${access}} 拿到的是 getter 本身）`
       );
+    }
+
+    // 反模式 20：对 useContext(Ctx) 的返回值直接取属性 —— 它是 getter，要先调用。
+    //    const t = useContext(Ctx); t.name     -> 取到函数自身的成员（name / length …）
+    //    useContext(Ctx).name                  -> 同上
+    //    正确：useContext(Ctx)().name
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const target = node.expression;
+      const isCtxGetter =
+        (ts.isIdentifier(target) && ctxGetters.has(target.text)) ||
+        (ts.isCallExpression(target) && isUseContextCall(target));
+      if (isCtxGetter) {
+        const suffix = ts.isPropertyAccessExpression(node)
+          ? `.${node.name.text}`
+          : `[${node.argumentExpression.getText(sf)}]`;
+        add(
+          node,
+          "error",
+          "PLAIN_E1114",
+          `useContext 的返回值是 getter，要先调用再取属性（"${node.getText(sf)}" 会取到函数自身的成员）。` +
+            `改成 ${target.getText(sf)}()${suffix}`
+        );
+      }
     }
 
     // 反模式 14：resolve on* 事件 prop —— 编译器不给 on[A-Z] 的 prop 包 getter，
@@ -931,7 +956,9 @@ function collectSignals(sf: ts.SourceFile): Set<string> {
       node.initializer &&
       ts.isCallExpression(node.initializer) &&
       ts.isIdentifier(node.initializer.expression) &&
-      ["signal", "computed", "resource"].includes(
+      // useContext(Ctx) 返回的也是 getter（和 signal 同读法）—— 一并纳入，
+      // 于是 {x} 会被既有的 PLAIN_E1102 自动修成 {x()}
+      ["signal", "computed", "resource", "useContext"].includes(
         node.initializer.expression.text
       )
     ) {
@@ -989,6 +1016,33 @@ function checkModuleScopeResource(sf: ts.SourceFile, add: AddIssue): void {
     ts.forEachChild(node, (c) => walk(c, next));
   };
   walk(sf, false);
+}
+
+/** 是否为 `useContext(...)` 调用 */
+function isUseContextCall(n: ts.Node): boolean {
+  return (
+    ts.isCallExpression(n) &&
+    ts.isIdentifier(n.expression) &&
+    n.expression.text === "useContext"
+  );
+}
+
+/** 收集 `const x = useContext(Ctx)` 里的 x —— 它们是 getter，直接取属性要报 E1114 */
+function collectContextGetters(sf: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      isUseContextCall(unwrapExpr(node.initializer))
+    ) {
+      names.add(node.name.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return names;
 }
 
 function isDeclarationName(id: ts.Identifier): boolean {

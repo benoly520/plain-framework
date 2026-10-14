@@ -112,6 +112,42 @@ test("PLAIN_E1113 可用抑制指令压掉（确认误报时的出口）", () =>
   assert.deepEqual(check(src, "a.tsx"), []);
 });
 
+test("useContext 的返回值是 getter：{x} 自动修成 {x()}，取属性报 PLAIN_E1114", () => {
+  const src = [
+    "import { createContext, useContext } from 'plain';",
+    "const Ctx = createContext('light');",
+    "export function A() { const t = useContext(Ctx); return <p>{t}</p>; }",
+  ].join("\n");
+  const issues = check(src, "a.tsx");
+  assert.deepEqual(codes(issues), ["PLAIN_E1102"]);
+  assert.ok(autofix(src, issues).includes("<p>{t()}</p>"));
+
+  const src2 = [
+    "import { createContext, useContext } from 'plain';",
+    "const Ctx = createContext({ name: 'x' });",
+    "export function A() { const t = useContext(Ctx); return <p>{t.name}</p>; }",
+  ].join("\n");
+  const issues2 = check(src2, "a.tsx");
+  assert.deepEqual(codes(issues2), ["PLAIN_E1114"]);
+  assert.ok(issues2[0].message.includes("t().name"), issues2[0].message);
+});
+
+test("PLAIN_E1114：直接对 useContext(...) 取属性也报；先调用后再取属性不报", () => {
+  const bad = [
+    "import { createContext, useContext } from 'plain';",
+    "const Ctx = createContext({ name: 'x' });",
+    "export function A() { return <p>{useContext(Ctx).name}</p>; }",
+  ].join("\n");
+  assert.deepEqual(codes(check(bad, "a.tsx")), ["PLAIN_E1114"]);
+
+  const good = [
+    "import { createContext, useContext } from 'plain';",
+    "const Ctx = createContext({ name: 'x' });",
+    "export function A() { return <p>{useContext(Ctx)().name}</p>; }",
+  ].join("\n");
+  assert.deepEqual(check(good, "a.tsx"), []);
+});
+
 test("不误伤：声明 / 对象属性赋值 / 普通变量赋值", () => {
   const src = [
     "import { signal } from 'plain';",

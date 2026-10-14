@@ -41,6 +41,7 @@ export type PlainErrorCode =
   | "PLAIN_E1111"
   | "PLAIN_E1112"
   | "PLAIN_E1113"
+  | "PLAIN_E1114"
   | "PLAIN_E2001";
 
 /** lint 规则短名（无前缀）：一种反模式一个短名，与 `plain/<短名>` 一一对应 */
@@ -56,7 +57,8 @@ export type LintRuleName =
   | "no-async-effect"
   | "no-effect-loop"
   | "no-computed-side-effect"
-  | "no-module-scope-resource";
+  | "no-module-scope-resource"
+  | "no-context-getter-property";
 
 export interface ErrorEntry {
   code: PlainErrorCode;
@@ -209,6 +211,12 @@ export const ERROR_CATALOG: Record<PlainErrorCode, ErrorEntry> = {
     rule: "no-module-scope-resource",
     suppressible: true,
     summary: "在模块作用域创建 `resource()`（import 时立即执行、无人回收）",
+  },
+  PLAIN_E1114: {
+    code: "PLAIN_E1114",
+    rule: "no-context-getter-property",
+    suppressible: true,
+    summary: "对 `useContext(Ctx)` 的返回值直接取属性（它是 getter，要先调用 `()`）",
   },
 
   // --- E2xxx 构建期 ------------------------------------------------------

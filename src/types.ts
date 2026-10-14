@@ -35,6 +35,21 @@ export type Ref<T extends Element = HTMLElement> = {
   bivarianceHack(el: T): void | (() => void);
 }["bivarianceHack"];
 
+/**
+ * Context —— 跨层传值（依赖注入），并让 SSR 下的请求级数据有正确的归属。
+ *
+ * 用法：`const Ctx = createContext<T>(默认值)`；`<Ctx.Provider value={...}>…</Ctx.Provider>`；
+ * 消费端 `const v = useContext(Ctx)` —— `v` 是可调用 getter，读法 `v()`（与 signal 一致）。
+ * 设计见 docs/rfcs/context-and-ssr-isolation.md。
+ */
+export interface Context<T> {
+  readonly __plainContext: true;
+  /** 没有任何 Provider 时读到的值（显式声明，不会静默变成 undefined） */
+  readonly defaultValue: T;
+  /** `<Ctx.Provider value={...}>children</Ctx.Provider>` */
+  Provider(props: { value: T; children?: any }): Node;
+}
+
 /** 组件返回值 / 插值可接受的任意可渲染值 */
 export type Renderable =
   | Node
