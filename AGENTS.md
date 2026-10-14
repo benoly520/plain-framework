@@ -181,6 +181,9 @@ npx plaindev lsp            # LSP stdio server：把契约检查接进编辑器�
 5. 改完 `src/` 记得 `pnpm run build` —— 测试与示例用的都是 `dist/`。
 6. **新增行为前先过「AI-first 四道闸」**（可静态验证 / 可本地推理 / 重复优于抽象 / 平台优先）——
    优先级从高到低：交给平台 → 交给构建 / 工具链 → 变成编译期检查 → 才考虑新增运行时概念。定义见 [`SPEC.md` §1.1](SPEC.md)。
+7. **不要给 `CommonAttributes` 加回 `[attr: string]: any`**（`src/types.ts`）：那会让内建元素上的
+   属性名拼错 / 类型写错在 `tsc` 下静默通过（`<img scr>` / `<input checked="yes">` / `<div onClikc>`）。
+   要支持冷门属性，就往那个枚举里**补一个名字**。防回归测试见 `test/types.test.mjs`。
 
 ## 8. 帮这个框架变好（重要）
 
