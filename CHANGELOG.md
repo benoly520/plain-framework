@@ -30,6 +30,24 @@
 
 ### 新增
 
+- **SSR 数据预取（阶段二：首屏数据随 HTML 迁移）**：阶段一让首屏「有数据」，阶段二让注水
+  「**不重复取、不闪一下**」。设计见 [`docs/rfcs/ssr-data.md`](docs/rfcs/ssr-data.md) §3.3。
+  - **编译器注入调用点 key**：`resource(fn)` -> `resource(fn, undefined, "src/App.tsx:31#0")`。
+    键由编译器给而不是手写 —— 必然存在、不会漏，而且服务端构建与客户端构建对同一份源码
+    得到**同一个键**（`keyBase` 用项目相对路径：可读、不泄漏构建机绝对路径；
+    `sourcemap.sources` 仍用真实模块路径，devtools 定位不受影响）。
+  - **服务端按创建序收集**：`renderToStringWithData(app, opts)` -> `{ html, data }`
+    （`renderToString` 变成它的便捷壳）。「没拿到值」也占位（`ok: false`）——
+    少一条会让同 key 的后续实例**错位配对**，那是静默串数据，比多一次请求糟得多。
+  - **注水时种入**：`hydrate` 从页面 `<script type="application/json" id="plain-data">` 读回来
+    （也可显式传 `data`），按「同一个 key 自己的队列」按创建序配对种入 -> **首帧与 HTML 一致、
+    0 注水告警、不闪 loading**；随后仍做一次 SWR 后台校验（跳过 `promiseFn()` 会丢 signal
+    依赖收集 = 静默陈旧数据）。载荷坏了**明确告警**，不静默退化成「首屏各自重新取一次」。
+  - 测试 `test/ssr-data.test.mjs` 新增 5 项：注入 key 可复现且两端一致 / 服务端按创建序收集 /
+    **端到端（SSR + 载荷 -> 注水 0 告警、首帧就是服务端值、后台校验确实发生）** /
+    **列表多实例按创建序配对（不串位）** / 载荷坏掉时告警。
+  > 已知限制：别名导入（`import { resource as r }`）识别不到 -> 没有 key ->
+  > 退化成「注水后后台照常取一次」（**结果正确**，只多一次请求）。
 - **SSR 数据预取（阶段一：服务端直调 + 确定性等待）**：把 SSR 从「机制齐全」推向「照着就能投产」，
   设计与取舍见 [`docs/rfcs/ssr-data.md`](docs/rfcs/ssr-data.md)。本阶段落地两件事：
   - **服务端直调**：`renderToString(App, { handlers })` 注入服务端清单后，SSR 期间的 `server()`

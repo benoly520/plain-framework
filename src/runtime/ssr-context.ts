@@ -1,22 +1,36 @@
-// SSR 上下文（运行时侧）：服务端渲染期间的两件事（见 docs/rfcs/ssr-data.md）
+// SSR 上下文（运行时侧）：服务端渲染期间的三件事（见 docs/rfcs/ssr-data.md）
 //
 //   1. server() 直调 —— 同进程、同一份 .plain/server.mjs，直接调用 handler，
 //      不走 HTTP（fetch 自己需要猜 host / port / 子路径，而且构建期根本没有服务在听）；
 //   2. resource 的 pending 登记 —— 让「等异步渲染完」是**可判定的**，
-//      而不是 `wait: 50` 这种猜出来的毫秒数。
+//      而不是 `wait: 50` 这种猜出来的毫秒数；
+//   3. 首屏数据的**收集**（服务端）与**种入**（客户端注水）—— 配对键由编译器注入。
 //
-// ★ 状态**不放模块作用域**：handlers 与 pending 都是「按渲染」的，
+// ★ 状态**不放模块作用域**：handlers / pending / 收集槽都是「按渲染」的，
 //   放模块级变量在并发渲染下会互相踩（A 的 handlers 被 B 看到、B 去等 A 的 promise）。
 //   真正的存放处由**服务端**提供（AsyncLocalStorage，见 server/ssr-scope.ts），
 //   这里只保留一个「读当前渲染上下文」的钩子 ——
 //   于是这份要进浏览器包的代码**不需要 import node:async_hooks**，
 //   而没注册钩子时 `isSSR()` 恒为 false（浏览器语义 ✓）。
+//
+// 客户端侧的「种子队列」是模块级的 —— 但那是**每页一份**，不是跨请求状态 ✓。
 
 export interface SSRStore {
   /** 服务端函数表（来自 .plain/server.mjs）；null = 没注入 */
   handlers: Record<string, (...args: any[]) => any> | null;
   /** 本次渲染尚未 settle 的 resource —— **按渲染隔离**，不跨请求 */
   pending: Set<Promise<unknown>>;
+  /** 本次渲染的数据收集槽，**按创建序**（服务端序列化用） */
+  slots: SSRSlot[];
+}
+
+/** 一个 resource 在本次渲染里的收集槽 */
+export interface SSRSlot {
+  /** 编译器注入的调用点 key */
+  key: string;
+  /** 是否已经 settle 出值 */
+  settled: boolean;
+  value?: unknown;
 }
 
 let readStore: (() => SSRStore | null) | null = null;
@@ -65,4 +79,68 @@ export function trackPending<T>(p: Promise<T>): Promise<T> {
   // 单独挂一条分支摘除自己，避免污染调用方的 then/catch 链
   p.then(done, done);
   return p;
+}
+
+// ---------------------------------------------------------------------------
+// 数据迁移：服务端收集
+// ---------------------------------------------------------------------------
+
+/**
+ * 服务端：为某个调用点 key 开一个收集槽（**按创建序** push）。
+ * 不在 SSR 里（客户端）返回 null。
+ *
+ * 为什么按创建序而不是按 settle 序：`value` 什么时候到位是不确定的，
+ * 但「同一个 key 的第几个实例」在两端都是确定的 —— 客户端就按这个顺序配对种入。
+ */
+export function openSSRSlot(key: string): SSRSlot | null {
+  const store = getSSRStore();
+  if (!store) return null;
+  const slot: SSRSlot = { key, settled: false };
+  store.slots.push(slot);
+  return slot;
+}
+
+// ---------------------------------------------------------------------------
+// 数据迁移：客户端种入
+// ---------------------------------------------------------------------------
+
+/** 服务端载荷里的一条 */
+export interface SSREntry {
+  key: string;
+  /** false = 这次在服务端没拿到值（出错 / 没 settle）；客户端照常自己去取 */
+  ok: boolean;
+  value?: unknown;
+}
+
+/** 按 key 排成的队列：同 key 的多个实例按**创建序**消费 */
+const seedQueues = new Map<string, SSREntry[]>();
+
+/**
+ * 注入页面载荷（hydrate 前调用）。重复调用会**整体替换**队列 ——
+ * 同一个页面只该有一份载荷。
+ */
+export function __loadSSRPayload(entries: SSREntry[] | null | undefined): void {
+  seedQueues.clear();
+  if (!entries) return;
+  for (const entry of entries) {
+    if (!entry || typeof entry.key !== "string") continue;
+    const q = seedQueues.get(entry.key);
+    if (q) q.push(entry);
+    else seedQueues.set(entry.key, [entry]);
+  }
+}
+
+/**
+ * 取一个种子；**取到就消费掉**（所以同 key 的多个实例会依次拿到各自的值）。
+ * 返回 null = 这个调用点没有种子（纯 CSR / 服务端那次没取到 …）。
+ */
+export function takeSSRSeed(key: string): SSREntry | null {
+  const q = seedQueues.get(key);
+  if (!q || !q.length) return null;
+  return q.shift() as SSREntry;
+}
+
+/** 仅供测试：清空种子队列 */
+export function __clearSSRPayload(): void {
+  seedQueues.clear();
 }

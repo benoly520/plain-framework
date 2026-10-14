@@ -21,6 +21,7 @@ import { makeClaimDocument } from "./claim-document.js";
 import { hmrRegister, getHmrModuleId } from "./hmr.js";
 import { syncRange, toNodes } from "./dom.js";
 import { flushRefs } from "./ref.js";
+import { __loadSSRPayload, type SSREntry } from "./ssr-context.js";
 
 export interface HydrateOptions {
   /**
@@ -32,6 +33,12 @@ export interface HydrateOptions {
   warn?: boolean;
   /** HMR 模块标识（vite 插件注入；提供后该子树支持热替换） */
   moduleId?: string;
+  /**
+   * 首屏数据载荷（`renderToStringWithData(...).data`）。
+   * 不传时会自动从页面里的 `<script type="application/json" id="plain-data">` 读 ——
+   * 服务端按默认约定输出、客户端零配置就能对上（见 docs/rfcs/ssr-data.md §3.3）。
+   */
+  data?: SSREntry[];
 }
 
 export interface HydrateResult {
@@ -60,6 +67,11 @@ export function hydrate(
   // 若此前 globalThis.document 是服务端垫片（SSR 未清理），还原成垫片会让
   // 后续 hydration 之外的新建操作产出 shim 节点（节点挂父级时报只读错）。
   const prevDoc = (globalThis as any).document;
+
+  // 首屏数据：先种进 runtime，再跑 App —— resource 首帧就拿到服务端的值，
+  // 于是**与 HTML 一致**（不闪 loading，也不必为对齐首屏先请求一次）。
+  // 见 docs/rfcs/ssr-data.md §3.3。
+  __loadSSRPayload(readPayload(realDoc, options.data, doWarn));
 
   // 根锚点：包住「整个 App 的输出区间」。它们是普通注释，不参与认领游标
   // （游标在 root 子树里走，锚点插在区间的两端之外），因此不会干扰认领。
@@ -163,6 +175,30 @@ export function hydrate(
   });
 
   return { dispose, warnings };
+}
+
+/**
+ * 读首屏数据载荷：显式传入优先，否则找页面里的 `<script id="plain-data">`。
+ * 解析失败必须**显式告警**（页面与约定对不上，静默会让首屏各自重新取一次而没人知道为什么）。
+ */
+function readPayload(doc: any, explicit?: SSREntry[], doWarn = true): SSREntry[] {
+  if (explicit) return explicit;
+  if (!doc || typeof doc.getElementById !== "function") return [];
+  const el = doc.getElementById("plain-data");
+  if (!el) return [];
+  try {
+    const parsed = JSON.parse(el.textContent || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    if (doWarn) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[plain hydrate] #plain-data 解析失败（${(e as Error).message}）——` +
+          `本次按纯客户端渲染处理：首屏资源会各自重新取一次`
+      );
+    }
+    return [];
+  }
 }
 
 /** 移除容器里位于 beforeMark 之前的节点（认领后未被采用的残留） */

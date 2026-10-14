@@ -97,6 +97,7 @@ SSR 的三块机制都已经在：`renderToString` / `renderToStringSync`（换�
 | 把固定 `wait: N` 当成主要手段 | 毫秒数是猜的：后端一慢就 SSR 出骨架屏，且**静态发现不了** —— P1 不过 |
 | 种入后**跳过** `promiseFn()` | 会丢掉 signal 依赖收集 → 依赖变化永不重取 = 静默陈旧数据。宁可多一次后台请求 |
 | 用运行期全局序号做配对键 | 隐藏耦合：条件渲染一有差异就静默串数据 —— P2 不过 |
+| 给**别名导入**的 `resource`（`import { resource as r }`）也注入 key | 识别不到就没有 key -> 退化成「注水后后台照常取一次」（**结果正确**，只多一次请求）。为一个少见写法去做作用域分析，复杂度不抵收益 |
 | 「数据缓存 / 失效（staleTime / cache 配置）」体系 | 先把首屏这条主路走通；缓存策略等有真实数据再定，别提前造概念 |
 | 流式 SSR / Suspense 式边界 | 与 SPEC 一致：隐藏边界对 AI 是负资产，先要「三态写全」 |
 
@@ -133,5 +134,5 @@ SSR 的三块机制都已经在：`renderToString` / `renderToStringSync`（换�
 | --- | --- | --- |
 | 零 | **并发隔离**（3.4）：`AsyncLocalStorage` 取代「换全局 + LIFO 恢复」+ 并发测试 | ✅ 已落地（`runSSR` / 取值查上下文的访问器 / pending 按渲染隔离；3 项并发测试） |
 | 一 | 服务端直调（3.1）+ 确定性等待（3.2） | ✅ 已落地（等静默 / 直调 / handlers 缺失明确报错 / reject 不炸 SSR） |
-| 二 | 数据迁移（3.3）：编译器 key + 载荷序列化 + 注水种入 | 待做 |
+| 二 | 数据迁移（3.3）：编译器 key + 载荷序列化 + 注水种入 | ✅ 已落地（`renderToStringWithData` / `#plain-data` / 按创建序配对；5 项测试含端到端与列表多实例） |
 | 三 | `ssrMiddleware` + SSR 示例 + `docs/patterns.md` 配方 + 文档同步 | 待做 |

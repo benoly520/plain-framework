@@ -118,9 +118,12 @@ export default function plainPlugin(options: {
         target: "es2022",
       });
 
-      // 2) Plain 编译。mapSource 用真实模块路径，devtools 才能把产物定位回源文件
+      // 2) Plain 编译。mapSource 用真实模块路径，devtools 才能把产物定位回源文件；
+      //    keyBase 单独给「resource 调用点 key」用**项目相对路径**（见 RFC §3.3）：
+      //    可读、不泄漏构建机绝对路径，且 SSR 构建与客户端构建对同一份源码得到同一个 key。
       const result = compile(stripped.code, id.split("/").pop() || "module.jsx", {
         mapSource: id,
+        keyBase: path.relative(root, fileName),
       });
 
       // 3) 登记 server 函数（物理剥离）

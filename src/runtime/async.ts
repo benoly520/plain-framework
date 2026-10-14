@@ -2,7 +2,13 @@
 
 import type { Resource, Owner } from "../types.js";
 import { signal, effect, batch } from "./signal.js";
-import { isSSR, getSSRHandler, trackPending } from "./ssr-context.js";
+import {
+  isSSR,
+  getSSRHandler,
+  trackPending,
+  openSSRSlot,
+  takeSSRSeed,
+} from "./ssr-context.js";
 
 /**
  * resource(fn) —— 自动带 loading / data / error 的异步资源。
@@ -10,19 +16,48 @@ import { isSSR, getSSRHandler, trackPending } from "./ssr-context.js";
  */
 export function resource<T>(
   promiseFn: () => T | Promise<T>,
-  owner?: Owner
+  owner?: Owner,
+  /**
+   * SSR 调用点 key —— **由编译器注入，不用手写**（见 docs/rfcs/ssr-data.md §3.3）。
+   * 有它，服务端取到的值才会随 HTML 迁移、并在注水时种回来（首帧与 HTML 一致）。
+   */
+  ssrKey?: string
 ): Resource<T> {
   const data = signal<T | undefined>(undefined);
   const loading = signal<boolean>(true);
   const error = signal<Error | undefined>(undefined);
   let seq = 0;
 
+  // ① 注水种入：服务端这次取到的值直接放进来，于是**首帧就与 HTML 一致**
+  //    （不闪 loading，也不必为了对齐首屏先请求一次）。
+  let seeded = false;
+  if (ssrKey) {
+    const seed = takeSSRSeed(ssrKey);
+    if (seed && seed.ok) {
+      data.set(seed.value as T);
+      loading.set(false);
+      seeded = true;
+    }
+  }
+
+  // ② 服务端收集：按**创建序**开槽，settle 后把值填进去（序列化时取走）。
+  //    注意「没拿到值」也要占位 —— 否则同 key 的多个实例在客户端会错位配对
+  //    （第 2 个实例拿到第 3 个的值：静默串数据，比多一次请求糟得多）。
+  const slot = ssrKey ? openSSRSlot(ssrKey) : null;
+
   effect(() => {
     const ticket = ++seq;
-    batch(() => {
-      loading.set(true);
-      error.set(undefined);
-    });
+    if (seeded) {
+      // 种入后的第一次：**不要翻回 loading**（否则注水首帧与 HTML 不一致、会闪一下）。
+      // 但 promiseFn 照跑：依赖收集不能丢（丢了依赖变化就永不重取 -> 静默陈旧数据），
+      // 顺便就是一次 stale-while-revalidate 的后台校验。
+      seeded = false;
+    } else {
+      batch(() => {
+        loading.set(true);
+        error.set(undefined);
+      });
+    }
     // 关键点：必须「同步」调用 promiseFn，这样它内部读取的 signal 才会被
     // 收集为依赖；放进 .then() 里读就永远订阅不上。
     let p: T | Promise<T>;
@@ -39,6 +74,10 @@ export function resource<T>(
     trackPending(Promise.resolve(p as Promise<T>))
       .then((v: T) => {
         if (ticket !== seq) return; // 丢弃过期响应，避免竞态
+        if (slot) {
+          slot.settled = true;
+          slot.value = v;
+        }
         batch(() => {
           data.set(v);
           loading.set(false);

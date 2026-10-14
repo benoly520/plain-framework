@@ -15,12 +15,12 @@ import type { SSRStore } from "../runtime/ssr-context.js";
 import { __setSSRStoreReader } from "../runtime/ssr-context.js";
 import { createDocument, installDocumentAccessor } from "./dom-shim.js";
 
-/** 本次渲染的完整状态：垫片 + handlers + pending */
-interface RunStore extends SSRStore {
+/** 本次渲染的完整状态：垫片 + handlers + pending + 数据收集槽 */
+export interface SSRRenderStore extends SSRStore {
   doc: any;
 }
 
-const als = new AsyncLocalStorage<RunStore>();
+const als = new AsyncLocalStorage<SSRRenderStore>();
 let ready = false;
 
 function ensureReady(): void {
@@ -37,11 +37,16 @@ function ensureReady(): void {
  */
 export function runSSR<T>(
   handlers: Record<string, (...args: any[]) => any> | null,
-  fn: (doc: any) => T
+  fn: (store: SSRRenderStore) => T
 ): T {
   ensureReady();
-  const store: RunStore = { doc: createDocument(), handlers, pending: new Set() };
-  return als.run(store, () => fn(store.doc));
+  const store: SSRRenderStore = {
+    doc: createDocument(),
+    handlers,
+    pending: new Set(),
+    slots: [],
+  };
+  return als.run(store, () => fn(store));
 }
 
 /** 当前渲染尚未 settle 的 resource 数量（不在渲染上下文里则为 0） */

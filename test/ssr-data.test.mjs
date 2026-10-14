@@ -14,9 +14,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { JSDOM } from "jsdom";
 import * as esbuild from "esbuild";
 import { compile } from "../dist/compiler/index.js";
-import { renderToString, renderToStringSync } from "../dist/server/render.js";
+import {
+  renderToString,
+  renderToStringSync,
+  renderToStringWithData,
+} from "../dist/server/render.js";
+import { hydrate } from "../dist/runtime/index.js";
 import { getSSRStore } from "../dist/runtime/ssr-context.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -71,6 +77,38 @@ async function forbidFetch(fn) {
  * 见 dom-shim），只留可见内容 —— 让断言读起来就是「用户看到什么」。
  */
 const visible = (html) => html.replace(/<!--[\s\S]*?-->/g, "");
+
+/** 在一个独立的 jsdom 窗口里跑一段逻辑（隔离 document，避免污染其它测试） */
+function inDom(html, fn) {
+  const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
+    url: "http://localhost/",
+    pretendToBeVisual: true,
+  });
+  const saved = {
+    window: globalThis.window,
+    document: globalThis.document,
+    Node: globalThis.Node,
+    Element: globalThis.Element,
+    HTMLElement: globalThis.HTMLElement,
+    Event: globalThis.Event,
+  };
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.Node = dom.window.Node;
+  globalThis.Element = dom.window.Element;
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  globalThis.Event = dom.window.Event;
+  return Promise.resolve()
+    .then(() => fn(dom))
+    .finally(() => {
+      Object.assign(globalThis, saved);
+    });
+}
+
+/** 把「SSR HTML + 数据载荷」拼成一个页面（等价 ssrMiddleware 要做的事） */
+const pageOf = (html, data) =>
+  `<div id="app">${html}</div>` +
+  `<script type="application/json" id="plain-data">${JSON.stringify(data)}</script>`;
 
 test("SSR 首屏就是真实数据：server() 直调 + 等静默", async () => {
   const { mod, handlers } = await loadModule(
@@ -299,4 +337,191 @@ test("渲染结束后：不残留废弃垫片，也不残留 SSR 上下文", asy
     "全局 document 不该停在某个渲染的废弃垫片上"
   );
   assert.equal(getSSRStore(), null, "渲染结束后不该残留跨请求的上下文");
+});
+
+// ---------------------------------------------------------------------------
+// 阶段二：首屏数据随 HTML 迁移
+//   编译器注入调用点 key -> 服务端按创建序收集 -> 注水时种入（首帧与 HTML 一致）
+// ---------------------------------------------------------------------------
+
+test("编译器给每个 resource 注入调用点 key：可读、可复现、两端一致", async () => {
+  const stripped = await esbuild.transform(
+    `
+    import { resource } from "plain";
+    export function App() {
+      const a = resource(() => 1);
+      return <p>{a.data()}</p>;
+    }
+    `,
+    { loader: "tsx", jsx: "preserve", target: "es2022", format: "esm" }
+  );
+
+  const one = compile(stripped.code, "App.jsx", { keyBase: "src/App.tsx" });
+  assert.match(
+    one.code,
+    /"src\/App\.tsx:\d+#0"/,
+    "key 应是「项目相对路径:行#序号」：" + one.code
+  );
+
+  const two = compile(stripped.code, "App.jsx", { keyBase: "src/App.tsx" });
+  assert.equal(two.code, one.code, "同一份源码 + 同一个 keyBase -> 产物完全一致（两端才能配对）");
+
+  const other = compile(stripped.code, "App.jsx", { keyBase: "src/Other.tsx" });
+  assert.ok(!other.code.includes("src/App.tsx"), "换 keyBase，key 跟着换（不是写死的）");
+});
+
+test("服务端把每个 resource 的值按创建序收进载荷", async () => {
+  const { mod, handlers } = await loadModule(
+    `
+    import { resource, server } from "plain";
+    const a = server(async () => "A");
+    const b = server(async () => "B");
+    export function App() {
+      const x = resource(() => a());
+      const y = resource(() => b());
+      return <p>{x.data() ?? "…"}{y.data() ?? "…"}</p>;
+    }
+    `,
+    "ssr11"
+  );
+
+  const { html, data } = await renderToStringWithData(mod.App, {
+    handlers,
+    container: false,
+  });
+  assert.equal(visible(html), "<p>AB</p>");
+  assert.equal(data.length, 2, "两个 resource 各占一条");
+  assert.deepEqual(
+    data.map((d) => d.value),
+    ["A", "B"],
+    "**按创建序**排列（不是 settle 序）"
+  );
+  assert.ok(
+    data.every((d) => d.ok && /:\d+#\d+$/.test(d.key)),
+    "每条都带调用点 key：" + JSON.stringify(data)
+  );
+});
+
+test("注水：首帧就用服务端的值（0 告警、不闪 loading），随后 SWR 后台校验", async () => {
+  const { mod, handlers } = await loadModule(
+    `
+    import { resource, server } from "plain";
+    const get = server(async () => "服务端值");
+    export function App() {
+      const r = resource(() => get());
+      return <p>{r.loading() ? "LOADING" : r.data()}</p>;
+    }
+    `,
+    "ssr12"
+  );
+
+  const { html, data } = await renderToStringWithData(mod.App, {
+    handlers,
+    container: false,
+  });
+  assert.equal(visible(html), "<p>服务端值</p>");
+
+  await inDom(pageOf(html, data), async (dom) => {
+    const container = dom.window.document.getElementById("app");
+    const origFetch = globalThis.fetch;
+    // 后台校验（SWR）会走 RPC：让它返回一个新值，用来证明「后台确实又取了一次」
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({ result: "客户端校验值" }),
+    });
+    try {
+      const res = hydrate(container, mod.App, { warn: false });
+      assert.equal(
+        visible(container.innerHTML),
+        "<p>服务端值</p>",
+        "首帧必须与服务端 HTML 一致（种入生效，而不是先渲染 LOADING）"
+      );
+      assert.equal(res.warnings.length, 0, "不该有注水告警：" + JSON.stringify(res.warnings));
+
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+      assert.match(
+        container.textContent,
+        /客户端校验值/,
+        "后台校验应把新值写回（说明依赖收集没丢）"
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+});
+
+test("同一个调用点的多个实例：按创建序配对（列表场景）", async () => {
+  const { mod, handlers } = await loadModule(
+    `
+    import { resource, server, resolve } from "plain";
+    const getRow = server(async (id) => "srv-" + id);
+    function Row(props) {
+      const r = resource(() => getRow(resolve(props.id)));
+      return <li>{r.data() ?? "…"}</li>;
+    }
+    export function App() {
+      return <ul>{[1, 2, 3].map((id) => <Row id={id} />)}</ul>;
+    }
+    `,
+    "ssr13"
+  );
+
+  const { html, data } = await renderToStringWithData(mod.App, {
+    handlers,
+    container: false,
+  });
+  assert.equal(visible(html), "<ul><li>srv-1</li><li>srv-2</li><li>srv-3</li></ul>");
+  assert.equal(data.length, 3, "3 个实例占 3 条");
+  assert.equal(new Set(data.map((d) => d.key)).size, 1, "同一个调用点 -> 同一个 key");
+  assert.deepEqual(
+    data.map((d) => d.value),
+    ["srv-1", "srv-2", "srv-3"],
+    "实例之间按创建序，客户端才能一一对上"
+  );
+
+  await inDom(pageOf(html, data), async (dom) => {
+    const container = dom.window.document.getElementById("app");
+    const res = hydrate(container, mod.App, { warn: false });
+    assert.equal(
+      visible(container.innerHTML),
+      "<ul><li>srv-1</li><li>srv-2</li><li>srv-3</li></ul>",
+      "三个实例各自拿到自己那条（没串位）"
+    );
+    assert.equal(res.warnings.length, 0, "不该有注水告警：" + JSON.stringify(res.warnings));
+  });
+});
+
+test("页面载荷坏掉时明确告警，而不是静默退化成全量请求", async () => {
+  const { mod } = await loadModule(
+    `
+    import { resource } from "plain";
+    export function App() {
+      const r = resource(() => Promise.resolve("v"));
+      return <p>{r.loading() ? "LOADING" : r.data()}</p>;
+    }
+    `,
+    "ssr14"
+  );
+
+  const html = renderToStringSync(mod.App, { container: false });
+  const page =
+    `<div id="app">${html}</div>` +
+    `<script type="application/json" id="plain-data">{这不是合法 JSON</script>`;
+
+  await inDom(page, async (dom) => {
+    const container = dom.window.document.getElementById("app");
+    const warnings = [];
+    const origWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      hydrate(container, mod.App, { warn: true });
+    } finally {
+      console.warn = origWarn;
+    }
+    assert.ok(
+      warnings.some((w) => w.includes("plain-data")),
+      "应指出载荷坏了：" + JSON.stringify(warnings)
+    );
+  });
 });

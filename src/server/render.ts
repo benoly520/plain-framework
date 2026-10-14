@@ -9,6 +9,7 @@
 import { serializeNode } from "./dom-shim.js";
 import { createScope } from "../runtime/signal.js";
 import { runSSR, pendingCount, settlePending } from "./ssr-scope.js";
+import type { SSREntry } from "../runtime/ssr-context.js";
 
 export type RenderableNode = any;
 
@@ -31,20 +32,36 @@ export interface RenderOptions {
   handlers?: Record<string, (...args: any[]) => any> | null;
 }
 
+export interface RenderResult {
+  /** 应用渲染出的 HTML（含注水认领锚点；`container: false` 时不套外层 div） */
+  html: string;
+  /**
+   * 首屏数据载荷，**按 resource 的创建序**排列。
+   * 交给页面模板嵌进 HTML（`<script type="application/json" id="plain-data">`），
+   * 注水时 `hydrate` 会读回来种进同名 resource。
+   * `ok: false` 表示这次在服务端没拿到值（出错 / 没 settle）—— 位置要占住。
+   */
+  data: SSREntry[];
+}
+
 /**
- * renderToString(component | node, options)
+ * renderToStringWithData(component | node, options) -> { html, data }
  *
  * 与同步版的区别只有一条：**异步资源会被等到 settle 为止**。
  * 不是 `wait: 50` 那种猜出来的毫秒数 —— 后端慢一点 SSR 就会渲染骨架屏，
  * 而这件事静态发现不了，所以改成「等静默」这条可判定的规则。
+ *
+ * `data` 是首屏数据载荷（**按创建序**）：交给页面模板嵌进 HTML，
+ * 注水时由 `hydrate` 读回来种进同名 resource —— 首帧因此与 HTML 一致（见 RFC §3.3）。
  */
-export async function renderToString(
+export async function renderToStringWithData(
   component: (() => any) | any,
   options: RenderOptions = {}
-): Promise<string> {
+): Promise<RenderResult> {
   const { wait = 0, container = true, handlers = null } = options || {};
   // 整个渲染（含下面的 await）都在**本次渲染自己的**作用域里跑 —— 并发安全
-  return runSSR(handlers, async (doc) => {
+  return runSSR(handlers, async (store) => {
+    const doc = store.doc;
     // 在独立作用域里渲染：SSR 期间创建的 effect（insert/when/each/组件）会在
     // 序列化完成后被整体回收。否则它们会继续订阅全局 signal —— 同一进程里随后
     // 做 hydrate 时，点击等更新会同时触发「SSR 残留 effect（锚点是服务端垫片节点）
@@ -59,11 +76,28 @@ export async function renderToString(
       await settleResources();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       const html = scope.value.childNodes.map(serializeNode).join("");
-      return container ? `<div>${html}</div>` : html;
+      return {
+        html: container ? `<div>${html}</div>` : html,
+        // 「没拿到值」也要带上（ok:false）：客户端按创建序消费，
+        // 少一条就会让同 key 的后续实例错位配对。
+        data: store.slots.map((s) =>
+          s.settled
+            ? { key: s.key, ok: true, value: s.value }
+            : { key: s.key, ok: false }
+        ),
+      };
     } finally {
       scope.dispose();
     }
   });
+}
+
+/** 只要 HTML 的便捷入口（= `renderToStringWithData(...).html`） */
+export async function renderToString(
+  component: (() => any) | any,
+  options: RenderOptions = {}
+): Promise<string> {
+  return (await renderToStringWithData(component, options)).html;
 }
 
 /**

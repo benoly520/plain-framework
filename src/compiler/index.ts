@@ -91,6 +91,13 @@ export class PlainCompileError extends Error {
 let uid = 0;
 const fresh = (p: string) => `__${p}${++uid}`;
 
+/**
+ * `resource(...)` 调用点 key 的序号（**同一个文件里按源码顺序**，稳定可复现）。
+ * 见 docs/rfcs/ssr-data.md §3.3：SSR 载荷要靠它把「服务端这次取到的值」与
+ * 「客户端注水时的同一个调用点」配对。
+ */
+let resourceSeq = 0;
+
 // helper 一律用别名引入，避免和用户自己的 import 重名
 const E = "__effect";
 const S = "__stringify";
@@ -147,6 +154,12 @@ export interface CompileSourceMap {
 export interface CompileOptions {
   /** sourcemap 的 sources 里写什么路径（默认与 fileName 相同；vite 插件会传真实模块路径） */
   mapSource?: string;
+  /**
+   * `resource(...)` 调用点 key 的路径前缀（SSR 载荷配对用，见 docs/rfcs/ssr-data.md §3.3）。
+   * 打包器应传**项目相对路径**：key 可读、不泄漏构建机绝对路径，且服务端与客户端
+   * 两次构建对同一份源码得到同一个 key。不传则退回 `mapSource` / 文件名。
+   */
+  keyBase?: string;
   /** 是否生成 sourcemap，默认 true */
   sourceMap?: boolean;
 }
@@ -162,6 +175,12 @@ export function compile(
   options: CompileOptions = {}
 ): { code: string; serverFunctions: ServerFunction[]; map: CompileSourceMap | null } {
   uid = 0;
+  resourceSeq = 0;
+  // 调用点 key 的前缀（见 docs/rfcs/ssr-data.md §3.3）：
+  // 优先用打包器给的 keyBase（vite 插件传**项目相对路径** —— key 可读、不泄漏
+  // 构建机绝对路径，且 SSR 构建与客户端构建对同一份源码得到**同一个 key**）。
+  // 没给就退回 mapSource / 文件名。
+  const keyPrefix = options.keyBase || options.mapSource || fileName;
   const sf = ts.createSourceFile(
     fileName,
     source,
@@ -200,6 +219,31 @@ export function compile(
           text: `((...__args) => ${RPC}(${JSON.stringify(name)}, __args))`,
         });
       }
+    }
+
+    // 1c) resource(fn) -> resource(fn, <owner 占位>, "调用点 key")
+    //
+    // 为什么由编译器给：SSR 首屏数据要随 HTML 迁移（见 docs/rfcs/ssr-data.md §3.3），
+    // 而「服务端的这次取数」与「客户端注水时的同一个调用点」需要一个双方都认得的键。
+    // 让 AI / 人手写这个键 = 又多一个会漏、会写错的东西；编译器给则是**必然存在**
+    // 且两端一致（同一份源码 -> 同一个 key）。
+    //
+    // 只认裸标识符 `resource(...)`：别名导入（`import { resource as r }`）识别不到 ——
+    // 那就没有键，退化成「注水后后台照常取一次」（结果正确，只多一次请求）。
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "resource" &&
+      (node.arguments.length === 1 || node.arguments.length === 2)
+    ) {
+      const at = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+      const key = `${keyPrefix}:${at.line + 1}#${resourceSeq++}`;
+      const last = node.arguments[node.arguments.length - 1];
+      const text =
+        node.arguments.length === 1
+          ? `, undefined, ${JSON.stringify(key)}`
+          : `, ${JSON.stringify(key)}`;
+      edits.push({ start: last.getEnd(), end: last.getEnd(), text });
     }
 
     // 1b) 调用 server() 产物时传入无法 JSON 序列化的参数（PLAIN_E1007）
