@@ -7,6 +7,9 @@
 //   [x] moduleId 关联：hmrScope / __plainBeginModule 让挂载点与模块自动绑定
 //   [x] 非挂载模块（独立组件文件 / import() 懒加载）改动也要生效：重跑所有挂载点
 //   [x] 认不出根组件时明确告警并交给整页刷新（绝不静默留旧代码）
+//   [x] 能力边界（钉死事实，别被「热更新」这个词带偏）：
+//       保住 —— 不整页刷新 / 锚点区间之外的 DOM / 模块级 signal 原始值
+//       丢掉 —— 区间之内整段重建：节点身份变、未受控输入的值、焦点 / 局部滚动
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -291,5 +294,67 @@ test("hmrApply：挂载模块认不出根组件时明确告警并交给整页刷
       "必须明确告警：" + JSON.stringify(warnings)
     );
     assert.equal(root.querySelector("p.a").textContent, "a", "不应破坏既有 DOM");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. 能力边界：HMR 到底保住什么、丢什么（把事实钉死，别让文档自夸）
+// ---------------------------------------------------------------------------
+test("HMR 能力边界：区间之外与模块级 signal 保住；区间之内整段重建（DOM 状态会丢）", async () => {
+  __clearHmrRegistry();
+  const src = (label) => `
+    import { signal } from "plain";
+    export const title = signal(${JSON.stringify(label)});
+    export function App() {
+      return (
+        <section class="app">
+          <h1>{title()}</h1>
+          <input class="free" />
+        </section>
+      );
+    }
+  `;
+  const { mod: v1 } = await compileModule(src("v1"), "m9");
+  const { mod: v2 } = await compileModule(src("v2"), "m9b");
+
+  await inDom("<div id='root'><input id='sibling' /></div>", async (dom) => {
+    const doc = dom.window.document;
+    const root = doc.getElementById("root");
+    const sibling = doc.getElementById("sibling");
+    // 锚点区间**之外**的输入框：模拟用户输入 + 聚焦
+    sibling.value = "outside";
+
+    __plainBeginModule("/src/m9.jsx");
+    mount(root, v1.App);
+    assert.equal(root.querySelector("h1").textContent, "v1");
+
+    // 锚点区间**之内**：模拟用户输入（值只存在于 DOM 上）+ 聚焦
+    const freeBefore = root.querySelector("input.free");
+    freeBefore.value = "inside";
+    freeBefore.focus();
+
+    // 用户改过模块级 signal
+    v1.title.set("edited");
+
+    // 按注入脚本体内的顺序走一遍：快照 -> 恢复 -> 热替换
+    const snap = snapshotSignals(v1);
+    restoreSignals(v2, snap, "/src/m9.jsx");
+    assert.equal(hmrApply("/src/m9.jsx", { App: v2.App }), true);
+
+    // ① 保住：模块级 signal 的原值（是用户编辑过的 "edited"，而不是新模块字面的 "v2"）
+    assert.equal(v2.title(), "edited");
+    assert.equal(root.querySelector("h1").textContent, "edited");
+
+    // ② 保住：区间之外的节点身份与状态都没被碰
+    assert.equal(doc.getElementById("sibling"), sibling, "区间外节点身份不变");
+    assert.equal(sibling.value, "outside", "区间外的输入值保留");
+
+    // ③ 丢掉：区间之内是整段重建 —— 节点身份变了，未受控输入的值回到初始值
+    const freeAfter = root.querySelector("input.free");
+    assert.notEqual(freeAfter, freeBefore, "重建 => 新节点（不复用）");
+    assert.equal(freeAfter.value, "", "未受控输入的值只活在旧节点上 => 丢");
+
+    // ④ 丢掉：焦点不在重建后的新节点上（浏览器会把被移除的焦点元素重置掉）
+    assert.notEqual(doc.activeElement, freeAfter, "焦点不会自动回到新节点");
   });
 });
