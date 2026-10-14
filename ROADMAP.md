@@ -162,7 +162,9 @@ SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式
 
 **dev 下的 SSR** ✅ 已落地（vite 插件选项 `ssr: { entry }`）：模块走 `ssrLoadModule`、handlers 用
 dev 内存注册表（不依赖 `.plain/server.mjs`）、模板过 `transformIndexHtml`；中间件装在 vite
-内部中间件之前，与生产共用 `renderPage`。仍未做：SSR 结果的**按路由缓存 / 流式输出**（当前每次请求整页渲染）。
+内部中间件之前，与生产共用 `renderPage`。**按路由缓存** ✅ 已落地（`ssrMiddleware` / `serve({ ssr })`
+的 `cache: { ttl, max }` 选项：按完整 URL + TTL 缓存整页 HTML、并发同 URL 去重、失败不进缓存）。
+仍未做：SSR 的**流式输出**（当前每次请求要等数据到齐才吐首字节）。
 
 ## M6 —— 剩余的 AI 原生工具（P1）
 

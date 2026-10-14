@@ -46,6 +46,14 @@
     构建时照样会被换成带 hash 的产物。示例与文档都已写明。
   - 测试 `test/vite-plugin.test.mjs` 新增 4 项（导航走 SSR + 模板过 vite + 载荷注入 /
     vite 自身请求与静态资源放行 / 出错透出 500 / 模板缺占位符同样报错）。
+- **SSR 按路由缓存（可选，生产路径）**：`ssrMiddleware` / `serve({ ssr })` 新增 `cache` 选项
+  `{ ttl?, max? }` —— 按**完整 URL（含 query）** + TTL 缓存渲染后的整页 HTML，命中直接回 HTML、
+  省掉整页重渲染。`ttl` 默认 0（永不过期，靠 `max` 上限淘汰），`max` 默认 1000。
+  - 只在**渲染成功**（已产出 HTML）后写缓存；500 等错误**不会**进缓存、也不会污染其它命中。
+  - 并发同 URL **去重**（一个 `inflight` Map）：同一时刻只渲染一次，其余请求复用结果（防惊群）。
+  - **dev 下不要开** —— 代码一变缓存就是脏的（dev SSR 走的是 vite 插件那条路，本中间件是生产路径）。
+  - 测试 `test/ssr-data.test.mjs` 新增 6 项（默认关闭 / 同 URL 命中不重渲染 / 不同 URL 独立 /
+    并发只渲染一次 / TTL 过期重渲染 / 超 max 淘汰最旧 / 失败不进缓存）。
 - **SSR 数据预取（阶段三：`ssrMiddleware` + SSR 示例）**：把前两个阶段接成一条能投产的链。
   - **`ssrMiddleware({ template, entry, manifest })`**（`plain/server`，Node 标准 `(req,res,next)`，与
     `rpcMiddleware` 同形状）：`renderToStringWithData(App, { handlers, url })` -> 把应用 HTML 写进模板的

@@ -665,3 +665,102 @@ test("ssrMiddleware：占位符出现两次 -> 报错（注入点不明确，绝
   assert.equal(res.statusCode, 500);
   assert.match(res.body, /2 次/, "应说明出现了几次：" + res.body);
 });
+
+// ---------------------------------------------------------------------------
+// 阶段三（续）：ssrMiddleware 的「按路由缓存」—— 命中直接回 HTML，省整页重渲染
+// ---------------------------------------------------------------------------
+
+/**
+ * 造一个带「渲染计数」的 SSR 项目：App 每渲染一次，模块级计数器 +1 并写进 HTML。
+ * 入口只 import 一次（ssrMiddleware 会缓存 import），计数跨请求累积 ——
+ * 于是「第二次同 URL 请求 body == 第一次」就等于「没再渲染」（缓存命中）。
+ * 另带一个 /boom 路由用于验证「渲染失败不进缓存」。
+ */
+async function makeCounterSsr(cache) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plain-ssr-cache-"));
+  const { code } = await loadModule(
+    `
+    import { createRouter } from "plain";
+    let __renders = 0;
+    function Home() { return <p>home</p>; }
+    function Boom() { throw new Error("boom"); }
+    const router = createRouter({ routes: [
+      { path: "/", component: Home },
+      { path: "/boom", component: Boom },
+    ]});
+    export function App() {
+      __renders += 1;
+      // 把渲染次数挂到 data-render 上：无论路由是否命中，每次渲染都可见（属性不会被锚点注释包住）
+      const m = router.current();
+      return <div data-render={__renders}>{m.route ? m.route.component({ params: m.params, path: m.path }) : null}</div>;
+    }
+    `,
+    "ssr-cache"
+  );
+  fs.writeFileSync(path.join(dir, "entry-server.mjs"), code);
+  fs.writeFileSync(path.join(dir, "server.mjs"), `export const __plainHandlers = {};`);
+  fs.writeFileSync(
+    path.join(dir, "index.html"),
+    `<!doctype html><html><head>${DATA_SLOT}</head><body><div id="app">${SSR_SLOT}</div></body></html>`
+  );
+  return ssrMiddleware({
+    template: path.join(dir, "index.html"),
+    entry: path.join(dir, "entry-server.mjs"),
+    manifest: path.join(dir, "server.mjs"),
+    cache,
+  });
+}
+
+/** 从渲染产物里取出 data-render 上的次数（属性不会被认领锚点注释包住） */
+const rendersOf = (body) => {
+  const m = body.match(/data-render="(\d+)"/);
+  return m ? Number(m[1]) : null;
+};
+
+test("ssrMiddleware 缓存：默认关闭，每次请求都重渲染", async () => {
+  const mw = await makeCounterSsr(undefined);
+  const a = rendersOf((await callSsr(mw, "/")).res.body);
+  const b = rendersOf((await callSsr(mw, "/")).res.body);
+  assert.equal(a, 1, "没开缓存：第一次渲染 = 1");
+  assert.equal(b, 2, "没开缓存：第二次应重新渲染 = 2");
+});
+
+test("ssrMiddleware 缓存：同 URL 命中直接回 HTML（不重渲染），不同 URL 独立", async () => {
+  const mw = await makeCounterSsr({ ttl: 60_000 });
+  const a = rendersOf((await callSsr(mw, "/")).res.body);
+  const b = rendersOf((await callSsr(mw, "/")).res.body);
+  assert.equal(a, 1, "第一次渲染 = 1");
+  assert.equal(b, 1, "命中缓存应复用同一份渲染（仍是 1）");
+  const c = rendersOf((await callSsr(mw, "/other")).res.body);
+  assert.equal(c, 2, "不同 URL 不该串（独立计到 2）");
+});
+
+test("ssrMiddleware 缓存：并发同 URL 只渲染一次（防惊群）", async () => {
+  const mw = await makeCounterSsr({ ttl: 60_000 });
+  const [x, y] = await Promise.all([callSsr(mw, "/"), callSsr(mw, "/")]);
+  assert.equal(rendersOf(x.res.body), 1, "并发应复用同一次渲染");
+  assert.equal(rendersOf(y.res.body), 1, "并发应复用同一次渲染");
+});
+
+test("ssrMiddleware 缓存：TTL 过期后重新渲染", async () => {
+  const mw = await makeCounterSsr({ ttl: 20 });
+  assert.equal(rendersOf((await callSsr(mw, "/")).res.body), 1);
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(rendersOf((await callSsr(mw, "/")).res.body), 2, "过期后应重新渲染");
+});
+
+test("ssrMiddleware 缓存：超过 max 淘汰最旧项", async () => {
+  const mw = await makeCounterSsr({ ttl: 60_000, max: 1 });
+  assert.equal(rendersOf((await callSsr(mw, "/a")).res.body), 1); // 缓存 {/a}
+  assert.equal(rendersOf((await callSsr(mw, "/b")).res.body), 2); // 淘汰 /a，缓存 {/b}
+  assert.equal(rendersOf((await callSsr(mw, "/a")).res.body), 3, "被淘汰的 URL 应重新渲染");
+});
+
+test("ssrMiddleware 缓存：渲染失败（500）不进缓存、也不污染其它命中", async () => {
+  const mw = await makeCounterSsr({ ttl: 60_000 });
+  assert.equal(rendersOf((await callSsr(mw, "/")).res.body), 1); // 正常并缓存
+  const boom = await callSsr(mw, "/boom");
+  assert.equal(boom.res.statusCode, 500, "错误路由应 500");
+  assert.equal(rendersOf((await callSsr(mw, "/")).res.body), 1, "成功的缓存不应被失败请求污染");
+});
+

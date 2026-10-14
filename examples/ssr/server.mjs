@@ -19,6 +19,9 @@ await serve({
   ssr: {
     template: path.join(here, "dist/index.html"),
     entry: path.join(here, ".plain/ssr/entry-server.js"),
+    // 可选：按路由缓存首屏 HTML，命中直接回、省掉整页重渲染。
+    // dev 下别开（代码会变，缓存就是脏的）；生产路径才开。
+    cache: { ttl: 30_000, max: 1000 },
   },
   port: Number(process.env.PORT) || 8300,
 });
