@@ -154,6 +154,8 @@ npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE �
 3. 编译产物与运行时不得出现 `innerHTML` / `eval`（有测试守着）。
 4. 提交信息用 Conventional Commits，scope 用模块名（`lint` / `compiler` / `runtime` / `server` / `vite` / `cli`）。
 5. 改完 `src/` 记得 `pnpm run build` —— 测试与示例用的都是 `dist/`。
+6. **新增行为前先过「AI-first 四道闸」**（可静态验证 / 可本地推理 / 重复优于抽象 / 平台优先）——
+   优先级从高到低：交给平台 → 交给构建 / 工具链 → 变成编译期检查 → 才考虑新增运行时概念。定义见 [`SPEC.md` §1.1](SPEC.md)。
 
 ## 8. 帮这个框架变好（重要）
 
