@@ -2,6 +2,7 @@
 
 import type { Resource, Owner } from "../types.js";
 import { signal, effect, batch } from "./signal.js";
+import { isSSR, getSSRHandler, trackPending } from "./ssr-context.js";
 
 /**
  * resource(fn) —— 自动带 loading / data / error 的异步资源。
@@ -34,7 +35,8 @@ export function resource<T>(
       });
       return;
     }
-    Promise.resolve(p as Promise<T>)
+    // SSR 的「等静默」靠它：登记进 pending，settle 后自动摘掉（见 ssr-context.ts）
+    trackPending(Promise.resolve(p as Promise<T>))
       .then((v: T) => {
         if (ticket !== seq) return; // 丢弃过期响应，避免竞态
         batch(() => {
@@ -90,6 +92,19 @@ export async function rpc<R = unknown>(
   name: string,
   args?: unknown[]
 ): Promise<R> {
+  // SSR 期间：**直调服务端实现**（同进程、同一份 .plain/server.mjs），不走 HTTP。
+  // 取不到 handler 就明确报错 —— 绝不静默退回 fetch 自己（那需要猜 host / port，
+  // 构建期更没有服务在监听）。见 docs/rfcs/ssr-data.md §3.1。
+  if (isSSR()) {
+    const fn = getSSRHandler(name);
+    if (!fn) {
+      throw new Error(
+        `[plain] SSR 期间调用了服务端函数 "${name}"，但这次渲染没有注入 handlers。` +
+          `服务端请这样渲染：renderToString(App, { handlers: await loadHandlers() })`
+      );
+    }
+    return (await fn(...(args || []))) as R;
+  }
   const res = await fetch(RPC_ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/json" },

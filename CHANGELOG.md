@@ -30,6 +30,25 @@
 
 ### 新增
 
+- **SSR 数据预取（阶段一：服务端直调 + 确定性等待）**：把 SSR 从「机制齐全」推向「照着就能投产」，
+  设计与取舍见 [`docs/rfcs/ssr-data.md`](docs/rfcs/ssr-data.md)。本阶段落地两件事：
+  - **服务端直调**：`renderToString(App, { handlers })` 注入服务端清单后，SSR 期间的 `server()`
+    调用**直调同进程的 handler**，不再 `fetch("/_plain/rpc")` **请求自己**（那需要猜 host / port /
+    子路径，构建期更是没有服务在监听）。用户代码零改动 —— 同一份源码两端同构。
+    没注入 `handlers` 却在 SSR 里调了 `server()` → **抛带指引的错**，不静默退回 fetch。
+    `renderToStringSync` 也进同一个上下文（同步版依然不等待异步资源）。
+  - **确定性等待**：`renderToString` 从「等 `wait: 50` 毫秒」（猜出来的数 —— 后端一慢 SSR 就渲染
+    骨架屏，而且静态发现不了）改成**等所有 `resource` 静默**：循环 settle 到没有 pending，
+    settle 后新建的 resource 由下一轮接住（**串联两层也能等到**）；等满 20 轮仍有剩余 → 显式
+    `console.warn`。`wait` 保留为额外上限，不再是主要手段。
+  - 测试 `test/ssr-data.test.mjs`（5 项）：首屏就是真实数据 / 串联两层也等到 /
+    SSR 期间**一次 fetch 都不发**（fetch 被打桩成会抛错）/ 缺 `handlers` 明确报错 /
+    资源 reject 不炸 SSR（`allSettled`，错误落在 `error` 态）。
+  - ⚠️ **本阶段同时暴露一个必须先修的并发缺陷**（RFC §3.4）：`installServerDOM()` 靠「换全局
+    `document` + LIFO 恢复」，隐含假设「渲染是同步的」。一旦渲染里有 `await`（等静默 / `wait` /
+    接下来的数据迁移），同进程并发渲染会互相覆盖 prev，最后 `globalThis.document` **永久停在一个
+    废弃垫片**上。修法已定：`AsyncLocalStorage` 保存本次渲染的垫片 + `document` 改成取值时查上下文的
+    访问器，**排在数据迁移之前做**。
 - **`plaindev lsp`：编辑器实时诊断（LSP over stdio）**：不写 tsserver 插件 —— 直接把契约检查的
   **同一条规则链**做成 `textDocument/publishDiagnostics`，于是**编辑器里报的**与**构建时拦的**
   是同一套 `PLAIN_Exxxx` 与同一份修法提示（可自动修的在 message 里带「可自动修」）。
