@@ -54,6 +54,10 @@ export function mount(
   render();
 
   const unmount = () => {
+    // 回收该挂载点作用域内的一切副作用（effect / onCleanup 等），
+    // 再移除 DOM —— 此前只移除 DOM，这些副作用会随挂载点一起泄漏。
+    cleanups.forEach((f) => f());
+    cleanups.clear();
     current.forEach((x: any) => x.remove && x.remove());
     startMark.remove && startMark.remove();
     endMark.remove && endMark.remove();
