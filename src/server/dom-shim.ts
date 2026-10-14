@@ -229,6 +229,8 @@ export interface ServerDocument {
   querySelector: () => null;
   getElementById: () => null;
   body: SElement;
+  /** 标记：让全局访问器认出「当前 document 是服务端垫片」 */
+  __plainShim: true;
 }
 
 export function createDocument(): ServerDocument {
@@ -242,32 +244,87 @@ export function createDocument(): ServerDocument {
     querySelector: () => null,
     getElementById: () => null,
     body: new SElement("body"),
+    __plainShim: true,
   };
 }
 
+// ---------------------------------------------------------------------------
+// 全局安装：**只装一次、不再换入换出**
+//
+// ⚠️ 为什么不能沿用它以前的写法（换 globalThis.document → 用完换回来）：
+// 渲染过程中有 await（等静默 / `wait` / 数据迁移），隐含假设「渲染是同步的、恢复是 LIFO」
+// 就不成立了 —— 并发渲染会互相覆盖「上一个 document」，最后全局**永久停在废弃的垫片**上
+// （根因分析见 docs/rfcs/ssr-data.md §3.4）。
+//
+// 现在 `document` 是「取值时查当前渲染上下文」的访问器：每个渲染各自
+// `als.run(自己的垫片, …)`，全程（含 await 之后）看到自己的 document，
+// 也不存在换入换出的窗口。
+// `Node` 不需要按渲染隔离 —— 它每次都是同一个值（SNode），不存在跨渲染串味。
+// ---------------------------------------------------------------------------
+
+/** 取当前渲染上下文的 document（由 server/ssr-scope.ts 注入）；不在渲染中返回 null */
+let getContextDoc: (() => any) | null = null;
+/** 不在渲染上下文里时 `document` 取什么（纯 Node 是 undefined；jsdom 测试里是真实文档） */
+let fallbackDoc: any = undefined;
+/** 同上，`Node` 的兜底值（谁给 globalThis.Node 赋过值就是谁） */
+let fallbackNode: any = undefined;
+let globalsInstalled = false;
+
+/** 当前是否跑在服务端垫片上（按渲染上下文，或旧的全局安装方式） */
+export function isServerShimActive(): boolean {
+  if (getContextDoc && getContextDoc()) return true;
+  return !!(fallbackDoc && fallbackDoc.__plainShim);
+}
+
 /**
- * 安装到 globalThis.document / window，供编译产物在 Node 里直接运行。
+ * 把 `globalThis.document` / `globalThis.Node` 装成访问器（**幂等，只装一次**）。
+ * provider 提供「当前渲染的垫片」；不传则保留已有 provider
+ * （旧入口直接调用时不该把渲染路径的 provider 带坏）。
+ */
+export function installDocumentAccessor(provider?: () => any): void {
+  if (provider) getContextDoc = provider;
+  if (globalsInstalled) return;
+  globalsInstalled = true;
+  const g = globalThis as any;
+  fallbackDoc = g.document;
+  fallbackNode = g.Node;
+  Object.defineProperty(g, "document", {
+    configurable: true,
+    get: () => (getContextDoc && getContextDoc()) || fallbackDoc,
+    // 兼容既有用法：测试与 hydrate 会直接给 globalThis.document 赋值
+    set: (v: any) => {
+      fallbackDoc = v;
+    },
+  });
+  Object.defineProperty(g, "Node", {
+    configurable: true,
+    get: () => (isServerShimActive() ? SNode : fallbackNode),
+    set: (v: any) => {
+      fallbackNode = v;
+    },
+  });
+}
+
+/**
+ * 旧入口：把垫片装成「全局默认 document」（**同步**用法 / 测试）。
  *
- * 返回的 document 上挂了一个 `__restore()`：SSR 结束后调用它可把全局
- * document / Node / window 还原成安装前的值。**务必还原**——否则 SSR 会污染
- * 宿主进程（典型后果：同进程里再做 hydrate / 无头 DOM 渲染时，全局 document
- * 仍是服务端垫片，运行时新建的节点会变成 shim 节点）。
+ * 新代码请走 `server/ssr-scope.ts` 的 `runSSR()` —— 那条路按渲染隔离、并发安全。
+ * 这里保留是为了不改动既有调用与测试的语义：返回的 document 上挂 `__restore()`，
+ * 把全局默认 document / window 还原成安装前的值。
  */
 export function installServerDOM(): ServerDocument {
   const doc = createDocument();
   const g = globalThis as any;
   const prev = {
     document: g.document,
-    Node: g.Node,
     window: g.window,
     hasWindow: "window" in g,
   };
-  g.document = doc;
-  g.Node = SNode;
+  installDocumentAccessor();
+  fallbackDoc = doc;
   if (!g.window) g.window = undefined;
   (doc as any).__restore = () => {
-    g.document = prev.document;
-    g.Node = prev.Node;
+    fallbackDoc = prev.document;
     if (prev.hasWindow) g.window = prev.window;
     else delete g.window;
   };

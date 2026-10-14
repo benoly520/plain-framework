@@ -131,7 +131,7 @@ SSR 的三块机制都已经在：`renderToString` / `renderToStringSync`（换�
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| 零 | **并发隔离**（3.4）：`AsyncLocalStorage` 取代「换全局 + LIFO 恢复」+ 并发测试 | 待做（**必须先做**） |
+| 零 | **并发隔离**（3.4）：`AsyncLocalStorage` 取代「换全局 + LIFO 恢复」+ 并发测试 | ✅ 已落地（`runSSR` / 取值查上下文的访问器 / pending 按渲染隔离；3 项并发测试） |
 | 一 | 服务端直调（3.1）+ 确定性等待（3.2） | ✅ 已落地（等静默 / 直调 / handlers 缺失明确报错 / reject 不炸 SSR） |
 | 二 | 数据迁移（3.3）：编译器 key + 载荷序列化 + 注水种入 | 待做 |
 | 三 | `ssrMiddleware` + SSR 示例 + `docs/patterns.md` 配方 + 文档同步 | 待做 |

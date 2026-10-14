@@ -2,10 +2,13 @@
 //
 // 因为 Plain 编译产物是「直接建 DOM」，且 effect 在首次执行时同步写入，
 // 所以 SSR 不需要独立的渲染器 —— 换个 document 实现即可。
+//
+// 每次渲染都在**自己的作用域**里跑（`runSSR`：垫片文档 + handlers + pending），
+// 所以同进程并发渲染互不影响（见 docs/rfcs/ssr-data.md §3.4）。
 
-import { installServerDOM, serializeNode } from "./dom-shim.js";
+import { serializeNode } from "./dom-shim.js";
 import { createScope } from "../runtime/signal.js";
-import { beginSSR, pendingCount, settlePending } from "../runtime/ssr-context.js";
+import { runSSR, pendingCount, settlePending } from "./ssr-scope.js";
 
 export type RenderableNode = any;
 
@@ -40,30 +43,27 @@ export async function renderToString(
   options: RenderOptions = {}
 ): Promise<string> {
   const { wait = 0, container = true, handlers = null } = options || {};
-  const doc: any = installServerDOM();
-  // SSR 上下文：server() 直调 + resource 的 pending 追踪
-  const restoreSSR = beginSSR(handlers);
-  // 在独立作用域里渲染：SSR 期间创建的 effect（insert/when/each/组件）会在
-  // 序列化完成后被整体回收。否则它们会继续订阅全局 signal —— 同一进程里随后
-  // 做 hydrate 时，点击等更新会同时触发「SSR 残留 effect（锚点是服务端垫片节点）
-  // + hydrate effect（锚点是真实 DOM 节点）」，导致在 shim 节点上做 DOM 操作而报错。
-  const scope = createScope(() => {
-    const root = doc.createElement(container ? "div" : "div");
-    const node = typeof component === "function" ? component() : component;
-    if (node) root.appendChild(node);
-    return root;
+  // 整个渲染（含下面的 await）都在**本次渲染自己的**作用域里跑 —— 并发安全
+  return runSSR(handlers, async (doc) => {
+    // 在独立作用域里渲染：SSR 期间创建的 effect（insert/when/each/组件）会在
+    // 序列化完成后被整体回收。否则它们会继续订阅全局 signal —— 同一进程里随后
+    // 做 hydrate 时，点击等更新会同时触发「SSR 残留 effect（锚点是服务端垫片节点）
+    // + hydrate effect（锚点是真实 DOM 节点）」，导致在 shim 节点上做 DOM 操作而报错。
+    const scope = createScope(() => {
+      const root = doc.createElement(container ? "div" : "div");
+      const node = typeof component === "function" ? component() : component;
+      if (node) root.appendChild(node);
+      return root;
+    });
+    try {
+      await settleResources();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      const html = scope.value.childNodes.map(serializeNode).join("");
+      return container ? `<div>${html}</div>` : html;
+    } finally {
+      scope.dispose();
+    }
   });
-  try {
-    await settleResources();
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    const html = scope.value.childNodes.map(serializeNode).join("");
-    return container ? `<div>${html}</div>` : html;
-  } finally {
-    restoreSSR();
-    scope.dispose();
-    // 还原宿主全局，避免污染同进程后续的 hydrate / DOM 操作
-    if (typeof doc.__restore === "function") doc.__restore();
-  }
 }
 
 /**
@@ -90,18 +90,16 @@ export function renderToStringSync(
   component: (() => any) | any,
   options: { handlers?: Record<string, (...args: any[]) => any> | null } = {}
 ): string {
-  const doc: any = installServerDOM();
-  // 同样进 SSR 上下文：SSR 里调 server() 一律直调，绝不尝试 fetch 自己
-  const restoreSSR = beginSSR(options.handlers ?? null);
-  const scope = createScope(() => {
-    const node = typeof component === "function" ? component() : component;
-    return node;
+  // 同样在自己的作用域里跑：SSR 里调 server() 一律直调，绝不尝试 fetch 自己
+  return runSSR(options.handlers ?? null, () => {
+    const scope = createScope(() => {
+      const node = typeof component === "function" ? component() : component;
+      return node;
+    });
+    try {
+      return serializeNode(scope.value);
+    } finally {
+      scope.dispose();
+    }
   });
-  try {
-    return serializeNode(scope.value);
-  } finally {
-    restoreSSR();
-    scope.dispose();
-    if (typeof doc.__restore === "function") doc.__restore();
-  }
 }

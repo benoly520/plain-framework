@@ -47,8 +47,7 @@
   - ⚠️ **本阶段同时暴露一个必须先修的并发缺陷**（RFC §3.4）：`installServerDOM()` 靠「换全局
     `document` + LIFO 恢复」，隐含假设「渲染是同步的」。一旦渲染里有 `await`（等静默 / `wait` /
     接下来的数据迁移），同进程并发渲染会互相覆盖 prev，最后 `globalThis.document` **永久停在一个
-    废弃垫片**上。修法已定：`AsyncLocalStorage` 保存本次渲染的垫片 + `document` 改成取值时查上下文的
-    访问器，**排在数据迁移之前做**。
+    废弃垫片**上。已在「修复」一节里修掉（阶段零）。
 - **`plaindev lsp`：编辑器实时诊断（LSP over stdio）**：不写 tsserver 插件 —— 直接把契约检查的
   **同一条规则链**做成 `textDocument/publishDiagnostics`，于是**编辑器里报的**与**构建时拦的**
   是同一套 `PLAIN_Exxxx` 与同一份修法提示（可自动修的在 message 里带「可自动修」）。
@@ -119,6 +118,21 @@
 
 ### 修复
 
+- **SSR 并发渲染不再串味、不再残留废弃垫片**（RFC §3.4 的根因修复）。此前 `installServerDOM()`
+  靠「换掉 `globalThis.document` → 用完换回来」，隐含假设「渲染是同步的、恢复是 LIFO」。
+  但渲染过程里有 `await`（等静默 / `wait` / 数据迁移），同进程并发渲染就破了这个假设 ——
+  10 行最小复现直接看到两种失效：**先结束的请求把全局还原掉 → 后一个请求的后续 `document.*`
+  落到另一个请求的垫片上（串味），或落到 `undefined`（TypeError 崩掉）**。
+  现在：
+  - `document` / `Node` 改成「**取值时查当前渲染上下文**」的访问器（只装一次，**不再换入换出**）；
+  - 新增 `src/server/ssr-scope.ts` 的 `runSSR(handlers, fn)`：用 `AsyncLocalStorage` 让每个渲染
+    跑在自己的作用域里，**异步上下文贯穿 `await`**，垫片 / handlers / pending 全按渲染隔离；
+  - `src/runtime/ssr-context.ts` 从「模块级状态」改成**只留一个「读当前上下文」的钩子** ——
+    这份代码要进浏览器包，不能 import `node:async_hooks`；没注册钩子时 `isSSR()` 恒为 `false`；
+  - `resource` 的 pending 从模块级 `Set` 移进渲染上下文：并发请求不再互相等对方的资源；
+    客户端也不再常驻一个无用的 `Set`。
+  - 测试 `test/ssr-data.test.mjs` 新增 3 项（用 `Promise.all` 制造真并发）：**各自数据只出现在
+    自己的响应里** / **handlers 不互相借用**（没注入的那个必须报错）/ **结束后不残留垫片与上下文**。
 - **HMR：改动「非挂载模块」不再静默留旧代码**。`hmrApply` 此前只处理「改动模块 == 挂载模块
   且导出 `App` / `default`」，其余情况打一句 warning 就返回 `false` —— 于是改独立组件文件、
   `import()` 懒加载进来的模块时，**界面纹丝不动且没有任何提示**（最坏的失败模式）。
