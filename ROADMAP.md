@@ -148,6 +148,21 @@ SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式
 **风险（已处理）**：注水的「首屏认领」与「后续更新」两条路径统一在 `syncRange` 内切换
 （hydrate 期启用 `reconcileHydrate` 的就地对齐，平时保持既有最小重排语义）。
 
+**后续：SSR 数据预取** ✅ 已落地（设计与取舍见 [`docs/rfcs/ssr-data.md`](docs/rfcs/ssr-data.md)）：
+
+- `server()` 在 SSR 期间**直调**同进程实现（`handlers` 注入），不再 fetch 自己；
+- 等待从「猜毫秒」改成「**等 resource 静默**」（settle 后新建的由下一轮接住；等满上限显式告警）；
+- **首屏数据随 HTML 迁移**：编译器注入 `resource` 的调用点 key、服务端按创建序收集、
+  注水按同一 key 的队列配对种入（首帧与 HTML 一致），随后仍做一次 SWR 后台校验；
+- `ssrMiddleware` / `serve({ ssr })` 一行起「SSR + 静态 + RPC」；router 支持按**请求 URL** 渲染；
+- 同进程**并发隔离**：`document` 改成「取值查当前渲染上下文」的访问器 + `AsyncLocalStorage`
+  （修掉了「换全局 + LIFO 恢复」在 `await` 下互相覆盖、最后全局停在废弃垫片上的缺陷）；
+- 验收：`test/ssr-data.test.mjs` 19 项（含并发、端到端注水、列表多实例配对、中间件）；
+  可跑示例 [`examples/ssr/`](examples/ssr)。
+
+**仍未做**：**dev 下的 SSR 体验** —— `ssrMiddleware` 只吃已构建的 SSR 入口（生产路径），
+dev 下随 vite 一起跑 SSR（`ssrLoadModule` / middleware 模式）暂无封装。
+
 ## M6 —— 剩余的 AI 原生工具（P1）
 
 - **MCP server** ✅ 已落地（`plaindev mcp`，零依赖 stdio JSON-RPC）：把 `plain_check` /

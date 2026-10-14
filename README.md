@@ -150,7 +150,7 @@ export default defineConfig({
 | `createSlot(label?)` | 带锚点的插槽：组件要**事后整体替换自己的内容**时返回它 |
 | `place(parent, node)` | 编译器挂载组件的统一入口（兼容 Node / Fragment / Slot） |
 | `ErrorBoundary` | 子树报错就地降级 |
-| `hydrate(el, App, opts?)` | SSR 注水：复用服务端节点，返回 `{ dispose, warnings }` |
+| `hydrate(el, App, opts?)` | SSR 注水：复用服务端节点，自动读回首屏数据载荷，返回 `{ dispose, warnings }` |
 | `hmrApply(id, newMod)` | 热替换指定模块的挂载点（一般由 vite 插件调，无需手写） |
 
 ### 异步与跨端
@@ -375,14 +375,29 @@ Plain 编译产物是「直接建 DOM + effect 首次同步执行」，所以 SS
 **换一个 `document` 实现即可**（`src/server/dom-shim.ts`，零依赖）。
 
 ```js
-import { renderToString, renderToStringSync } from "plain/server";
+import { renderToString, renderToStringSync, renderToStringWithData } from "plain/server";
 
-const html = renderToStringSync(App);                    // 同步部分
-const html2 = await renderToString(App, { wait: 20 });   // 等异步 resource
+const html = renderToStringSync(App);                    // 同步部分（resource 停在 loading）
+const { html, data } = await renderToStringWithData(App, { // 等 resource 静默 + 收集首屏载荷
+  handlers: await loadHandlers(),                        // server() 直调（不走 HTTP）
+  url: req.url,                                          // router 按请求 URL 渲染
+});
 ```
 
-服务端输出会在客户端**注水**：`hydrate` 复用服务端已渲染的真实节点（**节点对象身份
-不变**，不整树重建），文本/属性不一致时就地修正，随后事件与响应式照常工作。
+### 首屏数据：`server()` + `resource()` 就是唯一写法
+
+没有 `loader()` / `getServerSideProps` 这类概念 —— 一条链把「首屏就有数据」接起来：
+
+| 环节 | 发生了什么 |
+| --- | --- |
+| 服务端 | `server()` **直调**同进程实现（不 fetch 自己）；渲染后**等所有 `resource` 静默**（不是猜一个毫秒数） |
+| 收集 | 编译器给每个 `resource(...)` 注入了**调用点 key**（如 `app.tsx:19#0`），按**创建序**收进 `data` |
+| 传输 | `data` 写进页面 `<script type="application/json" id="plain-data">`；`hydrate` 自己读回来 |
+| 注水 | 按「同一个 key 自己的队列」按创建序**配对种入** → 首帧与 HTML 一致（不闪 loading、不多请求一次） |
+| 之后 | 仍做一次 **SWR 后台校验**：`promiseFn` 照跑，所以依赖变化照样能重取（不为此牺牲响应性） |
+
+**注水**：`hydrate` 复用服务端已渲染的真实节点（**节点对象身份不变**，不整树重建），
+文本/属性不一致时就地修正，随后事件与响应式照常工作。
 
 ```js
 import { hydrate } from "plain";
@@ -391,12 +406,29 @@ const { dispose, warnings } = hydrate(document.getElementById("app"), App);
 ```
 
 SSR 序列化时会保留 `plain-` 前缀的注释锚点（`<!--plain-[-->…<!--plain-]-->`），
-注水靠它们定位动态区间；普通注释仍会被丢弃。注水与 SSR 同源：都靠「换掉
-`globalThis.document`」跑同一份编译产物，`mount()`（未注水）行为完全不变。
+注水靠它们定位动态区间；普通注释仍会被丢弃。注水与 SSR 同源：都跑同一份编译产物，
+`mount()`（未注水）行为完全不变。
 
-> `renderToString` / `renderToStringSync` 渲染结束后会**还原宿主全局**
-> （`document`/`Node`/`window`）并回收 SSR 期间创建的 effect——避免同进程内 SSR 后
-> 再 hydrate 时被污染。
+### 起生产服务
+
+```js
+import { serve } from "plain/server";
+
+await serve({
+  dist: "dist",
+  ssr: { template: "dist/index.html", entry: ".plain/ssr/entry-server.js" },
+});
+```
+
+模板里要有两个占位注释（**缺了或写重了都直接报错**，不静默出一张没数据的页面）：
+`<!--plain-ssr-->`（应用 HTML，放在承载容器**里面**）、`<!--plain-data-->`（载荷 script，放在容器**外面**）。
+完整可跑的例子见 [`examples/ssr/`](examples/ssr)：`pnpm run build:example:ssr` 构建、
+`pnpm run start:example:ssr` 起服务（打开 `/todo/2` 的网页源代码就能看到那条数据）。
+
+> **并发安全**：SSR 期间 `globalThis.document` 是「取值时查当前渲染上下文」的访问器
+> （不是换全局再换回来），每次渲染跑在自己的 `AsyncLocalStorage` 作用域里 ——
+> 同进程并发渲染互相不串。根因与修法见 [`docs/rfcs/ssr-data.md`](docs/rfcs/ssr-data.md) §3.4。
+> `renderToString` 结束后会回收 SSR 期间创建的 effect，避免污染同进程后续的 hydrate。
 
 ---
 
@@ -525,6 +557,10 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ `server()` 编译期物理剥离 + dev / 生产 RPC 链路
 - ✅ SSR 输出（`renderToStringSync` / `renderToString`）
 - ✅ **SSR 注水**：`hydrate(container, App)` 复用服务端节点（身份不变）、就地修正、交互可用
+- ✅ **SSR 首屏数据**：`server()` 直调 + 等静默 + `renderToStringWithData` 收载荷 +
+  编译器注入调用点 key + 注水配对种入（首帧与 HTML 一致）；`ssrMiddleware` / `serve({ ssr })` 一行起。
+  并发隔离（`AsyncLocalStorage`）、示例 [`examples/ssr/`](examples/ssr)。设计见
+  [`docs/rfcs/ssr-data.md`](docs/rfcs/ssr-data.md)
 - ✅ **HMR 热更新**：dev 下改组件只热替换 DOM 子树（不整页刷新），模块级 signal 值尽力保留
 - ✅ CLI：check / schema / dev / build / serve
 - ✅ TypeScript 类型（含 JSX 类型，`tsc --noEmit` 通过）
@@ -553,7 +589,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；`plaindev lsp` 把**同一条规则链**做成
   **编辑器实时诊断**（写时就报，不必等 dev / build）；确认误报可用行级抑制指令
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 245 项（内核 19 + 单元 226）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 264 项（内核 19 + 单元 245）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -563,6 +599,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 | 缺口 | 影响 | 优先级 |
 | --- | --- | --- |
 | **组件级（细粒度）热替换** | 现在最细的粒度是「挂载点」：改动被别处使用的模块时会把挂载点的根组件全部重跑（会丢焦点 / 滚动），而不是只换那一棵子树 | P2 |
+| **SSR 的 dev 体验** | `ssrMiddleware` 只吃**已构建**的 SSR 入口（生产路径）；dev 下要随 vite 一起跑 SSR 得另配（`vite.ssrLoadModule` / vite middleware 模式），暂无封装 | P1 |
 | **RPC 请求合并 / 防抖** | 高频调用会各发一次请求 | P1 |
 | **多入口 / 代码分割** | 只验证了单入口 | P1 |
 | **并发渲染 / 时间切片** | 没有 | P2 |
@@ -581,7 +618,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 226 项
+pnpm test              # 构建 + 内核 19 项 + 单元 245 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -589,7 +626,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（226 项，`node:test`）：
+- `test/*.test.mjs`（245 项，`node:test`）：
   `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
   `errors` 统一错误码目录（唯一性 / lint 产出码都在表里 / 新旧抑制名都命中）、
   `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
@@ -605,6 +642,8 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
   `schema` 的 props 声明化（`type` 别名 / 内联字面量 / `extends` 与 `&` 合并 / 解析不了如实标记）、
   HMR（挂载点精确替换 / 非挂载模块重跑兜底 / 认不出根组件时明确告警 / 能力边界：
   区间外保住、区间内重建）、
+  `ssr-data`（SSR 数据全链：服务端直调 / 等静默 / 并发隔离 / 载荷迁移与注水配对 /
+  `ssrMiddleware` 的占位符与转义）、
   异步资源生命周期与 context getter（`PLAIN_E1113` / `PLAIN_E1114`）、
   `eval` 上下文档位、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
@@ -673,10 +712,10 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
-| 语句 | 90% | 93.6% |
+| 语句 | 90% | 94.1% |
 | 分支 | 82% | 86.3% |
 | 函数 | 85% | 91.6% |
-| 行 | 90% | 93.6% |
+| 行 | 90% | 94.1% |
 
 > 覆盖率最低的是 `src/cli/index.ts`（约 77%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
 > 目前只在示例端到端里被间接验证（`src/cli` 目录整体约 87%）。
@@ -684,7 +723,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 226 / fail 0   # 单元
+# pass 245 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23

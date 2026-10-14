@@ -474,7 +474,60 @@ let dlg: HTMLDialogElement | undefined;
 
 ---
 
-## 10. 跨层传值（Context）
+## 10. SSR 与首屏数据
+
+**唯一写法**：组件里还是 `server()` + `resource()` —— 没有、也不需要 `loader()`。
+
+```tsx
+const getTodo = server(async (id: number) => ({ id, text: "…" }));   // 两端同一份实现
+
+function Detail(props: RouteProps) {
+  const todo = resource(() => getTodo(Number(props.params.id)));     // 服务端直调 / 客户端 RPC
+  return todo.data() ? <h2>{todo.data()!.text}</h2> : <p className="muted">加载中…</p>;
+}
+```
+
+三件事不用你管，框架包了：
+
+1. **服务端不会「fetch 自己」** —— SSR 期间 `server()` 直调同进程实现（`handlers` 由 `ssrMiddleware` 注入）；
+2. **不用猜等多久** —— 渲染后**等所有 `resource` 静默**（不是 `wait: 50` 那种毫秒数）；
+3. **注水不会重复取、也不会闪一下** —— 编译器给每个 `resource` 注入了**调用点 key**，服务端收集、
+   页面载荷、注水配对种入全自动；之后仍会做一次 **SWR 后台校验**（依赖变化照样能重取）。
+
+### 11.1 服务端：一次渲染把数据取完
+
+`resource` 里**同步**读到的 signal 会被收成依赖（变化就重取）。串行取也行 ——
+框架会等到底：settle 之后新建的 `resource` 由下一轮接住，直到没有 pending 为止。
+
+### 11.2 路由：请求 URL 决定渲染哪一页
+
+服务端没有 `window`，`createRouter` 靠 `ssrMiddleware` 注入的请求 URL：
+
+```js
+import { serve } from "plain/server";
+await serve({ dist: "dist", ssr: { template: "dist/index.html", entry: ".plain/ssr/entry-server.js" } });
+```
+
+不传 `url`（或不用 `ssrMiddleware`）时，服务端只会渲染 `/`。
+
+### 11.3 模板：两个占位注释
+
+| 占位 | 放哪 |
+| --- | --- |
+| `<!--plain-ssr-->` | 应用 HTML —— 务必写在承载容器**里面**（`<div id="app">…</div>`） |
+| `<!--plain-data-->` | 首屏数据载荷的 `<script>` —— 写在容器**外面**（如 `<head>`） |
+
+**缺一个、或者写重了，都直接报错** —— 包括「把它写进另一段注释里」这种（踩过）。
+
+### 11.4 别写
+
+| 别写 | 为什么 |
+| --- | --- |
+| 自己造 `loader()` / `getServerSideProps` 那一套 | `server()` + `resource()` 已经表达了同一件事，多一层数据管道只是多一处会写错 |
+| SSR 期间自己去 `fetch("/_plain/rpc")` | 那是在**请求自己**：得猜 host / port / 子路径，构建期更没有服务在听 |
+| 靠 `wait: 50` 等异步 | 猜出来的毫秒数：后端一慢首屏就成骨架屏，而且静态发现不了 |
+
+## 11. 跨层传值（Context）
 
 跨层数据（主题 / 语言 / 当前用户 / 功能开关）不要一层层传 props（漏传一层不报错，值静默变 `undefined`）。
 用 Context：
