@@ -160,7 +160,7 @@
 - **HMR 热更新（M4 落地）**：`src/runtime/hmr.ts` 提供挂载点注册表与热替换内核；
   `src/vite/index.ts` 在 dev（`watchMode`）下为每个模块注入 `import.meta.hot.accept`，
   `handleHotUpdate` 让改动走 accept 管道而**不整页刷新**。改组件时只重建它产出的
-  DOM 子树（`syncRange` 最小重排），保住焦点/滚动/输入；模块级 `signal` 值尽力保留
+  DOM 子树（`syncRange` 替换锚点区间，区间之外的节点不动）；模块级 `signal` 值尽力保留
   （基于 `import.meta.hot.data` 快照，仅原始值可迁移），保留不了**显式 `console.warn`**。
   新增运行时 API：`hmrApply(id, newMod)` / `snapshotSignals` / `restoreSignals` /
   `hmrScope` / `getHmrModuleId`；vite 插件新增 `hmr` 选项（默认开）。

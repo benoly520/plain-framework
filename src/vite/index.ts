@@ -23,8 +23,9 @@ export default function plainPlugin(options: {
   rpc?: boolean;
   /**
    * HMR 热更新（默认开启，仅 dev 生效）。
-   * - true（默认）：为每个模块注入 import.meta.hot.accept —— 改动组件时只热替换
-   *   它产出的 DOM 子树，不整页刷新（保住焦点/滚动/输入 + 模块级 signal 值）。
+   * - true（默认）：为每个模块注入 import.meta.hot.accept —— 改动组件时**不整页刷新**，
+   *   只重建相关挂载点的 DOM 子树。保住：window 滚动 / 区间之外的 DOM / 模块级 signal 值；
+   *   丢失：被重建子树内的焦点、未受控输入的值、局部滚动（详见 `src/runtime/hmr.ts` 顶部说明）。
    * - false：关闭注入（退化成 vite 默认的整页刷新）。
    */
   hmr?: boolean;

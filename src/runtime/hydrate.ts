@@ -123,7 +123,8 @@ export function hydrate(
 
   /**
    * 热替换：用新的 comp 重建子树 —— 走非认领模式（正常 build DOM），
-   * 再经 syncRange 做最小重排替换锚点区间内的内容（保住焦点/滚动/输入）。
+   * 再经 syncRange 替换锚点区间内的内容（区间之内整段重建、不复用节点；
+   * 区间之外的节点身份不变）。
    */
   const rebuild = (comp: () => Renderable): void => {
     cleanups = new Set<() => void>();

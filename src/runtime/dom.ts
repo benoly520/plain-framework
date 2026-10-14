@@ -3,7 +3,12 @@
 // 关键设计：不在 Fragment 里换节点。
 // Fragment 一旦被 append 到父节点就会被「抽干」，后续再往它里面写就全丢了
 // （旧版本正是死在这里）。这里统一用两个注释锚点定位真实父节点，
-// 并通过「最小重排」更新兄弟区间，尽可能不动已有节点（保住焦点/滚动位置）。
+// 并按「区间」更新内容：**区间之外**的节点保持身份不变（它们的焦点 / 滚动 / 输入原样留着）。
+//
+// 注意 syncRange 在非注水路径下**不复用节点**（旧的 remove、新的 insertBefore），
+// 所以区间之内的 DOM 状态不保留：焦点 / 选区、未受控输入的值、局部滚动都会丢。
+// 要复用节点只有注水那条路（reconcileHydrate 的 inPlaceUpdate）。
+// 细粒度更新（insert / each 的 keyed 复用）不经过 syncRange，节点照旧复用。
 
 import type { Renderable, Slot, Owner } from "../types.js";
 import {
@@ -36,7 +41,7 @@ export function mount(
     typeof target === "string" ? document.querySelector(target) : target;
   if (!el) throw new Error(`[plain] mount 找不到目标：${target}`);
   const isComp = typeof node === "function";
-  // 用 Slot 锚点承载，使挂载点可被 HMR 整树替换（保住焦点/滚动/输入）。
+  // 用 Slot 锚点承载，使挂载点可被 HMR 整树替换：只动锚点区间，区间之外的节点不受影响。
   const startMark = document.createComment(`${A}root]`);
   const endMark = document.createComment(`${A}/root]`);
   el.appendChild(startMark);

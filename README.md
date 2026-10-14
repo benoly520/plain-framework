@@ -402,10 +402,18 @@ SSR 序列化时会保留 `plain-` 前缀的注释锚点（`<!--plain-[-->…<!-
 
 ## HMR 热更新
 
-dev（vite）下改动 Plain 模块**不整页刷新**：只重建该模块对应挂载点的 DOM 子树
-（`syncRange` 最小重排），保住滚动位置、焦点与输入内容；模块级 `signal` 的值尽力
-保留（保留不了会在控制台**显式告警**，绝不静默重置）。vite 插件默认开启，可用
-`plain({ hmr: false })` 关闭。
+dev（vite）下改动 Plain 模块**不整页刷新**：只重建相关挂载点的 DOM 子树
+（`syncRange` 替换锚点区间）。**说清保住什么、丢什么**：
+
+- **保住**：窗口滚动、**锚点区间之外**的 DOM（节点身份不变，它们的焦点 / 输入 / 局部滚动原样），
+  以及模块级 `signal` 的原始值 —— 这是唯一「主动搬运」的状态；保留不了会在控制台
+  **显式告警**，绝不静默重置；
+- **丢掉**：被重建子树**之内**的 DOM 状态 —— 焦点 / 选区、未受控输入的值、局部滚动、
+  第三方组件实例（Monaco 等会被 `ref` 的清理函数销毁后重建）。受控输入的值能回来，
+  因为值本来就在 `signal` 里，重渲染即恢复。
+
+换句话说：HMR 的粒度是**锚点区间**，不是节点。边界由 `test/hmr.test.mjs` 钉住。
+vite 插件默认开启，可用 `plain({ hmr: false })` 关闭。
 
 ```js
 // vite.config.js
@@ -545,7 +553,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；`plaindev lsp` 把**同一条规则链**做成
   **编辑器实时诊断**（写时就报，不必等 dev / build）；确认误报可用行级抑制指令
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 244 项（内核 19 + 单元 225）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 245 项（内核 19 + 单元 226）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -573,7 +581,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 225 项
+pnpm test              # 构建 + 内核 19 项 + 单元 226 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -581,7 +589,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（225 项，`node:test`）：
+- `test/*.test.mjs`（226 项，`node:test`）：
   `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
   `errors` 统一错误码目录（唯一性 / lint 产出码都在表里 / 新旧抑制名都命中）、
   `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
@@ -595,7 +603,8 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
   `lsp` 子命令（Content-Length 分帧 / 诊断往返 / 未知方法）、
   `types`（用真 `tsc` 钉住 JSX 类型收紧：拼错属性名 / 写错类型要报、合法写法不报）、
   `schema` 的 props 声明化（`type` 别名 / 内联字面量 / `extends` 与 `&` 合并 / 解析不了如实标记）、
-  HMR（挂载点精确替换 / 非挂载模块重跑兜底 / 认不出根组件时明确告警）、
+  HMR（挂载点精确替换 / 非挂载模块重跑兜底 / 认不出根组件时明确告警 / 能力边界：
+  区间外保住、区间内重建）、
   异步资源生命周期与 context getter（`PLAIN_E1113` / `PLAIN_E1114`）、
   `eval` 上下文档位、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
@@ -665,7 +674,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
 | 语句 | 90% | 93.6% |
-| 分支 | 82% | 86.2% |
+| 分支 | 82% | 86.3% |
 | 函数 | 85% | 91.6% |
 | 行 | 90% | 93.6% |
 
@@ -675,7 +684,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 225 / fail 0   # 单元
+# pass 226 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23
