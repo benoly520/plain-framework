@@ -359,6 +359,10 @@ const user = resource(() => getUser(props.params.id));
 {user.loading() ? <p>加载中…</p> : <p>{user.data()?.name}</p>}
 ```
 
+> **`resource()` 必须建在组件里**（或 `createScope(() => …)` 里）：它内部是 effect，放模块作用域会在
+> **模块被 import 时立刻执行** —— App 还没挂载、SSR 下更是在服务端「导入模块」时就发请求，而且没人回收。
+> 这是构建期错误（`PLAIN_E1113`），不是运行时才报。
+
 ---
 
 ## 7. 常见坑 → 反模式对照

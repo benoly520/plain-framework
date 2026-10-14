@@ -44,6 +44,7 @@
 | 16 | 在**组件**上写 `ref` | 把 `ref` 放到组件内部的元素上 | ✅ `PLAIN_E1009` | — |
 | 17 | `ref` 的值不是函数（`ref` / `ref="x"` / 返回 JSX） | `ref={(el) => { … }}` | ✅ `PLAIN_E1010` | — |
 | 18 | `ref={async (el) => …}` | 把 `await` 提到回调外 | ✅ `PLAIN_E1011` | — |
+| 19 | 在**模块作用域**创建 `resource(...)`（import 时立即执行、SSR 导入即发请求、无人回收） | 放进组件函数体，或 `createScope(() => …)` 里 | ✅ `PLAIN_E1113` | — |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
 > **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
@@ -69,6 +70,10 @@
 > （≈ 平台的 `connectedCallback`），返回的清理函数随元素回收。**要用这个节点的响应式逻辑，就写进
 > 回调里**（组件体的语句先于 DOM 构建执行，那时节点还不存在）。弹窗 / 画布 / 第三方库的配方见
 > [`docs/patterns.md`](docs/patterns.md)，取舍见 [`docs/rfcs/ref-escape-hatch.md`](docs/rfcs/ref-escape-hatch.md)。
+>
+> 关于第 19 条：`resource()` 内部是 effect，放模块作用域会在**模块被 import 时立刻执行**
+> （App 还没挂载；SSR 下更是在服务端「导入模块」时就发请求），而且没有 owner 可回收。
+> 放进组件函数体，或放进 `createScope(() => …)` 里。
 
 ## 4. 错误码
 
@@ -99,6 +104,7 @@
 | `PLAIN_E1109` | `effect(async () => …)` | 把 `await` 提到 `effect` 外，或用 `resource()` |
 | `PLAIN_E1110` | `effect` 自触发 | 派生值用 `computed`；`effect` 里只写没读过的 signal |
 | `PLAIN_E1111` | `computed` 里写 signal | `computed` 必须纯，副作用放 `effect` |
+| `PLAIN_E1113` | 在模块作用域创建 `resource()` | 放进组件函数体，或 `createScope(() => …)` 里 |
 | `PLAIN_E2001` | 契约检查未通过 | 跑 `npx plaindev check --fix <dir>` 自动修，再重新构建 |
 
 > `E11xx` 每条还带一个可读短名（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`。

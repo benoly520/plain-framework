@@ -73,10 +73,43 @@ test("innerHTML / outerHTML / insertAdjacentHTML 都被拦下", () => {
 test("resource 解构出来的 data/loading/error 也按 signal 校验", () => {
   const src = [
     "import { resource } from 'plain';",
-    "const { data, loading } = resource(() => 1);",
-    "loading = false;",
+    "export function App() {",
+    "  const { data, loading } = resource(() => 1);",
+    "  loading = false;",
+    "  return <p>{data()}</p>;",
+    "}",
   ].join("\n");
   assert.deepEqual(codes(check(src, "a.tsx")), ["PLAIN_E1101"]);
+});
+
+test("模块作用域创建 resource -> PLAIN_E1113（import 时立即执行 / 无人回收）", () => {
+  const src = [
+    "import { resource } from 'plain';",
+    "const user = resource(() => fetchUser());",
+  ].join("\n");
+  const issues = check(src, "a.tsx");
+  assert.deepEqual(codes(issues), ["PLAIN_E1113"]);
+  assert.equal(issues[0].line, 2);
+  assert.equal(issues[0].fix, undefined, "不自动修（要挪进组件 / createScope）");
+});
+
+test("resource 在组件 / createScope 内不报 PLAIN_E1113", () => {
+  const cases = [
+    "import { resource } from 'plain';\nexport function App(){ const r = resource(() => 1); return <p>{r.loading() ? '…' : r.data()}</p>; }",
+    "import { resource, createScope } from 'plain';\nconst s = createScope(() => ({ r: resource(() => 1) }));",
+  ];
+  for (const src of cases) {
+    assert.deepEqual(check(src, "a.tsx"), [], src);
+  }
+});
+
+test("PLAIN_E1113 可用抑制指令压掉（确认误报时的出口）", () => {
+  const src = [
+    "import { resource } from 'plain';",
+    "// plain-ignore-next-line PLAIN_E1113",
+    "const user = resource(() => 1);",
+  ].join("\n");
+  assert.deepEqual(check(src, "a.tsx"), []);
 });
 
 test("不误伤：声明 / 对象属性赋值 / 普通变量赋值", () => {

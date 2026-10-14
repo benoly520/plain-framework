@@ -7,6 +7,15 @@
 
 ### 新增
 
+- **契约规则 `no-module-scope-resource`（`PLAIN_E1113`）**：在**模块作用域**创建 `resource()`。
+  `resource()` 内部是 effect，放模块作用域会在**模块被 import 的那一刻立刻执行** —— 立刻发起请求
+  （App 还没挂载；SSR 下更是在服务端「导入模块」时就发请求），而且没有 owner 可回收。
+  正确位置是组件函数体，或 `createScope(() => …)` 里。判定口径是纯语法事实
+  （`resource(...)` 到 `SourceFile` 之间没有任何函数祖先）—— **不存在误报**；看不出的不猜。
+  同步：`AGENTS.md` 反模式 19 / §4 错误码、`README` 契约规则表、`docs/patterns.md` §6、`SPEC.md`；
+  测试见 `test/lint.test.mjs`。
+  > 原计划的「渲染 `data()` 却不处理 `loading` / `error`」规则经核实会造成误报（官方示例的
+  > `resource` 也不处理 `error()`；现有测试把 `{data()}` 视为合法），按「宁可少，不可误」**不实现**。
 - **命令式 DOM 逃逸口 `ref={(el) => …}`**（内建元素专用，**零新增对外 API**）：
   组件体默认拿不到自己创建的节点，`dialog.showModal()` / `canvas.getContext()` / 第三方库要节点
   这些真实需求此前无路可走（写 `ref={fn}` 会被当普通属性**静默丢弃**）。现在编译期把

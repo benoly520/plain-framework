@@ -291,6 +291,7 @@ function Card(props) {
 | `PLAIN_E1109` | `effect(async () => { await … })` | ❌ 依赖收集在 await 后失效，只报错 |
 | `PLAIN_E1110` | `effect(() => count.set(count() + 1))` | ❌ 自触发会栈溢出，只报错（钳位写法不报） |
 | `PLAIN_E1111` | `computed(() => { s.set(…) })` | ❌ 派生值必须纯，只报错 |
+| `PLAIN_E1113` | 模块作用域创建 `resource()`（import 时立即执行 / SSR 导入即发请求） | ❌ 挪进组件 / `createScope`，只报错 |
 
 > 每个码还有一个**可读短名**（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`；
 > 旧写法 `plain/no-props-snapshot` 在抑制指令里仍被接受（向后兼容），但输出统一走新码。
@@ -496,7 +497,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ `server()` 参数与返回值可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
 - ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
 - ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
-- ✅ `AGENTS.md` + 反模式目录（18 条均有静态检查；看不出类型的不猜）
+- ✅ `AGENTS.md` + 反模式目录（19 条均有静态检查；看不出类型的不猜）
 - ✅ AI 可发现性：`plaindev agent-context [--write]` 把规则落盘成跨工具标准 `AGENTS.md`
   （外加 `.github/copilot-instructions.md` 与 `.cursor/rules/*.mdc` 兜底，已有文件不覆盖）；
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；确认误报可用行级抑制指令

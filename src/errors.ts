@@ -40,6 +40,7 @@ export type PlainErrorCode =
   | "PLAIN_E1110"
   | "PLAIN_E1111"
   | "PLAIN_E1112"
+  | "PLAIN_E1113"
   | "PLAIN_E2001";
 
 /** lint 规则短名（无前缀）：一种反模式一个短名，与 `plain/<短名>` 一一对应 */
@@ -54,7 +55,8 @@ export type LintRuleName =
   | "no-resolve-event-prop"
   | "no-async-effect"
   | "no-effect-loop"
-  | "no-computed-side-effect";
+  | "no-computed-side-effect"
+  | "no-module-scope-resource";
 
 export interface ErrorEntry {
   code: PlainErrorCode;
@@ -201,6 +203,12 @@ export const ERROR_CATALOG: Record<PlainErrorCode, ErrorEntry> = {
     rule: "no-props-snapshot",
     suppressible: true,
     summary: "把 props getter 存进变量（赋值形态 / JSX 形态）",
+  },
+  PLAIN_E1113: {
+    code: "PLAIN_E1113",
+    rule: "no-module-scope-resource",
+    suppressible: true,
+    summary: "在模块作用域创建 `resource()`（import 时立即执行、无人回收）",
   },
 
   // --- E2xxx 构建期 ------------------------------------------------------

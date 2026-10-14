@@ -21,6 +21,15 @@ export interface LintIssue {
   fix?: { start: number; end: number; text: string };
 }
 
+/** check() 内部登记问题的回调（供各条规则复用） */
+type AddIssue = (
+  node: ts.Node,
+  level: "error" | "warn",
+  code: PlainErrorCode,
+  message: string,
+  fix?: { start: number; end: number; text: string }
+) => void;
+
 /**
  * 抑制指令：行级，和 CLI 报出来的行号一一对应。
  *   count = 1;                                   // plain-ignore-line PLAIN_E1101
@@ -372,6 +381,8 @@ export function check(
   };
 
   visit(sf);
+  // 反模式 19 需要「是否在函数内」的上下文，单独走一遍（口径见函数注释）
+  checkModuleScopeResource(sf, add);
   return issues.sort((a, b) => a.line - b.line);
 }
 
@@ -943,6 +954,41 @@ function collectSignals(sf: ts.SourceFile): Set<string> {
   };
   visit(sf);
   return names;
+}
+
+/**
+ * 反模式 19（异步资源生命周期）：在**模块作用域**创建 resource()。
+ *
+ * resource() 内部是一个 effect，放在模块作用域下它会在**模块被 import 的那一刻立刻执行**：
+ *   - 立刻发起请求 —— 此时 App 还没挂载，SSR 下更是在服务端「导入模块」时就发请求；
+ *   - 没有 owner，永远没人回收。
+ * 正确位置：组件函数体，或 createScope(() => …) 里。
+ *
+ * 判定口径：resource(...) 调用到 SourceFile 之间**没有任何函数祖先**。
+ * 组件、回调、createScope(() => …) 里的箭头函数都算函数祖先 —— 所以这是纯粹的语法事实，
+ * 不存在误报（模块作用域的 resource 没有任何合法场景）。看不出的东西一律不猜。
+ */
+function checkModuleScopeResource(sf: ts.SourceFile, add: AddIssue): void {
+  const walk = (node: ts.Node, inFunction: boolean) => {
+    if (
+      !inFunction &&
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "resource"
+    ) {
+      add(
+        node,
+        "error",
+        "PLAIN_E1113",
+        "不要在模块作用域创建 resource()：它内部是 effect，会在模块被 import 时立刻执行" +
+          "（App 还没挂载、SSR 导入模块时就会发请求），而且没有 owner 可回收。" +
+          "把 resource() 放进组件函数体，或放进 createScope(() => …) 里"
+      );
+    }
+    const next = inFunction || ts.isFunctionLike(node);
+    ts.forEachChild(node, (c) => walk(c, next));
+  };
+  walk(sf, false);
 }
 
 function isDeclarationName(id: ts.Identifier): boolean {

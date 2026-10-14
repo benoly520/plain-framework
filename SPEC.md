@@ -141,7 +141,7 @@ const loadUser = server((id) => db.users.find(id)); // 只跑在服务端
 > 3 已实现 10 条 lint 规则并**默认接入构建链路**（构建即失败），另有编译器侧的语义校验
 > `PLAIN_E1005`（key/index 冲突）、`PLAIN_E1006`（`server()` 引用外部变量）、
 > `PLAIN_E1007`（`server()` 的参数 / 返回值无法 JSON 序列化）。
-> 反模式目录 18 条均有静态检查；看不出的标识符不猜（见 `AGENTS.md`）。
+> 反模式目录 19 条均有静态检查；看不出的标识符不猜（见 `AGENTS.md`）。
 
 ---
 
