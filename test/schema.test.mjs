@@ -133,3 +133,111 @@ test("scanProject 尊重 ignore（node_modules/dist）", () => {
   );
   assert.deepEqual(scanProject(dir).files, []);
 });
+
+// ---------------------------------------------------------------------------
+// props 的「声明」优先：组件自己写的类型才是契约的事实来源
+// ---------------------------------------------------------------------------
+
+test("props 声明：type 别名 -> 带类型与可选性，这才是权威列表", () => {
+  const s = extractSchema(
+    [
+      "type CardProps = { title: string; count?: number };",
+      "export function Card(props: CardProps) {",
+      "  return <section>{props.title}</section>;",
+      "}",
+    ].join("\n"),
+    "Card.tsx"
+  );
+  const c = comp(s, "Card");
+  assert.equal(c.propsSource, "declared");
+  assert.deepEqual(c.props, [
+    { name: "title", optional: false, type: "string" },
+    { name: "count", optional: true, type: "number" },
+  ]);
+  // 旧的「猜」法会漏掉 count、且把 title 判成可选 —— 把差异留档，AI 能一眼看出错在哪
+  assert.deepEqual(c.inferredProps, [{ name: "title", optional: true }]);
+});
+
+test("props 声明：内联类型字面量 + children 排除但 hasChildren 为真", () => {
+  const s = extractSchema(
+    'export function Card(props: { title: string; children?: any }) { return <div>{props.title}</div>; }',
+    "Card.tsx"
+  );
+  const c = comp(s, "Card");
+  assert.equal(c.propsSource, "declared");
+  assert.deepEqual(c.props, [{ name: "title", optional: false, type: "string" }]);
+  assert.equal(c.hasChildren, true);
+});
+
+test("props 声明：interface extends 与 type 交叉都合并", () => {
+  const withExtends = extractSchema(
+    [
+      "interface Base { id: string }",
+      "interface CardProps extends Base { title: string }",
+      "export function Card(props: CardProps) { return <div>{props.title}</div>; }",
+    ].join("\n"),
+    "Card.tsx"
+  );
+  assert.deepEqual(
+    comp(withExtends, "Card").props.map((p) => p.name).sort(),
+    ["id", "title"]
+  );
+
+  const withIntersection = extractSchema(
+    [
+      "type Base = { id: string };",
+      "type CardProps = Base & { title: string };",
+      "export function Card(props: CardProps) { return <div>{props.title}</div>; }",
+    ].join("\n"),
+    "Card.tsx"
+  );
+  assert.deepEqual(
+    comp(withIntersection, "Card").props.map((p) => p.name).sort(),
+    ["id", "title"]
+  );
+});
+
+test("props 声明：解析不了就如实标记（跨文件 / 工具类型），并留推断结果兜底", () => {
+  const imported = extractSchema(
+    [
+      'import type { CardProps } from "./types";',
+      "export function Card(props: CardProps) { return <div>{props.title}</div>; }",
+    ].join("\n"),
+    "Card.tsx"
+  );
+  const c1 = comp(imported, "Card");
+  assert.equal(c1.propsSource, "declared-unresolved");
+  assert.equal(c1.declaredType, "CardProps");
+  assert.deepEqual(c1.props, [{ name: "title", optional: true }], "退回推断结果");
+
+  const util = extractSchema(
+    [
+      "type Card = { a: string; b: number };",
+      "export function Card(props: Pick<Card, 'a'>) { return <div>{props.a}</div>; }",
+    ].join("\n"),
+    "Card.tsx"
+  );
+  assert.equal(comp(util, "Card").propsSource, "declared-unresolved");
+  assert.equal(comp(util, "Card").declaredType, "Pick<Card, 'a'>");
+});
+
+test("props 声明：空 interface 是「无 props」而不是「解析失败」", () => {
+  const s = extractSchema(
+    ["interface P {}", "export function A(props: P) { return <p>a</p>; }"].join("\n"),
+    "A.tsx"
+  );
+  const c = comp(s, "A");
+  assert.equal(c.propsSource, "declared");
+  assert.deepEqual(c.props, []);
+  assert.ok(!("inferredProps" in c), "与推断一致时不留推断结果（省噪音）");
+});
+
+test("props 声明：没有类型注解时仍是 inferred（旧行为不变）", () => {
+  const s = extractSchema(
+    'function Badge(props) { return <span>{props.text}</span>; }',
+    "Badge.tsx"
+  );
+  const c = comp(s, "Badge");
+  assert.equal(c.propsSource, "inferred");
+  assert.deepEqual(c.props, [{ name: "text", optional: true }]);
+});

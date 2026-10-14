@@ -30,8 +30,102 @@ function isJsxLike(n: any): boolean {
   );
 }
 
+/** 比较两组 props 是否等价（只看名字 + 是否可选） */
+function sameProps(a: any[], b: any[]): boolean {
+  if (a.length !== b.length) return false;
+  const key = (p: any) => `${p.name}:${p.optional ? "?" : ""}`;
+  const other = new Set(b.map(key));
+  return a.every((p) => other.has(key(p)));
+}
+
+/** 收集本文件的 interface / type 声明（props 类型的解析来源） */
+function collectTypeDecls(sf: ts.SourceFile): Map<string, any> {
+  const map = new Map<string, any>();
+  const visit = (node: any) => {
+    if (ts.isInterfaceDeclaration(node)) map.set(node.name.text, node);
+    else if (ts.isTypeAliasDeclaration(node) && ts.isIdentifier(node.name))
+      map.set(node.name.text, node);
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return map;
+}
+
+/** 类型成员 -> props 条目 { name, optional, type } */
+function membersToProps(members: any[], sf: ts.SourceFile): any[] {
+  const out: any[] = [];
+  for (const m of members) {
+    if (!m.name) continue;
+    const name = m.name.getText(sf).replace(/^['"]|['"]$/g, "");
+    if (out.some((p) => p.name === name)) continue;
+    const type = ts.isMethodSignature(m) ? "method" : m.type ? m.type.getText(sf) : "any";
+    out.push({ name, optional: !!m.questionToken, type });
+  }
+  return out;
+}
+
+/**
+ * 把 props 的类型注解解析成成员列表。
+ *
+ * 只解析**本文件内**的 `interface` / `type 字面量`，以及它们的 `extends` / `&` 组合；
+ * 跨文件、泛型、工具类型（`Pick<…>` / `Omit<…>`）等一律解析不了 -> 返回 `null`，
+ * 由调用方标记 `propsSource: "declared-unresolved"` 并附上类型名 —— **不假装解析成功**。
+ */
+function resolveTypeMembers(
+  type: any,
+  decls: Map<string, any>,
+  seen = new Set<string>()
+): any[] | null {
+  if (!type) return null;
+  if (ts.isTypeLiteralNode(type)) return Array.from(type.members);
+  if (ts.isIntersectionTypeNode(type)) {
+    const all: any[] = [];
+    for (const t of type.types) {
+      const m = resolveTypeMembers(t, decls, seen);
+      if (!m) return null;
+      all.push(...m);
+    }
+    return all;
+  }
+  const refName =
+    ts.isTypeReferenceNode(type) && ts.isIdentifier(type.typeName)
+      ? type.typeName.text
+      : ts.isExpressionWithTypeArguments(type) && ts.isIdentifier(type.expression)
+        ? type.expression.text
+        : null;
+  // seen 只挡「当前这条路径」上的自引用，别误伤菱形继承
+  if (!refName || seen.has(refName)) return null;
+  const decl = decls.get(refName);
+  if (!decl) return null;
+  seen.add(refName);
+  let result: any[] | null = null;
+  if (ts.isTypeAliasDeclaration(decl)) {
+    result = resolveTypeMembers(decl.type, decls, seen);
+  } else if (ts.isInterfaceDeclaration(decl)) {
+    let members: any[] = Array.from(decl.members);
+    let failed = false;
+    for (const h of decl.heritageClauses || []) {
+      for (const t of h.types) {
+        const inherited = resolveTypeMembers(t, decls, seen);
+        if (!inherited) {
+          failed = true;
+          break;
+        }
+        members = members.concat(inherited);
+      }
+      if (failed) break;
+    }
+    // 基类解析不了 -> 整个 props 集合就是未知的，不能只报自己那几个（诚实优先）
+    result = failed ? null : members;
+  }
+  seen.delete(refName);
+  return result;
+}
+
 export function extractSchema(source: string, fileName = "module.tsx"): ExtractedSchema {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind(fileName));
+  // 本文件的 interface / type 声明 —— props 的「声明式」事实来源（见 resolveTypeMembers）
+  const typeDecls = collectTypeDecls(sf);
   const out: ExtractedSchema = {
     file: fileName,
     components: [],
@@ -66,7 +160,6 @@ export function extractSchema(source: string, fileName = "module.tsx"): Extracte
     if (!name) return;
     const propsObj =
       fn.parameters && fn.parameters[0] ? fn.parameters[0].name : null;
-    const props: any[] = [];
     const usedProps = new Set<string>();
     // props.xxx / props.children 的使用
     const scanProps = (node: any) => {
@@ -121,9 +214,20 @@ export function extractSchema(source: string, fileName = "module.tsx"): Extracte
     };
     collectCalls(sf);
 
-    Array.from(new Set([...usedProps, ...callSites]))
+    // 「猜」出来的 props：代码里读了什么 + 同文件调用点传了什么（只有名字，没有类型）
+    const inferredProps = Array.from(new Set([...usedProps, ...callSites]))
       .filter((p) => p !== "children")
-      .forEach((p) => props.push({ name: p, optional: !callSites.has(p) }));
+      .map((p) => ({ name: p, optional: !callSites.has(p) }));
+
+    // 「声明」的 props：组件的参数类型注解 —— 这才是契约的事实来源
+    const param = fn.parameters && fn.parameters[0];
+    const paramType = param && param.type;
+    const declaredType = paramType ? paramType.getText(sf) : null;
+    const members = paramType ? resolveTypeMembers(paramType, typeDecls) : null;
+    const declaredAll = members ? membersToProps(members, sf) : null;
+    const declaredProps = declaredAll
+      ? declaredAll.filter((p) => p.name !== "children")
+      : null;
 
     const elements = new Set<string>();
     const collectTags = (node: any) => {
@@ -135,13 +239,28 @@ export function extractSchema(source: string, fileName = "module.tsx"): Extracte
     };
     collectTags(jsx);
 
-    out.components.push({
+    const comp: any = {
       name,
       line: sf.getLineAndCharacterOfPosition(fn.getStart(sf)).line + 1,
-      props,
-      hasChildren: usedProps.has("children"),
+      // 权威列表：声明可得就用声明，否则退回推断
+      props: declaredProps ?? inferredProps,
+      propsSource: declaredProps
+        ? "declared"
+        : declaredType
+          ? "declared-unresolved"
+          : "inferred",
+      hasChildren:
+        usedProps.has("children") ||
+        (declaredAll ? declaredAll.some((p) => p.name === "children") : false),
       renders: Array.from(elements).sort(),
-    });
+    };
+    // 声明了类型却解析不出来（跨文件 / 泛型 / 工具类型）：带上类型名，不假装
+    if (!declaredProps && declaredType) comp.declaredType = declaredType;
+    // 两边不一致时把推断结果留在旁边做对照（AI 能一眼看出「猜」错在哪）
+    if (declaredProps && !sameProps(declaredProps, inferredProps)) {
+      comp.inferredProps = inferredProps;
+    }
+    out.components.push(comp);
   };
 
   const visit = (node: any) => {

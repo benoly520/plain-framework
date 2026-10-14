@@ -7,6 +7,16 @@
 
 ### 变更（破坏性）
 
+- **`plaindev schema` 的 props 从「推断」变「声明」**：`props` 的事实来源改为**组件自己声明的类型**
+  （`props: CardProps`）—— `optional` 来自 `?`、`type` 来自注解，跨文件调用也会漏的旧问题消失。
+  新增 `propsSource`（`declared` / `declared-unresolved` / `inferred`）如实标注来源：
+  解析不了（跨文件、`Pick<…>` 等工具类型）时附 `declaredType` 并退回推断，**不假装解析成功**；
+  声明与推断不一致时附 `inferredProps` 做对照。旧字段 `props` 的**形状不变**（仍是
+  `{name, optional}` 数组，声明可得时多一个 `type`），无注解的组件行为不变。
+  新增测试 `test/schema.test.mjs` 六项（`type` 别名 / 内联字面量 / `extends` 与 `&` 合并 /
+  解析不了如实标记 / 空 interface / 无注解仍是 inferred）。
+  > 明确**不做**的两件事（避免重复实现 `tsc` 已有的能力）：项目级「调用点校验」与
+  > 「强制声明 props 类型」—— JSX 类型已收紧 + `strict` 下隐式 `any` 本就报错，`tsc` 已覆盖。
 - **JSX 类型收紧：去掉 `CommonAttributes` 的 `[attr: string]: any`**。此前内建元素上「任何属性名、
   任何类型」都放行 —— `<img scr="a.png" />`（拼错）、`<input checked="yes" />`（该传布尔）、
   `<div onClikc={…} />`（事件名拼错）在 `tsc` 下静默通过、运行时静默失效。现在都会报错。
