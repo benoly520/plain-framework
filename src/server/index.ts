@@ -163,8 +163,8 @@ export async function serve(options: {
   manifest?: string;
   port?: number;
   endpoint?: string;
-  /** 开启 SSR：给模板与 SSR 入口即可（cache 见 `ssrMiddleware`） */
-  ssr?: { template: string; entry: string; manifest?: string; cache?: { ttl?: number; max?: number } };
+  /** 开启 SSR：给模板与 SSR 入口即可（cache / stream 见 `ssrMiddleware`） */
+  ssr?: { template: string; entry: string; manifest?: string; cache?: { ttl?: number; max?: number }; stream?: boolean };
 } = {}): Promise<http.Server> {
   const {
     dist = "dist",
@@ -227,6 +227,14 @@ export function ssrMiddleware(options: {
    * 只在渲染成功（已产出 HTML）后写缓存；500 等错误**不会**进缓存。
    */
   cache?: { ttl?: number; max?: number };
+  /**
+   * 可选的分块流式输出：先把模板里「第一个占位符之前」的确定性壳（`<head>` / 容器等）
+   * 立刻 flush 出去抢首字节（TTFB），剩下的（含已填好的应用 HTML 与载荷）等 `resource()`
+   * 数据到齐后再分块写。最终字节与非流式**完全一致** —— 客户端注水逻辑不受影响。
+   * 注意：这抢的是「首字节 / 早拉 CSS·JS」，不是「内容随数据逐段出现」（后者要客户端流式注水，
+   * 是另一件更大的事，本框架暂未做）。`stream` 与 `cache` 可同时开：命中即瞬时、未命中才流式。
+   */
+  stream?: boolean;
 }): (req: any, res: any, next?: () => void) => void {
   const { template, entry, manifest = ".plain/server.mjs" } = options;
   const tplPath = path.resolve(template);
@@ -241,6 +249,7 @@ export function ssrMiddleware(options: {
     : null;
   // 并发同 URL 去重：同一时刻只渲染一次，其余复用结果，防惊群
   const inflight = cache ? new Map<string, Promise<string>>() : null;
+  const stream = options.stream === true;
 
   interface Prepared {
     tpl: string;
@@ -278,12 +287,12 @@ export function ssrMiddleware(options: {
     return prepared;
   };
 
-  return function plainSsr(req: any, res: any, next?: () => void) {
+  return async function plainSsr(req: any, res: any, next?: () => void) {
     const url = (req.url || "/").split("?")[0];
     const looksLikePage = req.method === "GET" && !/\.[a-zA-Z0-9]+$/.test(url);
     if (!looksLikePage) return next ? next() : undefined;
 
-    // 命中缓存：直接回 HTML，省掉整页重渲染（dev 别开，代码会变）
+    // 命中缓存：直接回 HTML，省掉整页重渲染（流不流式都一样，命中即瞬时）
     if (cache) {
       const hit = cache.get(url);
       if (hit && (ttlMs <= 0 || Date.now() - hit.at < ttlMs)) {
@@ -293,40 +302,57 @@ export function ssrMiddleware(options: {
       }
     }
 
-    void prepare()
-      .then(async ({ tpl, App, handlers }) => {
-        // 并发同 URL 去重：同一时刻只渲染一次，其余请求复用这次结果（防惊群）
-        let p = inflight?.get(url);
-        if (!p) {
-          p = (async () => {
-            const { html, data } = await renderToStringWithData(App, {
-              container: false,
-              handlers,
-              url,
-            });
-            return renderPage(tpl, html, data);
-          })();
-          inflight?.set(url, p);
-        }
-        try {
-          const out = await p;
-          // 只在渲染成功（已产出整页 HTML）后写缓存；500 等错误不会进缓存
-          if (cache) {
-            cache.set(url, { html: out, at: Date.now() });
-            // 超过上限就淘汰最旧的一条（Map 保持插入序，keys 第一项即最旧）
-            if (cache.size > maxEntries) cache.delete(cache.keys().next().value as string);
-          }
-          res.setHeader("content-type", "text/html; charset=utf-8");
-          res.end(out);
-        } finally {
-          inflight?.delete(url);
-        }
-      })
-      .catch((e: any) => {
-        res.statusCode = 500;
-        res.setHeader("content-type", "text/plain; charset=utf-8");
-        res.end(`[plain ssr] ${(e && e.message) || e}`);
-      });
+    try {
+      const { tpl, App, handlers } = await prepare();
+      // 并发同 URL 去重：同一时刻只渲染一次，其余请求复用这次结果（防惊群）
+      let p = inflight?.get(url);
+      if (!p) {
+        p = (async () => {
+          const { html, data } = await renderToStringWithData(App, {
+            container: false,
+            handlers,
+            url,
+          });
+          return renderPage(tpl, html, data);
+        })();
+        inflight?.set(url, p);
+      }
+
+      // 流式：先把「第一个占位符之前」的确定性壳立刻 flush，抢首字节（TTFB）；
+      // 壳与最终文档前缀完全一致，所以拼回去字节数 = 非流式结果，客户端注水不受影响。
+      const shellCut = stream
+        ? Math.min(tpl.indexOf(SSR_SLOT), tpl.indexOf(DATA_SLOT))
+        : 0;
+      if (stream) {
+        res.setHeader("content-type", "text/html; charset=utf-8");
+        res.setHeader("x-accel-buffering", "no"); // 别让反代缓冲整页，把流式吃掉
+        res.write(tpl.slice(0, shellCut));
+        res.flushHeaders?.();
+      }
+
+      const out = await p;
+      // 只在渲染成功（已产出整页 HTML）后写缓存；500 等错误不会进缓存
+      if (cache) {
+        cache.set(url, { html: out, at: Date.now() });
+        // 超过上限就淘汰最旧的一条（Map 保持插入序，keys 第一项即最旧）
+        if (cache.size > maxEntries) cache.delete(cache.keys().next().value as string);
+      }
+
+      if (stream) {
+        // 壳已写出，这里补上「第一个占位符及之后」的部分（含已填好的应用 HTML 与载荷）
+        res.write(out.slice(shellCut));
+        res.end();
+      } else {
+        res.setHeader("content-type", "text/html; charset=utf-8");
+        res.end(out);
+      }
+    } catch (e: any) {
+      res.statusCode = 500;
+      res.setHeader("content-type", "text/plain; charset=utf-8");
+      res.end(`[plain ssr] ${(e && e.message) || e}`);
+    } finally {
+      inflight?.delete(url);
+    }
   };
 }
 

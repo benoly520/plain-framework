@@ -536,11 +536,26 @@ function fakeRes() {
   const res = {
     statusCode: 200,
     headers: {},
+    body: "",
+    writes: [],
+    writeCalled: false,
     setHeader(k, v) {
       this.headers[k.toLowerCase()] = v;
     },
-    end(body) {
-      this.body = body;
+    write(chunk) {
+      this.writeCalled = true;
+      this.writes.push(chunk);
+      this.body += chunk;
+      return true;
+    },
+    flushHeaders() {
+      this.flushed = true;
+    },
+    end(chunk) {
+      if (chunk) {
+        this.writes.push(chunk);
+        this.body += chunk;
+      }
       this._done();
     },
   };
@@ -565,7 +580,7 @@ async function callSsr(mw, url, method = "GET") {
  * 造一份临时「SSR 项目」：SSR 入口（真实编译产物）+ 服务端清单 + 页面模板。
  * 入口与客户端编译同一份源码 -> 调用点 key 天然一致（真实项目里靠 keyBase 保证）。
  */
-async function makeSsr(template) {
+async function makeSsr(template, extra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plain-ssr-mw-"));
   const { code, serverFunctions } = await loadModule(
     `
@@ -608,6 +623,7 @@ async function makeSsr(template) {
     template: path.join(dir, "index.html"),
     entry: path.join(dir, "entry-server.mjs"),
     manifest: path.join(dir, "server.mjs"),
+    ...extra,
   });
 }
 
@@ -762,5 +778,47 @@ test("ssrMiddleware 缓存：渲染失败（500）不进缓存、也不污染其
   const boom = await callSsr(mw, "/boom");
   assert.equal(boom.res.statusCode, 500, "错误路由应 500");
   assert.equal(rendersOf((await callSsr(mw, "/")).res.body), 1, "成功的缓存不应被失败请求污染");
+});
+
+// ---------------------------------------------------------------------------
+// 阶段三（续二）：ssrMiddleware 的「分块流式输出」—— 壳先 flush 抢首字节
+// ---------------------------------------------------------------------------
+
+test("ssrMiddleware 流式：分块写出（壳先 flush），最终字节与非流式完全一致", async () => {
+  const streamMw = await makeSsr(undefined, { stream: true });
+  const plainMw = await makeSsr(); // 对照组：非流式
+
+  const streamRes = (await callSsr(streamMw, "/")).res;
+  const plainRes = (await callSsr(plainMw, "/")).res;
+
+  // 流式：用 write 拆成多块（壳 + 内容），并告诉反代别缓冲整页
+  assert.ok(streamRes.writeCalled, "流式应走 write 拆块");
+  assert.ok(streamRes.writes.length >= 2, "流式应分块写出：" + JSON.stringify(streamRes.writes.length));
+  assert.equal(streamRes.headers["x-accel-buffering"], "no", "应关掉反代缓冲");
+  // 拼回去的字节要跟非流式一模一样 —— 客户端注水逻辑不受流式影响
+  assert.equal(streamRes.body, plainRes.body, "流式最终字节应等于非流式");
+});
+
+test("ssrMiddleware 流式：首块是「第一个占位符之前」的壳（不含应用 HTML / 载荷）", async () => {
+  const streamMw = await makeSsr(undefined, { stream: true });
+  const { res } = await callSsr(streamMw, "/");
+  const shell = res.writes[0];
+  assert.ok(shell.includes("<head>"), "壳应含 head");
+  assert.ok(!shell.includes("plain-data"), "壳里不该有载荷（它在后面才写）");
+  assert.ok(!shell.includes("<p>home</p>"), "壳里不该有应用 HTML");
+});
+
+test("ssrMiddleware 流式：按请求 URL 渲染 + 载荷仍随 HTML 迁移（内容正确）", async () => {
+  const streamMw = await makeSsr(undefined, { stream: true });
+  const { res } = await callSsr(streamMw, "/todo/7");
+  assert.match(res.body, /todo-7/, "应按 URL 渲染对应路由");
+  assert.match(res.body, /id="plain-data"/, "载荷仍要写进页面");
+});
+
+test("ssrMiddleware 流式：默认（非流式）走 end 不拆块", async () => {
+  const plainMw = await makeSsr();
+  const { res } = await callSsr(plainMw, "/");
+  assert.equal(res.writeCalled, false, "非流式不应走 write 拆块");
+  assert.match(res.body, /<p>home<\/p>/, "内容仍正确");
 });
 

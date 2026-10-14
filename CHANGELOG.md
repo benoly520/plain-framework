@@ -54,6 +54,15 @@
   - **dev 下不要开** —— 代码一变缓存就是脏的（dev SSR 走的是 vite 插件那条路，本中间件是生产路径）。
   - 测试 `test/ssr-data.test.mjs` 新增 6 项（默认关闭 / 同 URL 命中不重渲染 / 不同 URL 独立 /
     并发只渲染一次 / TTL 过期重渲染 / 超 max 淘汰最旧 / 失败不进缓存）。
+- **SSR 分块流式输出（可选，生产路径）**：`ssrMiddleware` / `serve({ ssr })` 新增 `stream: true` 选项。
+  先把模板里「第一个占位符之前」的确定性壳（`<head>` / 容器等）**立刻 flush** 出去抢首字节（TTFB），
+  剩下的（含等 `resource()` 数据到齐后填好的应用 HTML 与载荷）再分块写；并设 `x-accel-buffering: no`
+  避免反代把整页缓冲掉、把流式吃掉。`stream` 与 `cache` 可同时开（命中即瞬时、未命中才流式）。
+  - **边界（写明）**：这抢的是「首字节 / 早拉 CSS·JS」，不是「内容随数据逐段出现」——
+    后者要客户端流式注水（suspense 式），是另一件更大的事，本框架暂未做。流式与非流式**最终字节完全一致**，
+    客户端注水逻辑不受影响（这也是为什么流式安全）。`renderPage` 仍是生产/dev 共用的唯一拼装处。
+  - 测试 `test/ssr-data.test.mjs` 新增 4 项（分块写出且字节=非流式 / 首块是壳不含应用 HTML 与载荷 /
+    按 URL 渲染且载荷仍在 / 默认非流式走 end 不拆块）。
 - **SSR 数据预取（阶段三：`ssrMiddleware` + SSR 示例）**：把前两个阶段接成一条能投产的链。
   - **`ssrMiddleware({ template, entry, manifest })`**（`plain/server`，Node 标准 `(req,res,next)`，与
     `rpcMiddleware` 同形状）：`renderToStringWithData(App, { handlers, url })` -> 把应用 HTML 写进模板的
