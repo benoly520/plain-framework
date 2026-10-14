@@ -7,6 +7,14 @@
 
 ### 新增
 
+- **`plaindev lsp`：编辑器实时诊断（LSP over stdio）**：不写 tsserver 插件 —— 直接把契约检查的
+  **同一条规则链**做成 `textDocument/publishDiagnostics`，于是**编辑器里报的**与**构建时拦的**
+  是同一套 `PLAIN_Exxxx` 与同一份修法提示（可自动修的在 message 里带「可自动修」）。
+  最小子集：`initialize` / `initialized` / `didOpen` / `didChange` / `didClose` / `shutdown` / `exit`；
+  文本同步用 Full；分帧走 LSP 的 `Content-Length`（与 MCP 的换行分隔不同）；落定前做一次空写
+  排空屏障，避免诊断被 `process.exit` 截断；只对 `.tsx/.jsx/.ts/.js` 出诊断。
+  文档：README 工具链 / 已完成、`AGENTS.md` §5；测试 `test/lsp.test.mjs`。
+  对应 ROADMAP M6 里长期挂着的「仍缺 LSP 实时诊断」。
 - **Context（跨层传值）+ SSR 请求级隔离**：新增 `createContext` / `useContext` 两个导出与
   `Context<T>` 类型；`<Ctx.Provider value={…}>` 是普通组件标签（**无需改编译器**）。
   - `useContext(Ctx)` 返回**可调用 getter**（读法 `useContext(Ctx)()`，与 `signal` 一致）：

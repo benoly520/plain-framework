@@ -33,6 +33,7 @@ plaindev v${PKG.version} —— Plain 框架命令行
                                     --write 落盘到 AGENTS.md / copilot / cursor
                                     （已存在的文件默认不覆盖，--force 才覆盖）
   plaindev mcp                      MCP stdio server：把 check / schema 暴露给 AI IDE
+  plaindev lsp                      LSP stdio server：把契约检查接进编辑器实时诊断
   plaindev help                     显示本帮助
 
 提示：dev / build 需要项目里安装了 vite。
@@ -239,6 +240,13 @@ async function cmdMcp(): Promise<number> {
   return 0;
 }
 
+/** LSP stdio server：把契约检查接进编辑器，写代码（didOpen/didChange）时就报 */
+async function cmdLsp(): Promise<number> {
+  const { serveLsp } = await load("./lsp.js", "lsp");
+  await serveLsp();
+  return 0;
+}
+
 const map: Record<string, () => Promise<number>> = {
   check: cmdCheck,
   schema: cmdSchema,
@@ -247,6 +255,7 @@ const map: Record<string, () => Promise<number>> = {
   serve: cmdServe,
   "agent-context": cmdAgentContext,
   mcp: cmdMcp,
+  lsp: cmdLsp,
   help: async () => {
     console.log(HELP);
     return 0;
