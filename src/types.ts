@@ -121,7 +121,24 @@ declare global {
 
     type MaybeGetter<T> = T | (() => T);
 
+    /** bivariance hack：更窄的事件类型也能赋给基类型（同 React 的 EventHandler） */
+    type EventHandler<E extends Event = Event> = {
+      bivarianceHack(e: E): void;
+    }["bivarianceHack"];
+
+    /**
+     * 所有内建元素共用的属性集合。
+     *
+     * ⚠️ 这里**故意不放** `[attr: string]: any` —— 那个口子会让属性名拼错（`scr` / `classNmae`）
+     * 与类型写错（`checked="yes"`）在 `tsc` 下静默通过、运行时静默失效。
+     * 去掉它之后：拼错的属性名 / 写错的类型会在编辑器与 `tsc` 下当场报错。
+     *
+     * **边界（诚实说明）**：这是一套**共用**属性，不按元素区分 ——
+     * 能拦住「拼写错 / 类型错」，但**不拦「属性放错元素」**（如 `<div colSpan={2}>` 不报）。
+     * 未知标签（自定义元素）走 `IntrinsicElements` 的兜底，保持宽松。
+     */
     interface CommonAttributes {
+      // ---- 身份 / 样式 / 通用 ----
       key?: string | number;
       id?: MaybeGetter<string>;
       class?: MaybeGetter<string>;
@@ -129,81 +146,236 @@ declare global {
       style?: MaybeGetter<string | Record<string, string | number>>;
       title?: MaybeGetter<string>;
       hidden?: MaybeGetter<boolean>;
-      onClick?: (e: MouseEvent) => void;
-      onKeyDown?: (e: KeyboardEvent) => void;
-      onKeyUp?: (e: KeyboardEvent) => void;
       /** 命令式 DOM 逃逸口：元素连入文档后调用一次，可返回清理函数 */
       ref?: Ref;
       children?: any;
-      /** 其余 / data-* / aria-* / on* 一律放行 */
-      [attr: string]: any;
+
+      // ---- HTML 全局属性 ----
+      accessKey?: MaybeGetter<string>;
+      autoCapitalize?: MaybeGetter<string>;
+      autoFocus?: MaybeGetter<boolean>;
+      contentEditable?: MaybeGetter<boolean>;
+      dir?: MaybeGetter<"ltr" | "rtl" | "auto">;
+      draggable?: MaybeGetter<boolean>;
+      enterKeyHint?: MaybeGetter<string>;
+      inert?: MaybeGetter<boolean>;
+      inputMode?: MaybeGetter<string>;
+      is?: string;
+      lang?: MaybeGetter<string>;
+      nonce?: string;
+      part?: string;
+      role?: MaybeGetter<string>;
+      slot?: string;
+      spellcheck?: MaybeGetter<boolean>;
+      tabIndex?: MaybeGetter<number>;
+      /** 编译器 PROP_ALIAS 也认小写 HTML 写法 */
+      tabindex?: MaybeGetter<number>;
+      translate?: MaybeGetter<"yes" | "no">;
+
+      // ---- 常用元素属性（跨元素共用一套；见上方边界说明）----
+      accept?: MaybeGetter<string>;
+      acceptCharset?: MaybeGetter<string>;
+      action?: MaybeGetter<string>;
+      allow?: MaybeGetter<string>;
+      allowFullScreen?: MaybeGetter<boolean>;
+      alt?: MaybeGetter<string>;
+      as?: MaybeGetter<string>;
+      async?: MaybeGetter<boolean>;
+      autoComplete?: MaybeGetter<string>;
+      /** 编译器 PROP_ALIAS 接受小写 */
+      autocomplete?: MaybeGetter<string>;
+      autoplay?: MaybeGetter<boolean>;
+      capture?: MaybeGetter<string | boolean>;
+      checked?: MaybeGetter<boolean>;
+      cite?: MaybeGetter<string>;
+      cols?: MaybeGetter<number>;
+      colSpan?: MaybeGetter<number>;
+      controls?: MaybeGetter<boolean>;
+      crossOrigin?: MaybeGetter<string>;
+      dateTime?: MaybeGetter<string>;
+      decoding?: MaybeGetter<string>;
+      default?: MaybeGetter<boolean>;
+      defer?: MaybeGetter<boolean>;
+      disabled?: MaybeGetter<boolean>;
+      download?: MaybeGetter<string | boolean>;
+      enctype?: MaybeGetter<string>;
+      for?: MaybeGetter<string>;
+      htmlFor?: MaybeGetter<string>;
+      form?: MaybeGetter<string>;
+      formAction?: MaybeGetter<string>;
+      formMethod?: MaybeGetter<string>;
+      formNoValidate?: MaybeGetter<boolean>;
+      formTarget?: MaybeGetter<string>;
+      headers?: MaybeGetter<string>;
+      height?: MaybeGetter<string | number>;
+      href?: MaybeGetter<string>;
+      hrefLang?: MaybeGetter<string>;
+      integrity?: MaybeGetter<string>;
+      kind?: MaybeGetter<string>;
+      label?: MaybeGetter<string>;
+      list?: MaybeGetter<string>;
+      loading?: MaybeGetter<"lazy" | "eager">;
+      loop?: MaybeGetter<boolean>;
+      max?: MaybeGetter<string | number>;
+      maxLength?: MaybeGetter<number>;
+      method?: MaybeGetter<string>;
+      min?: MaybeGetter<string | number>;
+      minLength?: MaybeGetter<number>;
+      multiple?: MaybeGetter<boolean>;
+      muted?: MaybeGetter<boolean>;
+      name?: MaybeGetter<string>;
+      noModule?: MaybeGetter<boolean>;
+      noValidate?: MaybeGetter<boolean>;
+      open?: MaybeGetter<boolean>;
+      optimum?: MaybeGetter<number>;
+      pattern?: MaybeGetter<string>;
+      ping?: MaybeGetter<string>;
+      placeholder?: MaybeGetter<string>;
+      playsInline?: MaybeGetter<boolean>;
+      poster?: MaybeGetter<string>;
+      preload?: MaybeGetter<"none" | "metadata" | "auto">;
+      readOnly?: MaybeGetter<boolean>;
+      /** 编译器 PROP_ALIAS 接受小写 */
+      readonly?: MaybeGetter<boolean>;
+      referrerPolicy?: MaybeGetter<string>;
+      rel?: MaybeGetter<string>;
+      required?: MaybeGetter<boolean>;
+      reversed?: MaybeGetter<boolean>;
+      rows?: MaybeGetter<number>;
+      rowSpan?: MaybeGetter<number>;
+      sandbox?: MaybeGetter<string>;
+      scope?: MaybeGetter<string>;
+      selected?: MaybeGetter<boolean>;
+      size?: MaybeGetter<number>;
+      sizes?: MaybeGetter<string>;
+      span?: MaybeGetter<number>;
+      src?: MaybeGetter<string>;
+      srcDoc?: MaybeGetter<string>;
+      srcLang?: MaybeGetter<string>;
+      srcSet?: MaybeGetter<string>;
+      start?: MaybeGetter<number>;
+      step?: MaybeGetter<string | number>;
+      target?: MaybeGetter<string>;
+      type?: MaybeGetter<string>;
+      useMap?: MaybeGetter<string>;
+      value?: MaybeGetter<string | number>;
+      width?: MaybeGetter<string | number>;
+      wrap?: MaybeGetter<string>;
+
+      // ---- data-* / aria-*（模板字面量索引签名：只放行这两种前缀）----
+      [key: `data-${string}`]: MaybeGetter<string | number | boolean> | undefined;
+      [key: `aria-${string}`]: MaybeGetter<string | number | boolean> | undefined;
+
+      // ---- 事件（枚举而非 on* 兜底：否则 onClikc 之类的拼写错就拦不住了）----
+      onClick?: EventHandler<MouseEvent>;
+      onDblClick?: EventHandler<MouseEvent>;
+      onMouseDown?: EventHandler<MouseEvent>;
+      onMouseUp?: EventHandler<MouseEvent>;
+      onMouseMove?: EventHandler<MouseEvent>;
+      onMouseEnter?: EventHandler<MouseEvent>;
+      onMouseLeave?: EventHandler<MouseEvent>;
+      onMouseOver?: EventHandler<MouseEvent>;
+      onMouseOut?: EventHandler<MouseEvent>;
+      onContextMenu?: EventHandler<MouseEvent>;
+      onWheel?: EventHandler<WheelEvent>;
+      onKeyDown?: EventHandler<KeyboardEvent>;
+      onKeyUp?: EventHandler<KeyboardEvent>;
+      onKeyPress?: EventHandler<KeyboardEvent>;
+      onInput?: EventHandler<InputEv>;
+      onChange?: EventHandler<InputEv>;
+      onBeforeInput?: EventHandler<InputEvent>;
+      onCompositionStart?: EventHandler<CompositionEvent>;
+      onCompositionUpdate?: EventHandler<CompositionEvent>;
+      onCompositionEnd?: EventHandler<CompositionEvent>;
+      onSubmit?: EventHandler<SubmitEvent>;
+      onReset?: EventHandler<Event>;
+      onFocus?: EventHandler<FocusEvent>;
+      onBlur?: EventHandler<FocusEvent>;
+      onScroll?: EventHandler<UIEvent>;
+      onScrollEnd?: EventHandler<Event>;
+      onSelect?: EventHandler<Event>;
+      onInvalid?: EventHandler<Event>;
+      onToggle?: EventHandler<Event>;
+      onClose?: EventHandler<Event>;
+      onCancel?: EventHandler<Event>;
+      onPointerDown?: EventHandler<PointerEvent>;
+      onPointerUp?: EventHandler<PointerEvent>;
+      onPointerMove?: EventHandler<PointerEvent>;
+      onPointerEnter?: EventHandler<PointerEvent>;
+      onPointerLeave?: EventHandler<PointerEvent>;
+      onPointerCancel?: EventHandler<PointerEvent>;
+      onTouchStart?: EventHandler<TouchEvent>;
+      onTouchEnd?: EventHandler<TouchEvent>;
+      onTouchMove?: EventHandler<TouchEvent>;
+      onTouchCancel?: EventHandler<TouchEvent>;
+      onDrag?: EventHandler<DragEvent>;
+      onDragStart?: EventHandler<DragEvent>;
+      onDragEnd?: EventHandler<DragEvent>;
+      onDragEnter?: EventHandler<DragEvent>;
+      onDragOver?: EventHandler<DragEvent>;
+      onDragLeave?: EventHandler<DragEvent>;
+      onDrop?: EventHandler<DragEvent>;
+      onCopy?: EventHandler<ClipboardEvent>;
+      onCut?: EventHandler<ClipboardEvent>;
+      onPaste?: EventHandler<ClipboardEvent>;
+      onLoad?: EventHandler<Event>;
+      onError?: EventHandler<Event>;
+      onAnimationStart?: EventHandler<AnimationEvent>;
+      onAnimationEnd?: EventHandler<AnimationEvent>;
+      onAnimationIteration?: EventHandler<AnimationEvent>;
+      onTransitionEnd?: EventHandler<TransitionEvent>;
+      // 媒体事件
+      onPlay?: EventHandler<Event>;
+      onPause?: EventHandler<Event>;
+      onPlaying?: EventHandler<Event>;
+      onEnded?: EventHandler<Event>;
+      onTimeUpdate?: EventHandler<Event>;
+      onDurationChange?: EventHandler<Event>;
+      onVolumeChange?: EventHandler<Event>;
+      onSeeking?: EventHandler<Event>;
+      onSeeked?: EventHandler<Event>;
+      onWaiting?: EventHandler<Event>;
+      onStalled?: EventHandler<Event>;
+      onSuspend?: EventHandler<Event>;
+      onCanPlay?: EventHandler<Event>;
+      onCanPlayThrough?: EventHandler<Event>;
+      onLoadedData?: EventHandler<Event>;
+      onLoadedMetadata?: EventHandler<Event>;
+      onProgress?: EventHandler<Event>;
     }
 
     /** 输入框事件：target 直接就是 input，省得每次手写 as HTMLInputElement */
     type InputEv = Event & { target: HTMLInputElement };
 
+    // 下面这些接口只为「把 ref 收窄成对应元素类型」；其余属性共用 CommonAttributes。
     interface InputAttributes extends CommonAttributes {
-      type?: string;
-      value?: MaybeGetter<string>;
-      placeholder?: MaybeGetter<string>;
-      checked?: MaybeGetter<boolean>;
-      disabled?: MaybeGetter<boolean>;
-      readOnly?: MaybeGetter<boolean>;
-      maxLength?: MaybeGetter<number>;
-      min?: MaybeGetter<string | number>;
-      max?: MaybeGetter<string | number>;
-      step?: MaybeGetter<string | number>;
-      pattern?: MaybeGetter<string>;
-      autoComplete?: MaybeGetter<string>;
-      onInput?: (e: InputEv) => void;
-      onChange?: (e: InputEv) => void;
-      onFocus?: (e: FocusEvent) => void;
-      onBlur?: (e: FocusEvent) => void;
+      ref?: Ref<HTMLInputElement>;
     }
 
     interface AnchorAttributes extends CommonAttributes {
       ref?: Ref<HTMLAnchorElement>;
-      href?: MaybeGetter<string>;
-      target?: string;
-      rel?: string;
-      download?: string;
     }
 
     interface ImageAttributes extends CommonAttributes {
       ref?: Ref<HTMLImageElement>;
-      src?: MaybeGetter<string>;
-      alt?: MaybeGetter<string>;
-      width?: MaybeGetter<string | number>;
-      height?: MaybeGetter<string | number>;
     }
 
     interface FormAttributes extends CommonAttributes {
       ref?: Ref<HTMLFormElement>;
-      action?: MaybeGetter<string>;
-      method?: string;
-      onSubmit?: (e: SubmitEvent) => void;
     }
 
     interface MediaAttributes extends CommonAttributes {
       ref?: Ref<HTMLMediaElement>;
-      src?: MaybeGetter<string>;
-      controls?: MaybeGetter<boolean>;
-      autoplay?: MaybeGetter<boolean>;
-      loop?: MaybeGetter<boolean>;
-      muted?: MaybeGetter<boolean>;
     }
 
     /** canvas：ref 推导为 HTMLCanvasElement（getContext 等命令式 API 的入口） */
     interface CanvasAttributes extends CommonAttributes {
       ref?: Ref<HTMLCanvasElement>;
-      width?: MaybeGetter<string | number>;
-      height?: MaybeGetter<string | number>;
     }
 
     /** dialog：ref 推导为 HTMLDialogElement（showModal / close 的入口） */
     interface DialogAttributes extends CommonAttributes {
       ref?: Ref<HTMLDialogElement>;
-      open?: MaybeGetter<boolean>;
     }
 
     interface IntrinsicElements {
@@ -276,7 +448,7 @@ declare global {
       object: CommonAttributes;
       ol: CommonAttributes;
       optgroup: CommonAttributes;
-      option: InputAttributes;
+      option: CommonAttributes;
       output: CommonAttributes;
       p: CommonAttributes;
       param: CommonAttributes;
@@ -292,7 +464,7 @@ declare global {
       script: CommonAttributes;
       search: CommonAttributes;
       section: CommonAttributes;
-      select: InputAttributes;
+      select: CommonAttributes;
       slot: CommonAttributes;
       small: CommonAttributes;
       source: CommonAttributes;
@@ -306,7 +478,7 @@ declare global {
       tbody: CommonAttributes;
       td: CommonAttributes;
       template: CommonAttributes;
-      textarea: InputAttributes;
+      textarea: CommonAttributes;
       tfoot: CommonAttributes;
       th: CommonAttributes;
       thead: CommonAttributes;
@@ -319,8 +491,8 @@ declare global {
       var: CommonAttributes;
       video: MediaAttributes;
       wbr: CommonAttributes;
-      /** 未列出的标签/自定义元素也放行 */
-      [tag: string]: CommonAttributes;
+      /** 未列出的标签 / 自定义元素：放行（不参与属性校验，避免误伤 web component） */
+      [tag: string]: any;
     }
   }
 }
