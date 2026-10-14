@@ -8,6 +8,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import plugin from "../dist/vite/index.js";
 
+const runtime = await import("../dist/runtime/index.js");
+
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), "plain-vite-"));
 const manifestOf = (root) => path.join(root, ".plain", "server.mjs");
 
@@ -365,4 +367,127 @@ test("handleHotUpdate：命中 Plain 模块时不强制整页刷新", async () =
   // 非 Plain 文件同样不特殊处理
   const r2 = p.handleHotUpdate({ file: path.join(root, "style.css") });
   assert.equal(r2, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// dev SSR（插件选项 `ssr`）：页面导航交给服务端渲染，不必先构建
+// ---------------------------------------------------------------------------
+
+/** 造一个「够用的」vite server 假体；返回被装上的中间件列表 */
+function fakeViteServer(overrides = {}) {
+  const mw = [];
+  const server = {
+    middlewares: { use: (fn) => mw.push(fn) },
+    ssrLoadModule: async (id) => {
+      assert.equal(id, "/entry-server.tsx", "应按 root 相对路径加载 SSR 入口");
+      return {
+        App: () => {
+          // 手写 DOM + 显式 key（等价编译器给 resource 注入的那份）
+          const r = runtime.resource(
+            () => Promise.resolve("dev-value"),
+            undefined,
+            "fake:1#0"
+          );
+          const p = document.createElement("p");
+          const t = document.createTextNode("");
+          p.appendChild(t);
+          runtime.effect(() => {
+            t.nodeValue = String(r.data() ?? "loading");
+          });
+          return p;
+        },
+      };
+    },
+    // 真实 vite 会在这里注入 @vite/client、改写脚本引用
+    transformIndexHtml: async (url, html) =>
+      html.replace("<head>", `<head><!--vite:${url}-->`),
+    config: { logger: { error: () => {} } },
+    ...overrides,
+  };
+  return { server, mw };
+}
+
+async function configureDevSsr(root, overrides) {
+  const p = plugin({ ssr: { entry: "./entry-server.tsx" } });
+  p.configResolved({ root });
+  const { server, mw } = fakeViteServer(overrides);
+  p.configureServer(server);
+  return mw;
+}
+
+test("dev SSR：页面导航走服务端渲染（模板过 vite、载荷注入）", async () => {
+  const root = tmpRoot();
+  fs.writeFileSync(
+    path.join(root, "index.html"),
+    "<!doctype html><html><head><!--plain-data--></head>" +
+      '<body><div id="app"><!--plain-ssr--></div></body></html>'
+  );
+  const mw = await configureDevSsr(root);
+  assert.equal(mw.length, 1, "应装上 dev SSR 中间件");
+
+  const res = fakeResponse();
+  await mw[0]({ method: "GET", url: "/todo/2" }, res, () => {
+    res.nextCalled = true;
+  });
+  assert.equal(res.headers["content-type"], "text/html; charset=utf-8");
+  assert.match(res.body, /<p>dev-value<\/p>/, "SSR 应把 resource 的值渲染进 HTML");
+  assert.match(res.body, /<!--vite:\/todo\/2-->/, "模板应先过 transformIndexHtml");
+  assert.match(res.body, /"key":"fake:1#0"/, "载荷应带上调用点 key：" + res.body);
+  assert.ok(!res.nextCalled, "页面导航不该放行给后面的中间件");
+});
+
+test("dev SSR：vite 自己的请求与静态资源一律放行", async () => {
+  const root = tmpRoot();
+  fs.writeFileSync(
+    path.join(root, "index.html"),
+    "<!doctype html><head><!--plain-data--></head><body><!--plain-ssr--></body>"
+  );
+  const mw = await configureDevSsr(root);
+
+  for (const url of [
+    "/@vite/client",
+    "/@fs/abs/x.tsx",
+    "/node_modules/.vite/deps/a.js",
+    "/entry-client.tsx",
+    "/assets/a.css",
+  ]) {
+    const res = fakeResponse();
+    await mw[0]({ method: "GET", url }, res, () => {
+      res.nextCalled = true;
+    });
+    assert.equal(res.nextCalled, true, url + " 应放行（否则会把 vite 自己的东西拦下来）");
+  }
+
+  const post = fakeResponse();
+  await mw[0]({ method: "POST", url: "/" }, post, () => {
+    post.nextCalled = true;
+  });
+  assert.equal(post.nextCalled, true, "非 GET 应放行");
+});
+
+test("dev SSR：加载/渲染出错 -> 500 并把错误透出来（不吞成白屏）", async () => {
+  const root = tmpRoot();
+  fs.writeFileSync(
+    path.join(root, "index.html"),
+    "<!doctype html><head><!--plain-data--></head><body><!--plain-ssr--></body>"
+  );
+  const mw = await configureDevSsr(root, {
+    ssrLoadModule: async () => {
+      throw new Error("契约检查未通过 PLAIN_E1102");
+    },
+  });
+  const res = fakeResponse();
+  await mw[0]({ method: "GET", url: "/" }, res, () => {});
+  assert.equal(res.statusCode, 500);
+  assert.match(res.body, /PLAIN_E1102/, "错误要透出来：" + res.body);
+});
+
+test("dev SSR：模板缺占位符同样报错（与生产同一条规则）", async () => {
+  const root = tmpRoot();
+  fs.writeFileSync(path.join(root, "index.html"), "<!doctype html><div id='app'></div>");
+  const mw = await configureDevSsr(root);
+  const res = fakeResponse();
+  await mw[0]({ method: "GET", url: "/" }, res, () => {});
+  assert.equal(res.statusCode, 500);
+  assert.match(res.body, /plain-ssr/, "应点名缺的占位符：" + res.body);
 });

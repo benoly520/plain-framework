@@ -16,6 +16,9 @@ import {
 import { check, formatIssues } from "../lint.js";
 import { transformWithEsbuild } from "vite";
 import path from "node:path";
+import fs from "node:fs";
+import { renderToStringWithData } from "../server/render.js";
+import { renderPage } from "../server/index.js";
 
 export default function plainPlugin(options: {
   serverEntry?: string;
@@ -36,12 +39,25 @@ export default function plainPlugin(options: {
    * - false：关闭
    */
   lint?: "error" | "warn" | false;
+  /**
+   * **dev 下的 SSR**（可选）。给**源码**入口就行 —— 不必先构建：
+   *
+   *   plain({ ssr: { entry: "./entry-server.tsx" } })
+   *
+   * 页面导航（GET、看起来像页面）会交给服务端渲染：模块走 vite 的 SSR 管线加载，
+   * 所以改代码立刻生效，`server()` 直调用的是同一份 dev 注册表（也不依赖 `.plain/server.mjs`）。
+   * 模板默认 `root/index.html`，需含 `<!--plain-ssr-->` 与 `<!--plain-data-->` 两个占位注释。
+   *
+   * 生产路径是另一件事（给的是**已构建**的入口）：`serve({ ssr: { template, entry } })`。
+   */
+  ssr?: { entry: string; template?: string };
 } = {}): Plugin {
   const {
     serverEntry = ".plain/server.mjs",
     include = /\.(tsx|jsx)$/,
     lint = "error",
     hmr = true,
+    ssr,
   } = options;
   const registry = new Map<string, any>(); // name -> 可执行的 server 函数（仅 dev 需要）
   /** name -> 函数体源码。清单只要文本，build 不解析函数体（见下方 transform 注释） */
@@ -78,6 +94,19 @@ export default function plainPlugin(options: {
     },
 
     configureServer(server: any) {
+      // dev 下的 SSR：页面导航交给服务端渲染（生产路径见 serve({ ssr })）。
+      // 必须**在这里直接 use** —— vite 的内部中间件（含 index.html 的兜底）是在
+      // configureServer 之后装的；放进「返回的函数」里就晚了，`/` 会被 vite 自己先 serve 掉。
+      if (ssr) {
+        installDevSsr(server, {
+          root: () => root,
+          entry: ssr.entry,
+          template: ssr.template,
+          // dev 的 handler 就是内存里那份注册表（transform 已求值成可调用对象），
+          // 所以 dev 不需要 .plain/server.mjs
+          getHandlers: () => Object.fromEntries(registry),
+        });
+      }
       if (options.rpc === false) return;
       // dev 才需要可调用对象；标记后 transform 才会求值函数体
       needsCallable = true;
@@ -289,4 +318,79 @@ function evalFn(body: string, name: string): any {
       throw new Error(`server fn ${name} unavailable`);
     };
   }
+}
+
+/**
+ * dev 下的 SSR 中间件：给**源码**入口即可，不必先构建。
+ *
+ * 与生产路径（`ssrMiddleware`）的差别只有「模块从哪来」与「谁给 handlers」：
+ *   - 模块：vite 的 `ssrLoadModule`（走同一条 transform 管线 —— 改代码立刻生效）；
+ *   - handlers：插件内存里的 dev 注册表（所以 dev 不需要 `.plain/server.mjs`）；
+ *   - 模板：源码 `index.html`，经 `transformIndexHtml` 注入 vite 客户端、改写脚本引用。
+ * 「两个占位注释 + 载荷转义」那套规则复用 `renderPage` —— 生产与 dev 只有一份。
+ */
+function installDevSsr(
+  server: any,
+  opts: {
+    root: () => string;
+    entry: string;
+    template?: string;
+    getHandlers: () => Record<string, (...args: any[]) => any>;
+  }
+): void {
+  const entryUrlOf = (): string => {
+    const root = opts.root();
+    const rel = path.relative(root, path.resolve(root, opts.entry));
+    return "/" + rel.split(path.sep).join("/");
+  };
+
+  server.middlewares.use(async (req: any, res: any, next: any) => {
+    const url = (req.url || "/").split("?")[0];
+    // 只接手「看起来像页面导航」的 GET：dev 的 /@vite/client、/@fs/…、/node_modules/…、
+    // 以及带扩展名的资源一律放行 —— 否则会把 vite 自己的东西也拦下来。
+    const looksLikePage =
+      req.method === "GET" &&
+      !url.startsWith("/@") &&
+      !url.startsWith("/node_modules/") &&
+      !/\.[a-zA-Z0-9]+$/.test(url);
+    if (!looksLikePage) return next();
+
+    try {
+      const mod: any = await server.ssrLoadModule(entryUrlOf());
+      const App =
+        typeof mod.App === "function"
+          ? mod.App
+          : typeof mod.default === "function"
+            ? mod.default
+            : null;
+      if (!App) {
+        throw new Error(
+          `SSR 入口 ${entryUrlOf()} 没有导出 App 或 default —— 渲染需要一个根组件`
+        );
+      }
+      const { html, data } = await renderToStringWithData(App, {
+        container: false,
+        handlers: opts.getHandlers(),
+        url,
+      });
+      const tplPath = path.resolve(opts.root(), opts.template || "index.html");
+      // 模板先过 vite：注入 @vite/client、把 ./entry-client.tsx 改写成 dev 路径
+      const tpl = await server.transformIndexHtml(
+        url,
+        fs.readFileSync(tplPath, "utf8")
+      );
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.end(renderPage(tpl, html, data));
+    } catch (e: any) {
+      // 编译 / 契约检查 / 渲染错误：明确报出来，别吞成白屏
+      const msg = (e && e.message) || String(e);
+      const logger = server.config && server.config.logger;
+      if (logger && typeof logger.error === "function") logger.error(`[plain ssr] ${msg}`);
+      // eslint-disable-next-line no-console
+      else console.error(`[plain ssr] ${msg}`);
+      res.statusCode = 500;
+      res.setHeader("content-type", "text/plain; charset=utf-8");
+      res.end(`[plain ssr] ${msg}`);
+    }
+  });
 }

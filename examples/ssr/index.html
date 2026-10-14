@@ -76,6 +76,11 @@
   </head>
   <body>
     <div id="app"><!--plain-ssr--></div>
-    <script type="module" src="./entry-client.tsx"></script>
+    <!--
+      资源引用一律用**绝对路径**（/entry-client.tsx，不是 ./entry-client.tsx）：
+      SSR 下页面可能是 /todo/2 这样的嵌套地址，相对路径会被解析成 /todo/entry-client.tsx。
+      绝对路径在 dev 与构建后都指向项目根，构建时照样会被换成带 hash 的产物。
+    -->
+    <script type="module" src="/entry-client.tsx"></script>
   </body>
 </html>

@@ -425,6 +425,18 @@ await serve({
 完整可跑的例子见 [`examples/ssr/`](examples/ssr)：`pnpm run build:example:ssr` 构建、
 `pnpm run start:example:ssr` 起服务（打开 `/todo/2` 的网页源代码就能看到那条数据）。
 
+**dev 下不必先构建**：给 vite 插件一个**源码**入口，页面导航就交给服务端渲染（改代码立刻生效，
+`server()` 直调用的是内存里的 dev 注册表，也不依赖 `.plain/server.mjs`）：
+
+```js
+// vite.config.js
+plain({ ssr: { entry: "./entry-server.tsx" } });   // 示例：pnpm run dev:example:ssr
+```
+
+> 模板里的资源引用请用**绝对路径**（`/entry-client.tsx`，不是 `./entry-client.tsx`）：
+> SSR 的页面可能是 `/todo/2` 这类嵌套地址，相对路径会被解析成 `/todo/entry-client.tsx` ——
+> 首屏 HTML 正常，客户端脚本却 404。绝对路径在 dev 与构建后都指向项目根。
+
 > **并发安全**：SSR 期间 `globalThis.document` 是「取值时查当前渲染上下文」的访问器
 > （不是换全局再换回来），每次渲染跑在自己的 `AsyncLocalStorage` 作用域里 ——
 > 同进程并发渲染互相不串。根因与修法见 [`docs/rfcs/ssr-data.md`](docs/rfcs/ssr-data.md) §3.4。
@@ -561,6 +573,8 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
   编译器注入调用点 key + 注水配对种入（首帧与 HTML 一致）；`ssrMiddleware` / `serve({ ssr })` 一行起。
   并发隔离（`AsyncLocalStorage`）、示例 [`examples/ssr/`](examples/ssr)。设计见
   [`docs/rfcs/ssr-data.md`](docs/rfcs/ssr-data.md)
+- ✅ **dev 下的 SSR**：插件给**源码**入口即可（`plain({ ssr: { entry } })`）—— 走 vite 的
+  `ssrLoadModule` + dev 内存注册表 + `transformIndexHtml`，不必先构建，改代码立刻生效
 - ✅ **HMR 热更新**：dev 下改组件只热替换 DOM 子树（不整页刷新），模块级 signal 值尽力保留
 - ✅ CLI：check / schema / dev / build / serve
 - ✅ TypeScript 类型（含 JSX 类型，`tsc --noEmit` 通过）
@@ -599,7 +613,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 | 缺口 | 影响 | 优先级 |
 | --- | --- | --- |
 | **组件级（细粒度）热替换** | 现在最细的粒度是「挂载点」：改动被别处使用的模块时会把挂载点的根组件全部重跑（会丢焦点 / 滚动），而不是只换那一棵子树 | P2 |
-| **SSR 的 dev 体验** | `ssrMiddleware` 只吃**已构建**的 SSR 入口（生产路径）；dev 下要随 vite 一起跑 SSR 得另配（`vite.ssrLoadModule` / vite middleware 模式），暂无封装 | P1 |
+| **SSR 结果缓存 / 流式输出** | 每个页面请求都整页渲染；没有按路由缓存，也没有流式吐 HTML（首字节要等数据到齐） | P2 |
 | **RPC 请求合并 / 防抖** | 高频调用会各发一次请求 | P1 |
 | **多入口 / 代码分割** | 只验证了单入口 | P1 |
 | **并发渲染 / 时间切片** | 没有 | P2 |

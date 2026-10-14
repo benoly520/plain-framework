@@ -30,6 +30,22 @@
 
 ### 新增
 
+- **dev 下的 SSR：给源码入口就行，不必先构建**（vite 插件新增 `ssr` 选项）：
+  ```js
+  plain({ ssr: { entry: "./entry-server.tsx" } })
+  ```
+  页面导航（GET、看起来像页面）交给服务端渲染：模块走 vite 的 `ssrLoadModule`（同一条 transform
+  管线，改代码立刻生效），`server()` 直调用的是**内存里那份 dev 注册表**（所以 dev 也不需要
+  `.plain/server.mjs`），模板是源 `index.html` 并先过 `transformIndexHtml`（注入 `@vite/client`、
+  改写脚本引用）。中间件**必须装在 vite 内部中间件之前**，否则 `/` 会被 vite 自己的 index.html 先 serve 掉。
+  与生产（`serve({ ssr })`）共用 `renderPage` —— 「两个占位符 + 载荷转义」这套规则只有一份。
+  出错（编译 / 契约检查 / 渲染）**透出 500 + 原因**，不吞成白屏。
+  - 顺手修掉示例里一个真 bug：模板里用**相对路径**引脚本（`./entry-client.tsx`）时，
+    SSR 的嵌套地址（`/todo/2`）会被 vite 解析成 `/todo/entry-client.tsx` —— 首屏 HTML 对、
+    但客户端脚本 404。模板里的资源引用一律用绝对路径（`/entry-client.tsx`），
+    构建时照样会被换成带 hash 的产物。示例与文档都已写明。
+  - 测试 `test/vite-plugin.test.mjs` 新增 4 项（导航走 SSR + 模板过 vite + 载荷注入 /
+    vite 自身请求与静态资源放行 / 出错透出 500 / 模板缺占位符同样报错）。
 - **SSR 数据预取（阶段三：`ssrMiddleware` + SSR 示例）**：把前两个阶段接成一条能投产的链。
   - **`ssrMiddleware({ template, entry, manifest })`**（`plain/server`，Node 标准 `(req,res,next)`，与
     `rpcMiddleware` 同形状）：`renderToStringWithData(App, { handlers, url })` -> 把应用 HTML 写进模板的

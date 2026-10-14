@@ -519,6 +519,19 @@ await serve({ dist: "dist", ssr: { template: "dist/index.html", entry: ".plain/s
 
 **缺一个、或者写重了，都直接报错** —— 包括「把它写进另一段注释里」这种（踩过）。
 
+模板里的资源引用一律用**绝对路径**（`/entry-client.tsx`，而不是 `./entry-client.tsx`）：
+SSR 的页面可能是 `/todo/2` 这样的嵌套地址，相对路径会被解析成 `/todo/entry-client.tsx` ——
+首屏 HTML 正常、客户端脚本却 404（踩过）。绝对路径在 dev 与构建后都指向项目根。
+
+dev 下也不想先构建？给插件一个**源码**入口就行：
+
+```js
+// vite.config.js
+plain({ ssr: { entry: "./entry-server.tsx" } });   // 页面导航直接服务端渲染，改代码立刻生效
+```
+
+（生产是另一件事：`serve({ ssr: { template, entry } })`，那里给的是**已构建**的入口。）
+
 ### 11.4 别写
 
 | 别写 | 为什么 |

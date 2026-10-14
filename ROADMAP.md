@@ -160,8 +160,9 @@ SSR 换成零依赖服务端垫片（产出 HTML），hydrate 换成「认领式
 - 验收：`test/ssr-data.test.mjs` 19 项（含并发、端到端注水、列表多实例配对、中间件）；
   可跑示例 [`examples/ssr/`](examples/ssr)。
 
-**仍未做**：**dev 下的 SSR 体验** —— `ssrMiddleware` 只吃已构建的 SSR 入口（生产路径），
-dev 下随 vite 一起跑 SSR（`ssrLoadModule` / middleware 模式）暂无封装。
+**dev 下的 SSR** ✅ 已落地（vite 插件选项 `ssr: { entry }`）：模块走 `ssrLoadModule`、handlers 用
+dev 内存注册表（不依赖 `.plain/server.mjs`）、模板过 `transformIndexHtml`；中间件装在 vite
+内部中间件之前，与生产共用 `renderPage`。仍未做：SSR 结果的**按路由缓存 / 流式输出**（当前每次请求整页渲染）。
 
 ## M6 —— 剩余的 AI 原生工具（P1）
 

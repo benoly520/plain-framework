@@ -273,11 +273,7 @@ export function ssrMiddleware(options: {
           url,
         });
         res.setHeader("content-type", "text/html; charset=utf-8");
-        res.end(
-          tpl
-            .replace(SSR_SLOT, html)
-            .replace(DATA_SLOT, payloadTag(data))
-        );
+        res.end(renderPage(tpl, html, data));
       })
       .catch((e: any) => {
         res.statusCode = 500;
@@ -291,6 +287,16 @@ export function ssrMiddleware(options: {
 function payloadTag(data: unknown[]): string {
   const json = JSON.stringify(data).replace(/</g, "\\u003c");
   return `<script type="application/json" id="${DATA_ID}">${json}</script>`;
+}
+
+/**
+ * 把应用 HTML 与首屏载荷写进模板（**生产与 dev 共用这一处**，规则只有一份）：
+ * 先校验占位符（缺了 / 重了都报错），再替换，载荷按 `payloadTag` 转义。
+ */
+export function renderPage(tpl: string, html: string, data: unknown[]): string {
+  assertSlot(tpl, SSR_SLOT);
+  assertSlot(tpl, DATA_SLOT);
+  return tpl.replace(SSR_SLOT, html).replace(DATA_SLOT, payloadTag(data));
 }
 
 /**
