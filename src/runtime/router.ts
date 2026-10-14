@@ -3,6 +3,7 @@
 import type { Router, Route, RouteProps, Renderable, Owner } from "../types.js";
 import { signal, computed, withOwner } from "./signal.js";
 import { resolve, nodesOf } from "./dom.js";
+import { flushRefs } from "./ref.js";
 
 function currentPath(mode: string): string {
   if (typeof window === "undefined") return "/";
@@ -109,6 +110,8 @@ export function createRouter(options: {
         });
         const nodes = nodesOf(node);
         nodes.forEach((n: Node) => container.appendChild(n));
+        // 路由页刚接入文档 -> 跑掉这一页的 ref 回调（见 ref.ts）
+        flushRefs();
         current = {
           nodes,
           dispose() {

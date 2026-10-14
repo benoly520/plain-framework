@@ -25,6 +25,9 @@ export type PlainErrorCode =
   | "PLAIN_E1006"
   | "PLAIN_E1007"
   | "PLAIN_E1008"
+  | "PLAIN_E1009"
+  | "PLAIN_E1010"
+  | "PLAIN_E1011"
   | "PLAIN_E1101"
   | "PLAIN_E1102"
   | "PLAIN_E1103"
@@ -109,6 +112,21 @@ export const ERROR_CATALOG: Record<PlainErrorCode, ErrorEntry> = {
     code: "PLAIN_E1008",
     suppressible: false,
     summary: "JSX 属性展开 `{...expr}`（只做了半套支持，会静默跑错）",
+  },
+  PLAIN_E1009: {
+    code: "PLAIN_E1009",
+    suppressible: false,
+    summary: "`ref` 用在组件上（组件没有稳定根节点）",
+  },
+  PLAIN_E1010: {
+    code: "PLAIN_E1010",
+    suppressible: false,
+    summary: "`ref` 的值不是函数（应为 `ref={(el) => …}`）",
+  },
+  PLAIN_E1011: {
+    code: "PLAIN_E1011",
+    suppressible: false,
+    summary: "`ref` 回调不能是 `async`（清理与异步不兼容）",
   },
 
   // --- E11xx lint：可自动修 ----------------------------------------------

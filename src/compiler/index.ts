@@ -101,9 +101,13 @@ const RPC = "__rpc";
 
 const PLACE = "__place";
 
+/** 命令式 DOM 逃逸口（ref={fn}）的运行时入口；内部符号，见 docs/rfcs/ref-escape-hatch.md */
+const REF = "__ref";
+
 const HELPER_IMPORT =
   `import { effect as ${E}, stringify as ${S}, insert as ${INS}, ` +
-  `each as ${EACH}, when as ${WHEN}, rpc as ${RPC}, place as ${PLACE} } from "plain";`;
+  `each as ${EACH}, when as ${WHEN}, rpc as ${RPC}, place as ${PLACE}, ` +
+  `${REF} } from "plain";`;
 
 function isComponentTag(name: string): boolean {
   return /^[A-Z]/.test(name) || name.includes(".");
@@ -978,6 +982,87 @@ function assertNoSpreadAttrs(attrs: any, sf: any): void {
   });
 }
 
+/** 是否为 async 函数（箭头 / 函数表达式） */
+function isAsyncFunction(fn: any): boolean {
+  return !!(
+    fn.modifiers &&
+    fn.modifiers.some((m: any) => m.kind === ts.SyntaxKind.AsyncKeyword)
+  );
+}
+
+/** 抛出 ref 相关的编译错误（PLAIN_E1009 / E1010 / E1011） */
+function throwRefError(
+  code: PlainErrorCode,
+  node: any,
+  detail: string,
+  hint: string
+): never {
+  const sf = node.getSourceFile();
+  const at = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+  throw new PlainCompileError({
+    code,
+    file: sf.fileName,
+    line: at.line + 1,
+    column: at.character + 1,
+    detail,
+    hint,
+  });
+}
+
+/**
+ * 编译内建元素上的 `ref={fn}` -> `__ref(el, fn)`（命令式 DOM 逃逸口）。
+ *
+ * 语义：元素**连入文档后**调用一次 fn(el)，返回的清理函数随 owner 回收
+ * （≈ 平台的 connectedCallback / disconnectedCallback）。只接受函数形态；
+ * 明显的非函数、async、返回 JSX 一律编译期报错，不做静默降级。
+ * 设计见 docs/rfcs/ref-escape-hatch.md。
+ */
+function emitRefAttr(el: string, attr: any, out: string[]): void {
+  const init = attr.initializer;
+  const hint =
+    "写成 ref={(el) => { … }}；元素连入文档后会用它调用一次，可返回清理函数";
+  if (!init || ts.isStringLiteral(init) || ts.isNumericLiteral(init)) {
+    throwRefError("PLAIN_E1010", attr, "ref 需要一个函数：ref={(el) => …}", hint);
+  }
+  if (!ts.isJsxExpression(init) || !init.expression) {
+    throwRefError("PLAIN_E1010", attr, "ref 需要一个函数：ref={(el) => …}", hint);
+  }
+  const expr = unparen(init.expression);
+  // 明确的非函数字面量：直接报错。标识符 / 调用 / 成员表达式看不出类型，交给运行期兜底。
+  if (
+    ts.isStringLiteral(expr) ||
+    ts.isNumericLiteral(expr) ||
+    ts.isObjectLiteralExpression(expr) ||
+    ts.isArrayLiteralExpression(expr) ||
+    ts.isTemplateExpression(expr) ||
+    ts.isNoSubstitutionTemplateLiteral(expr) ||
+    expr.kind === ts.SyntaxKind.TrueKeyword ||
+    expr.kind === ts.SyntaxKind.FalseKeyword ||
+    expr.kind === ts.SyntaxKind.NullKeyword
+  ) {
+    throwRefError("PLAIN_E1010", attr, "ref 的值必须是函数", hint);
+  }
+  if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
+    if (isAsyncFunction(expr)) {
+      throwRefError(
+        "PLAIN_E1011",
+        expr,
+        "ref 回调不能是 async",
+        "清理与异步不兼容：把 await 提到回调外，或在回调里自己 catch"
+      );
+    }
+    if (isJsxLike(unparen(expr.body))) {
+      throwRefError(
+        "PLAIN_E1010",
+        expr,
+        "ref 回调不能返回 JSX（它返回的应是清理函数）",
+        "JSX 请放到组件里；ref 回调只做命令式操作，可返回一个清理函数"
+      );
+    }
+  }
+  out.push(`${REF}(${el}, ${expr.getText()});`);
+}
+
 function emitNode(node: any, parentVar: string, out: string[]): void {
   if (!node) return;
   if (ts.isJsxFragment(node)) {
@@ -1077,6 +1162,18 @@ function emitComponent(
   parentVar: string,
   out: string[]
 ): void {
+  // ref 只能放在内建元素上：组件不保证有根节点，静默忽略会变成"静默失败"
+  const refAttr = attrs.properties.find(
+    (p: any) => ts.isJsxAttribute(p) && p.name.getText() === "ref"
+  );
+  if (refAttr) {
+    throwRefError(
+      "PLAIN_E1009",
+      refAttr,
+      `组件 <${tagText}> 上不支持 ref`,
+      "ref 只能放在内建元素上：把 ref 放到组件内部的元素上，或改用 props 把节点回调传进组件"
+    );
+  }
   const propsVar = fresh("props");
   const parts = collectProps(attrs);
   const meaningful = children.filter(
@@ -1147,6 +1244,11 @@ function emitElement(
       const raw = p.name.getText();
       // key 由 each 消费，不能落到 DOM 属性上
       if (raw === "key") return;
+      // ref 是命令式逃逸口的编译期指令（见 docs/rfcs/ref-escape-hatch.md）
+      if (raw === "ref") {
+        emitRefAttr(el, p, out);
+        return;
+      }
       const key = PROP_ALIAS[raw] || raw;
       const init = p.initializer;
 

@@ -17,6 +17,7 @@ import {
 } from "./signal.js";
 import { getHydrationCtx, claimPair, suspendHydrate } from "./hydration-context.js";
 import { hmrRegister } from "./hmr.js";
+import { flushRefs } from "./ref.js";
 
 export { resolve } from "./signal.js";
 
@@ -187,6 +188,8 @@ export function place(parent: Node, node: any): unknown {
   if (!node) return node;
   const list = node.__plainSlot ? toNodes(node.fragment) : toNodes(node);
   list.forEach((n: Node) => parent.appendChild(n));
+  // 组件子树可能刚接入文档 -> 把连入的 ref 回调跑掉（见 ref.ts）
+  flushRefs();
   return node;
 }
 
@@ -209,6 +212,7 @@ export function syncRange(start: any, end: any, next: Node[]): void {
   // 这是「复用服务端已有节点」的核心；普通更新不启用（保持既有语义）。
   if (getHydrationCtx()) {
     reconcileHydrate(start, end, cur, next);
+    flushRefs();
     return;
   }
 
@@ -223,6 +227,8 @@ export function syncRange(start: any, end: any, next: Node[]): void {
     }
     parent.insertBefore(want, ref === null ? end : ref);
   }
+  // 区间已同步：新接入文档的节点上的 ref 回调在这里跑（见 ref.ts）
+  flushRefs();
 }
 
 /**

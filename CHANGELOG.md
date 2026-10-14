@@ -7,6 +7,21 @@
 
 ### 新增
 
+- **命令式 DOM 逃逸口 `ref={(el) => …}`**（内建元素专用，**零新增对外 API**）：
+  组件体默认拿不到自己创建的节点，`dialog.showModal()` / `canvas.getContext()` / 第三方库要节点
+  这些真实需求此前无路可走（写 `ref={fn}` 会被当普通属性**静默丢弃**）。现在编译期把
+  `ref={fn}` 编译成内部符号 `__ref(el, fn)`：元素**连入文档之后**回调一次
+  （≈ 平台的 `connectedCallback`），返回的清理函数随元素回收（≈ `disconnectedCallback`）；
+  `el` 的类型由标签推导（`<canvas>` → `HTMLCanvasElement`、`<dialog>` → `HTMLDialogElement` 等），
+  无需手写泛型。
+  - 生命周期：列表行增删 / `when` 分支切换 / keyed 复用移动语义正确；SSR 期间不执行；
+    hydration 认领后执行一次；回调在**该元素的 owner 作用域内**执行 —— 因此
+    「要用这个节点的响应式逻辑，就写进 `ref` 回调」是官方推荐写法（组件体的语句先于 DOM 构建执行）。
+  - 编译期拦截三态：`PLAIN_E1009`（组件上用 `ref`）/ `PLAIN_E1010`（值非函数 / 返回 JSX）/
+    `PLAIN_E1011`（`async` 回调）。
+  - 文档：README「命令式逃逸口 `ref`」、`AGENTS.md` 反模式 16–18 与错误码表、
+    `docs/patterns.md` §9（弹窗 / 画布 / 第三方库 / 焦点）、提案 `docs/rfcs/ref-escape-hatch.md`。
+  - 测试：`test/ref.test.mjs`（14 项：编译正反例 + 连接 / 清理 / 列表 / 条件 / SSR / 注水）。
 - **`plain/testing` 官方测试工具包**（零依赖，独立子路径，不并入冻结的运行时 API 面）：
   - `render(Component)` —— 挂进全新容器，返回 `container` / `html()` / `text()` /
     `get()` / `query()` / `queryAll()` / `getByText()` / `queryByText()` / `unmount()`；
@@ -30,6 +45,9 @@
 
 ### 修复
 
+- **`mount()` 卸载不再泄漏 effect / 清理回调**：此前 `mount()` 返回的卸载函数只移除 DOM，
+  不回收该挂载点作用域内的 effect / `onCleanup` / `ref` 清理（它们只在 HMR 热替换时被回收）。
+  现在卸载会**先回收作用域内的一切副作用、再移除 DOM**。依赖「卸载后 effect 仍存活」的非标准用法需调整。
 - **`server()` 清单的多入口隔离**：`.plain/server.mjs` 是单文件清单，此前多入口 / 多模块下
   **同名 `server()` 函数会静默互相覆盖** —— 客户端 RPC 桩还在调旧名字，服务端实现却已换成
   另一个（最贵的「静默语义降级」）。现在：

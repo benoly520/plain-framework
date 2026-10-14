@@ -45,5 +45,9 @@ export {
   __hmrIds,
 } from "./hmr.js";
 
+// 命令式 DOM 逃逸口：内建元素 ref={fn} 的运行时支撑（编译器生成 __ref 调用）。
+// 归入内部符号（同 __plainBeginModule），不在对外 API 面里。
+export { __ref } from "./ref.js";
+
 // 公共类型 + 全局 JSX 命名空间（由 tsc 一并产出到 dist/index.d.ts）
 export * from "../types.js";

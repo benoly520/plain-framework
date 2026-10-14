@@ -20,6 +20,7 @@ import {
 import { makeClaimDocument } from "./claim-document.js";
 import { hmrRegister, getHmrModuleId } from "./hmr.js";
 import { syncRange, toNodes } from "./dom.js";
+import { flushRefs } from "./ref.js";
 
 export interface HydrateOptions {
   /**
@@ -116,6 +117,8 @@ export function hydrate(
     live = inserted;
     // 清掉认领后可能残留的、未被认领的服务端节点（它们在 startMark 之前）
     pruneBefore(container, startMark);
+    // 认领完成、节点已归位 -> 跑掉这一棵注水子树的 ref 回调（见 ref.ts）
+    flushRefs();
   };
 
   /**

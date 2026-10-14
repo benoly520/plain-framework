@@ -23,6 +23,18 @@ export interface Effect {
 /** owner = 一组清理回调（Set of dispose fn），用于作用域回收 */
 export type Owner = ReadonlySet<() => void>;
 
+/**
+ * ref 回调 —— 命令式 DOM 逃逸口（≈ 平台的 connectedCallback）。
+ * 元素连入文档后调用一次；可返回一个清理函数（≈ disconnectedCallback）。
+ * 类型由标签推导，无需手写泛型。见 docs/rfcs/ref-escape-hatch.md。
+ *
+ * 用「bivariance hack」（同 React 的 EventHandler）：让更窄的元素类型
+ * （如 Ref<HTMLCanvasElement>）可赋给基类型，各 Attributes 接口才能安全收窄 ref。
+ */
+export type Ref<T extends Element = HTMLElement> = {
+  bivarianceHack(el: T): void | (() => void);
+}["bivarianceHack"];
+
 /** 组件返回值 / 插值可接受的任意可渲染值 */
 export type Renderable =
   | Node
@@ -105,6 +117,8 @@ declare global {
       onClick?: (e: MouseEvent) => void;
       onKeyDown?: (e: KeyboardEvent) => void;
       onKeyUp?: (e: KeyboardEvent) => void;
+      /** 命令式 DOM 逃逸口：元素连入文档后调用一次，可返回清理函数 */
+      ref?: Ref;
       children?: any;
       /** 其余 / data-* / aria-* / on* 一律放行 */
       [attr: string]: any;
@@ -133,6 +147,7 @@ declare global {
     }
 
     interface AnchorAttributes extends CommonAttributes {
+      ref?: Ref<HTMLAnchorElement>;
       href?: MaybeGetter<string>;
       target?: string;
       rel?: string;
@@ -140,6 +155,7 @@ declare global {
     }
 
     interface ImageAttributes extends CommonAttributes {
+      ref?: Ref<HTMLImageElement>;
       src?: MaybeGetter<string>;
       alt?: MaybeGetter<string>;
       width?: MaybeGetter<string | number>;
@@ -147,17 +163,32 @@ declare global {
     }
 
     interface FormAttributes extends CommonAttributes {
+      ref?: Ref<HTMLFormElement>;
       action?: MaybeGetter<string>;
       method?: string;
       onSubmit?: (e: SubmitEvent) => void;
     }
 
     interface MediaAttributes extends CommonAttributes {
+      ref?: Ref<HTMLMediaElement>;
       src?: MaybeGetter<string>;
       controls?: MaybeGetter<boolean>;
       autoplay?: MaybeGetter<boolean>;
       loop?: MaybeGetter<boolean>;
       muted?: MaybeGetter<boolean>;
+    }
+
+    /** canvas：ref 推导为 HTMLCanvasElement（getContext 等命令式 API 的入口） */
+    interface CanvasAttributes extends CommonAttributes {
+      ref?: Ref<HTMLCanvasElement>;
+      width?: MaybeGetter<string | number>;
+      height?: MaybeGetter<string | number>;
+    }
+
+    /** dialog：ref 推导为 HTMLDialogElement（showModal / close 的入口） */
+    interface DialogAttributes extends CommonAttributes {
+      ref?: Ref<HTMLDialogElement>;
+      open?: MaybeGetter<boolean>;
     }
 
     interface IntrinsicElements {
@@ -175,7 +206,7 @@ declare global {
       body: CommonAttributes;
       br: CommonAttributes;
       button: CommonAttributes;
-      canvas: CommonAttributes;
+      canvas: CanvasAttributes;
       caption: CommonAttributes;
       cite: CommonAttributes;
       code: CommonAttributes;
@@ -187,7 +218,7 @@ declare global {
       del: CommonAttributes;
       details: CommonAttributes;
       dfn: CommonAttributes;
-      dialog: CommonAttributes;
+      dialog: DialogAttributes;
       div: CommonAttributes;
       dl: CommonAttributes;
       dt: CommonAttributes;
