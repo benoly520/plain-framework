@@ -100,6 +100,10 @@ function Counter() {
 - **不支持属性展开 `{...expr}`**（编译期报错 `PLAIN_E1008`）：展开只做了半套 —— 不进响应式更新，
   且绕过 class / style / value 的正确属性路径，会静默跑错。与 `PLAIN_E1005` 同一条理由：
   **不做静默降级**，宁可在编译期挡住。
+- **命令式 DOM 用 `ref={(el) => …}`**（内建元素专用）：元素连入文档后回调一次
+  （≈ 平台的 `connectedCallback`），返回的清理函数随元素回收。组件上写 `ref` 报 `PLAIN_E1009`。
+  只提供「回调」一种形态，不引入 `.current` box / Signal 形态（SPEC 原则 6：稳定小核心）——
+  取舍与验收见 [`docs/rfcs/ref-escape-hatch.md`](docs/rfcs/ref-escape-hatch.md)。
 
 ---
 
@@ -137,7 +141,7 @@ const loadUser = server((id) => db.users.find(id)); // 只跑在服务端
 > 3 已实现 10 条 lint 规则并**默认接入构建链路**（构建即失败），另有编译器侧的语义校验
 > `PLAIN_E1005`（key/index 冲突）、`PLAIN_E1006`（`server()` 引用外部变量）、
 > `PLAIN_E1007`（`server()` 的参数 / 返回值无法 JSON 序列化）。
-> 反模式目录 13 条均有静态检查；看不出的标识符不猜（见 `AGENTS.md`）。
+> 反模式目录 18 条均有静态检查；看不出的标识符不猜（见 `AGENTS.md`）。
 
 ---
 

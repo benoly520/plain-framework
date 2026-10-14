@@ -209,7 +209,33 @@ function Card(props) {
 
 // 6. 事件
 <button onClick={(e) => submit(e)}>提交</button>
+
+// 7. 命令式逃逸口：拿到这个元素（内建元素专用）
+<canvas ref={(el) => { el.getContext("2d"); }} />
 ```
+
+### 命令式逃逸口 `ref`
+
+组件体拿不到自己创建的 DOM 节点。需要命令式操作（`dialog.showModal()` / `canvas.getContext()` /
+`video.play()` / 第三方库要节点）时，在**内建元素**上用 `ref={(el) => …}`：
+
+```tsx
+<canvas ref={(el) => {            // el 类型由标签推导：HTMLCanvasElement
+  const ctx = el.getContext("2d");
+  draw(ctx);
+  return () => { /* 元素回收时清理（可选） */ };
+}} />
+```
+
+- **调用时机**：元素**连入文档之后**调用一次（≈ 平台的 `connectedCallback`）—— 所以
+  `showModal()` 这类「必须在文档里才能调」的 API 可以放心用。
+- **返回值**：可选清理函数，随该元素 / 组件回收（≈ `disconnectedCallback`）。
+- **作用域**：回调在该元素的 owner 作用域内执行；**要用这个节点的响应式逻辑就写进回调里**
+  （组件体的语句先于 DOM 构建执行，那时节点还不存在）。
+- **只放内建元素上**：组件上写 `ref` 会编译报错（组件不保证有根节点）。
+- SSR 期间不执行；注水后执行一次。
+
+取舍与验收见 [`docs/rfcs/ref-escape-hatch.md`](docs/rfcs/ref-escape-hatch.md)。
 
 ### 不支持 —— 会**在编译期报错并给出行号**
 
@@ -244,6 +270,9 @@ function Card(props) {
 | `PLAIN_E1006` | `server()` 的函数体引用了外部变量（闭包不会跟到服务端） |
 | `PLAIN_E1007` | `server()` 的调用参数 / 返回值无法 JSON 序列化（函数 / 类实例 / Stream） |
 | `PLAIN_E1008` | JSX 属性展开 `{...expr}`（只做了半套支持，会静默跑错） |
+| `PLAIN_E1009` | `ref` 用在组件上（组件没有稳定根节点） |
+| `PLAIN_E1010` | `ref` 的值不是函数（应为 `ref={(el) => …}`） |
+| `PLAIN_E1011` | `ref` 回调不能是 `async`（清理与异步不兼容） |
 | `PLAIN_E2001` | 契约检查未通过（由构建链路抛出，`plaindev check --fix` 可自动修） |
 
 **契约检查默认接在构建链路里**（`plainPlugin({ lint: "warn" | false })` 可调），
@@ -460,17 +489,19 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ CLI：check / schema / dev / build / serve
 - ✅ TypeScript 类型（含 JSX 类型，`tsc --noEmit` 通过）
 - ✅ 列表 keyed 复用（`key={...}`）：头部插入 / 重排不重建已有节点
+- ✅ **命令式 DOM 逃逸口** `ref={(el) => …}`：元素连入文档后回调（≈ `connectedCallback`）、
+  可返回清理函数、列表 / 分支回收正确、SSR 跳过、注水后执行；`PLAIN_E1009`–`E1011` 编译期拦截
 - ✅ 结构化编译错误（`PLAIN_E100x` + 文件/行列/hint，可 JSON 序列化）
 - ✅ `server()` 自包含校验（`PLAIN_E1006`）：引用了外部变量在**编译期**报错，不再等运行时 `ReferenceError`
 - ✅ `server()` 参数与返回值可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
 - ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
 - ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
-- ✅ `AGENTS.md` + 反模式目录（13 条均有静态检查；看不出类型的不猜）
+- ✅ `AGENTS.md` + 反模式目录（18 条均有静态检查；看不出类型的不猜）
 - ✅ AI 可发现性：`plaindev agent-context [--write]` 把规则落盘成跨工具标准 `AGENTS.md`
   （外加 `.github/copilot-instructions.md` 与 `.cursor/rules/*.mdc` 兜底，已有文件不覆盖）；
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；确认误报可用行级抑制指令
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 156 项（内核 19 + 单元 137）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 218 项（内核 19 + 单元 199）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -498,7 +529,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 137 项
+pnpm test              # 构建 + 内核 19 项 + 单元 199 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -506,7 +537,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（160+ 项，`node:test`）：
+- `test/*.test.mjs`（199 项，`node:test`）：
   `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
   `errors` 统一错误码目录（唯一性 / lint 产出码都在表里 / 新旧抑制名都命中）、
   `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
@@ -515,6 +546,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
   `server`（静态托管 / 目录穿越 / RPC / 一行起服）、
   `testing`（`plain/testing` 自己的单测 + 真编译 TSX 的端到端）、
   `keyed` 列表复用语义、`PLAIN_E1005` / `PLAIN_E1006` / `PLAIN_E1007`（参数与返回值）的诊断与不误报、
+  `ref` 命令式逃逸口（编译正反例 + 连接 / 清理 / 列表 / 条件 / SSR 跳过 / 注水）、
   `eval` 上下文档位、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
   路由跳转、详情参数、`server()` 往返、404、ErrorBoundary 降级与重试，以及**控制台零报错**。
@@ -582,18 +614,18 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
-| 语句 | 90% | 92.2% |
-| 分支 | 82% | 87.5% |
+| 语句 | 90% | 92.9% |
+| 分支 | 82% | 86.3% |
 | 函数 | 85% | 90.8% |
-| 行 | 90% | 92.2% |
+| 行 | 90% | 92.9% |
 
-> 唯一明显偏低的是 `src/cli`（约 69%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
-> 目前只在示例端到端里被间接验证。
+> 覆盖率最低的是 `src/cli/index.ts`（约 77%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
+> 目前只在示例端到端里被间接验证（`src/cli` 目录整体约 87%）。
 
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 137 / fail 0   # 单元
+# pass 199 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23

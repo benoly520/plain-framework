@@ -403,3 +403,67 @@ Plain 的取舍是：**少一个概念，就少一类错误**。
 ```tsx
 <input value={email()} onInput={(e) => email.set(e.target.value)} />
 ```
+
+---
+
+## 9. 命令式 DOM（弹窗 / 画布 / 第三方库）
+
+Plain 组件是纯函数，函数体默认拿不到自己创建的节点。需要**命令式操作**时，在内建元素上写
+`ref={(el) => { … }}`：元素**连入文档之后**回调一次，返回的清理函数随元素回收。
+
+**唯一推荐写法：要用这个节点的逻辑，就写进 `ref` 回调里。**
+
+### 9.1 画布 / 第三方库（在回调里建实例，用返回值保证不泄漏）
+
+```tsx
+<canvas ref={(el) => {
+  const ctx = el.getContext("2d")!;
+  draw(ctx);
+}} />
+
+<div ref={(el) => {
+  const editor = monaco.editor.create(el, { value: resolve(props.value) });
+  return () => editor.dispose();   // 元素回收时销毁实例
+}} />
+```
+
+### 9.2 弹窗：用平台的 `<dialog>`，不要自己造 Portal
+
+`<dialog>` 自带顶层渲染 / 焦点陷阱 / Esc / `::backdrop` —— 不需要框架再发明一个 Portal。
+
+```tsx
+let dlg: HTMLDialogElement | undefined;
+
+<dialog ref={(el) => {
+  dlg = el;
+  // 依赖这个节点的响应式逻辑，写在 ref 回调里（此时 el 已连入文档）
+  effect(() => {
+    if (open() && !el.open) el.showModal();      // 注意两个 guard：
+    else if (!open() && el.open) el.close();     // 重复 showModal / close 会抛错
+  });
+}}>
+  <p>确定吗？</p>
+  <button onClick={() => open.set(false)}>关闭</button>
+</dialog>
+```
+
+要点：
+- **`showModal()` 必须在元素连入文档后调用** —— 这正是 `ref` 回调的时机（游离节点上会抛
+  `InvalidStateError`）；所以**不要**把 `effect` 写在组件体里（那时节点还不存在）；
+- 浮层 / 菜单 / tooltip 用平台的 `popover` + `popovertarget`，**零框架支持**；
+- 组件上不能写 `ref`（`PLAIN_E1009`）—— 要给组件传节点回调，用显式 props。
+
+### 9.3 程序化焦点 / 滚动
+
+```tsx
+<input ref={(el) => { effect(() => { if (focusIt()) el.focus(); }); }} />
+```
+
+### 9.4 别写
+
+| 别写 | 该写 |
+| --- | --- |
+| 在组件体里写依赖节点的 `effect`（那时节点还不存在） | 把 `effect` 写进 `ref` 回调 |
+| `ref` 回调里返回 JSX（如 `ref={(el) => <div/>}`） | 回调只做命令式操作，可返回清理函数 |
+| 组件上 `ref`（`PLAIN_E1009`） | 把 `ref` 放到组件内部的元素上 |
+| 自己 `document.body.appendChild` 造 Portal | 平台的 `<dialog>` / `popover` |

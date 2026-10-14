@@ -41,6 +41,9 @@
 | 13 | `computed(() => { s.set(…) })` | `computed` 必须是纯函数，副作用放 `effect` | ✅ `PLAIN_E1111` | — |
 | 14 | `resolve(props.onClick)`（`on*` 事件 prop 不能 resolve） | `props.onClick(...)`：编译器不给 `on*` 包 getter，传进来的就是函数，`resolve` 会把它当场调用 | ✅ `PLAIN_E1108`（可自动修） | — |
 | 15 | JSX 属性展开 `{...expr}` | 展开成显式属性：展开只做半套（不进响应式 + 绕过 class / style / value），会静默跑错 | ✅ `PLAIN_E1008` | — |
+| 16 | 在**组件**上写 `ref` | 把 `ref` 放到组件内部的元素上 | ✅ `PLAIN_E1009` | — |
+| 17 | `ref` 的值不是函数（`ref` / `ref="x"` / 返回 JSX） | `ref={(el) => { … }}` | ✅ `PLAIN_E1010` | — |
+| 18 | `ref={async (el) => …}` | 把 `await` 提到回调外 | ✅ `PLAIN_E1011` | — |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
 > **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
@@ -61,6 +64,11 @@
 > 第二轮收敛，不报）；回调定义在别处（`effect(load)`）看不出是不是 async / 纯的，也不猜。
 > 已知边界：表达式形式的自我收敛写法（`count.set(Math.min(count() + 1, 10))`）看不出闸门，
 > 会被报成死循环 —— 确认是规则判断错了，用第 4.1 节的抑制指令，不要绕开规则。
+>
+> 关于第 16–18 条：`ref`（**只能放内建元素上**）是命令式 DOM 逃逸口 —— 元素**连入文档后**回调一次
+> （≈ 平台的 `connectedCallback`），返回的清理函数随元素回收。**要用这个节点的响应式逻辑，就写进
+> 回调里**（组件体的语句先于 DOM 构建执行，那时节点还不存在）。弹窗 / 画布 / 第三方库的配方见
+> [`docs/patterns.md`](docs/patterns.md)，取舍见 [`docs/rfcs/ref-escape-hatch.md`](docs/rfcs/ref-escape-hatch.md)。
 
 ## 4. 错误码
 
@@ -77,6 +85,9 @@
 | `PLAIN_E1006` | `server()` 的函数体引用了外部变量 | 在函数体内自己获取，或改成参数传入（闭包不会跟到服务端） |
 | `PLAIN_E1007` | `server()` 的调用参数无法 JSON 序列化 | 只传数据；把函数 / 校验逻辑写进 `server()` 函数体 |
 | `PLAIN_E1008` | JSX 属性展开 `{...expr}` | 展开成显式属性（展开只做半套，会静默跑错） |
+| `PLAIN_E1009` | `ref` 用在组件上 | 把 `ref` 放到组件内部的元素上 |
+| `PLAIN_E1010` | `ref` 的值不是函数 | 写成 `ref={(el) => { … }}`（可返回清理函数） |
+| `PLAIN_E1011` | `ref` 回调是 `async` | 把 `await` 提到回调外（清理与异步不兼容） |
 | `PLAIN_E1101` | 直接给 signal 变量赋值 | 改成 `.set(…)`（可自动修） |
 | `PLAIN_E1102` | JSX 里把 signal 当值用 | 补上调用 `()`（可自动修） |
 | `PLAIN_E1103` | React 肌肉记忆（`useState` 等） | 换 `signal` / `effect` / `computed` |
@@ -134,7 +145,7 @@ npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE �
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/runtime/` | signal / dom / async / router / error / hydrate / hmr —— 运行时（**对外 API 面冻结**） |
+| `src/runtime/` | signal / dom / ref / async / router / error / hydrate / hmr —— 运行时（**对外 API 面冻结**；`ref.ts` 是命令式逃逸口的运行时支撑） |
 | `src/runtime/hydrate.ts` | SSR 注水：认领式 document 复用服务端节点（`claim-document.ts` / `hydration-context.ts` 为内核） |
 | `src/runtime/hmr.ts` | HMR 挂载点注册表与热替换（`hmrApply` / 模块级 signal 快照） |
 | `src/compiler/` | TSX → 建 DOM 代码、服务端清单、契约提取、sourcemap |
@@ -145,7 +156,8 @@ npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE �
 | `src/cli/` | `plaindev` |
 | `test/` | 测试（跑的是 `dist/`，不是 `src/`） |
 | `eval/` | AI 正确率评测：任务 + 验收断言 + 指标 |
-| `docs/patterns.md` | 常见场景（表单 / 异步提交 / 列表内表单 / 校验）的**唯一推荐写法** |
+| `docs/patterns.md` | 常见场景（表单 / 异步提交 / 列表内表单 / 校验 / 命令式 DOM）的**唯一推荐写法** |
+| `docs/rfcs/` | 设计提案（如 `ref-escape-hatch.md`），评审后进 `SPEC.md` |
 
 ## 7. 改动约束
 
