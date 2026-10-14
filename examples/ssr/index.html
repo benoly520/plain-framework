@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plain SSR 示例</title>
+    <link rel="icon" href="data:," />
+    <!--
+      SSR 页面的模板。两个占位注释缺一不可，也**不能出现两次**（注入点不明确就直接报错，
+      不会静默出一张没数据的页面）：
+        plain-ssr   —— 应用渲染出的 HTML 插在这里（该写在承载容器**里面**，见下面的 #app）
+        plain-data  —— 首屏数据载荷的 script 插在这里（该在容器**外面**）
+      这份模板会被 vite 处理（script 换成带 hash 的产物），占位注释会保留下来。
+    -->
+    <!--plain-data-->
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --card: #fff;
+        --fg: #14181f;
+        --muted: #5b6270;
+        --border: #e3e7ee;
+        --accent: #2563eb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.65;
+        font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+      }
+      .app {
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 32px 20px 80px;
+      }
+      .topbar {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 22px;
+      }
+      .brand { font-size: 20px; font-weight: 700; color: var(--fg); text-decoration: none; }
+      main {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px 22px;
+        margin-bottom: 18px;
+      }
+      h1 { font-size: 19px; margin: 0 0 8px; }
+      h2 { font-size: 17px; margin: 0 0 8px; }
+      .muted { color: var(--muted); font-size: 14px; }
+      .ok { color: #16a34a; font-weight: 600; margin: 0; }
+      .todos { list-style: none; padding: 0; margin: 14px 0 0; }
+      .todos li { padding: 9px 0; border-bottom: 1px solid var(--border); }
+      .todos li:last-child { border-bottom: 0; }
+      .todos li.done a { color: var(--muted); text-decoration: line-through; }
+      .todos a { color: var(--accent); text-decoration: none; }
+      .back { color: var(--accent); text-decoration: none; font-size: 14px; }
+      .foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .btn {
+        background: var(--accent);
+        color: #fff;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 14px;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"><!--plain-ssr--></div>
+    <script type="module" src="./entry-client.tsx"></script>
+  </body>
+</html>

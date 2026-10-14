@@ -22,6 +22,11 @@ export interface SSRStore {
   pending: Set<Promise<unknown>>;
   /** 本次渲染的数据收集槽，**按创建序**（服务端序列化用） */
   slots: SSRSlot[];
+  /**
+   * 本次请求的路径（如 `/todo/3`）。服务端没有 `window`，router 靠它才知道
+   * 「这次要渲染哪一页」—— 否则 SSR 只能渲染 `/`（多路由就白做了）。
+   */
+  url?: string | null;
 }
 
 /** 一个 resource 在本次渲染里的收集槽 */
@@ -33,19 +38,46 @@ export interface SSRSlot {
   value?: unknown;
 }
 
-let readStore: (() => SSRStore | null) | null = null;
+/**
+ * 「读当前渲染上下文」的钩子放在**进程级共享槽**上，而不是模块局部变量。
+ *
+ * 原因很实际：SSR 构建如果把框架运行时**打包进产物**（alias / `ssr.noExternal` /
+ * 依赖树里出现两份），进程里就会有两个 runtime 副本 —— 模块局部的钩子跨不过去，
+ * 应用那一份会以为「不在 SSR」，`server()` 于是退回 HTTP（或报「没注入 handlers」）。
+ * 这种失败极难查。共享一个槽位，两份副本就认同一份上下文。
+ *
+ * 只影响服务端进程；浏览器里这个槽位永远是空的（`isSSR()` 恒为 false ✓）。
+ */
+const SHARED_KEY = "__plainSSRContext";
+
+interface SharedSlot {
+  read: (() => SSRStore | null) | null;
+}
+
+function sharedSlot(): SharedSlot {
+  const g = globalThis as any;
+  if (!g[SHARED_KEY]) {
+    Object.defineProperty(g, SHARED_KEY, {
+      value: { read: null } as SharedSlot,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return g[SHARED_KEY] as SharedSlot;
+}
 
 /**
  * 注册「读当前渲染上下文」的实现；由服务端在初始化时调用一次。
  * 不注册 = 不在 SSR 里（浏览器 / 纯 CSR）。
  */
 export function __setSSRStoreReader(reader: (() => SSRStore | null) | null): void {
-  readStore = reader;
+  sharedSlot().read = reader;
 }
 
 /** 当前渲染上下文；不在 SSR 期间返回 null */
 export function getSSRStore(): SSRStore | null {
-  return readStore ? readStore() : null;
+  const read = sharedSlot().read;
+  return read ? read() : null;
 }
 
 /** 是否处于 SSR 期间 */

@@ -37,7 +37,9 @@ function ensureReady(): void {
  */
 export function runSSR<T>(
   handlers: Record<string, (...args: any[]) => any> | null,
-  fn: (store: SSRRenderStore) => T
+  fn: (store: SSRRenderStore) => T,
+  /** 本次请求的路径（router 在服务端靠它知道该渲染哪一页） */
+  url: string | null = null
 ): T {
   ensureReady();
   const store: SSRRenderStore = {
@@ -45,6 +47,7 @@ export function runSSR<T>(
     handlers,
     pending: new Set(),
     slots: [],
+    url,
   };
   return als.run(store, () => fn(store));
 }

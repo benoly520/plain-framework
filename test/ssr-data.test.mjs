@@ -24,6 +24,7 @@ import {
 } from "../dist/server/render.js";
 import { hydrate } from "../dist/runtime/index.js";
 import { getSSRStore } from "../dist/runtime/ssr-context.js";
+import { ssrMiddleware, SSR_SLOT, DATA_SLOT } from "../dist/server/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -52,7 +53,7 @@ async function loadModule(tsx, name) {
     // eslint-disable-next-line no-new-func
     handlers[fn.name] = new Function(`return (${fn.body});`)();
   }
-  return { mod, handlers };
+  return { mod, handlers, code, serverFunctions: out.serverFunctions };
 }
 
 /** 断言 SSR 期间**一次 fetch 都没发** —— 直调走的是同进程 handler */
@@ -524,4 +525,143 @@ test("页面载荷坏掉时明确告警，而不是静默退化成全量请求",
       "应指出载荷坏了：" + JSON.stringify(warnings)
     );
   });
+});
+
+// ---------------------------------------------------------------------------
+// 阶段三：ssrMiddleware —— 把「首屏有数据」接成一条链
+//   模板占位符 -> renderToStringWithData(handlers, url) -> HTML + 载荷写进页面
+// ---------------------------------------------------------------------------
+
+function fakeRes() {
+  const res = {
+    statusCode: 200,
+    headers: {},
+    setHeader(k, v) {
+      this.headers[k.toLowerCase()] = v;
+    },
+    end(body) {
+      this.body = body;
+      this._done();
+    },
+  };
+  res.done = new Promise((r) => {
+    res._done = r;
+  });
+  return res;
+}
+
+async function callSsr(mw, url, method = "GET") {
+  const res = fakeRes();
+  let nexted = false;
+  mw({ method, url }, res, () => {
+    nexted = true;
+    res._done();
+  });
+  await res.done;
+  return { res, nexted };
+}
+
+/**
+ * 造一份临时「SSR 项目」：SSR 入口（真实编译产物）+ 服务端清单 + 页面模板。
+ * 入口与客户端编译同一份源码 -> 调用点 key 天然一致（真实项目里靠 keyBase 保证）。
+ */
+async function makeSsr(template) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plain-ssr-mw-"));
+  const { code, serverFunctions } = await loadModule(
+    `
+    import { resource, server, createRouter } from "plain";
+    const getTodo = server(async (id) => ({ id, text: "todo-" + id }));
+    const getRaw = server(async () => ({ text: "</script><img src=x onerror=alert(1)>" }));
+    function Detail(props) {
+      const r = resource(() => getTodo(props.params.id));
+      return <p>{r.data() ? r.data().text : "…"}</p>;
+    }
+    function Raw() {
+      const r = resource(() => getRaw());
+      return <p>{r.data() ? r.data().text : "…"}</p>;
+    }
+    function Home() { return <p>home</p>; }
+    const router = createRouter({ routes: [
+      { path: "/", component: Home },
+      { path: "/raw", component: Raw },
+      { path: "/todo/:id", component: Detail },
+    ]});
+    export function App() {
+      const m = router.current();
+      return <div>{m.route ? m.route.component({ params: m.params, path: m.path }) : null}</div>;
+    }
+    `,
+    "ssr-mw"
+  );
+  fs.writeFileSync(path.join(dir, "entry-server.mjs"), code);
+  fs.writeFileSync(
+    path.join(dir, "server.mjs"),
+    `export const __plainHandlers = { ${serverFunctions
+      .map((f) => `${f.name}: ${f.body}`)
+      .join(", ")} };`
+  );
+  fs.writeFileSync(
+    path.join(dir, "index.html"),
+    template ?? `<!doctype html><html><head>${DATA_SLOT}</head><body><div id="app">${SSR_SLOT}</div></body></html>`
+  );
+  return ssrMiddleware({
+    template: path.join(dir, "index.html"),
+    entry: path.join(dir, "entry-server.mjs"),
+    manifest: path.join(dir, "server.mjs"),
+  });
+}
+
+test("ssrMiddleware：模板注入 + 首屏数据 + **按请求 URL 渲染对应路由**", async () => {
+  const mw = await makeSsr();
+
+  const home = await callSsr(mw, "/");
+  assert.equal(home.res.statusCode, 200);
+  assert.match(home.res.headers["content-type"], /text\/html/);
+  assert.match(home.res.body, /<p>home<\/p>/);
+  assert.match(home.res.body, /id="plain-data"/, "载荷要写进页面");
+
+  // 关键：服务端没有 window，router 靠注入的请求 URL 才知道渲染哪一页
+  const todo = await callSsr(mw, "/todo/7");
+  assert.match(todo.res.body, /todo-7/, "应按请求 URL 渲染对应路由（否则 SSR 只有首页）");
+  assert.match(
+    todo.res.body,
+    /"value":\{"id":"7","text":"todo-7"\}/,
+    "载荷里应是这次请求的数据：" + todo.res.body
+  );
+  assert.ok(!todo.res.body.includes("home"), "不该把首页内容也渲染进去");
+});
+
+test("ssrMiddleware：载荷里的 </script> 会被转义（数据不能逃出 script 标签）", async () => {
+  const mw = await makeSsr();
+  const { res } = await callSsr(mw, "/raw");
+  assert.ok(
+    !res.body.includes("</script><img"),
+    "数据里的 </script> 必须被转义，否则就是注入：" + res.body
+  );
+  assert.match(res.body, /\\u003c\/script>/, "应转义成 \\u003c");
+});
+
+test("ssrMiddleware：模板缺占位符 -> 500 并指明缺哪个（不静默出无数据的页面）", async () => {
+  const mw = await makeSsr(`<!doctype html><div id="app">${SSR_SLOT}</div>`);
+  const { res } = await callSsr(mw, "/");
+  assert.equal(res.statusCode, 500);
+  assert.match(res.body, /plain-data/, "应点名缺的占位符：" + res.body);
+});
+
+test("ssrMiddleware：静态资源与非 GET 一律放行（交给后面的中间件）", async () => {
+  const mw = await makeSsr();
+  assert.equal((await callSsr(mw, "/assets/app.js")).nexted, true, "带扩展名 -> 放行");
+  assert.equal((await callSsr(mw, "/", "POST")).nexted, true, "非 GET -> 放行");
+});
+
+test("ssrMiddleware：占位符出现两次 -> 报错（注入点不明确，绝不挑第一处）", async () => {
+  // 真实踩过的坑：把占位符写进另一段注释里，于是 HTML 被插到了看不见的地方
+  const template =
+    `<!doctype html><html><head>${DATA_SLOT}` +
+    `<!-- 说明里又写了一次 ${SSR_SLOT} --></head>` +
+    `<body><div id="app">${SSR_SLOT}</div></body></html>`;
+  const mw = await makeSsr(template);
+  const { res } = await callSsr(mw, "/");
+  assert.equal(res.statusCode, 500);
+  assert.match(res.body, /2 次/, "应说明出现了几次：" + res.body);
 });

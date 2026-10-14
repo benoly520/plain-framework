@@ -30,6 +30,29 @@
 
 ### 新增
 
+- **SSR 数据预取（阶段三：`ssrMiddleware` + SSR 示例）**：把前两个阶段接成一条能投产的链。
+  - **`ssrMiddleware({ template, entry, manifest })`**（`plain/server`，Node 标准 `(req,res,next)`，与
+    `rpcMiddleware` 同形状）：`renderToStringWithData(App, { handlers, url })` -> 把应用 HTML 写进模板的
+    `<!--plain-ssr-->`、把首屏载荷写进 `<!--plain-data-->`。载荷以
+    `<script type="application/json" id="plain-data">` 输出并**转义 `<`**（数据里出现 `</script>`
+    不能逃出标签）。模板占位符**缺了或出现多次都报错**（后者：注入点不明确时静默挑第一处 =
+    把 HTML 插到看不见的地方 —— 这是我自己写示例时踩到的坑）。只接手「看起来像页面导航」的 GET。
+  - **`serve({ ssr: {...} })`**：一行起「SSR + 静态托管 + RPC」，顺序是
+    RPC -> SSR -> 静态/SPA 兜底（SSR 必须在 SPA 兜底之前，否则页面导航全被吞成 index.html）。
+  - **`renderToString` / `renderToStringSync` 新增 `url` 选项**，配合下面这条：
+    **router 现在支持服务端按请求 URL 渲染**（服务端没有 `window`）。顺带修掉一个真缺陷：
+    路由匹配原来是 `computed`（有缓存），而服务端路径来自每次渲染的上下文，
+    **第二个请求会复用第一个请求的匹配结果** —— 改成每次直接算（匹配本身很便宜）。
+  - **跨运行时副本共享 SSR 上下文**：`getSSRStore()` 的钩子挂在进程级共享槽上。
+    SSR 构建若把框架运行时**打包进产物**（alias / `ssr.noExternal` / 依赖树里两份），
+    进程里就有两个 runtime 副本 —— 模块局部的钩子跨不过去，应用那份会以为「不在 SSR」而
+    退回 HTTP（或报「没注入 handlers」），极难查。浏览器里这个槽位永远是空的。
+  - **示例 `examples/ssr/`**：同一份 `app.tsx` 服务端直出 HTML（首屏就有数据）+ 客户端注水接管；
+    `pnpm run build:example:ssr` 构建（客户端 + SSR 两份产物），`pnpm run start:example:ssr` 起服务。
+    实测 `/todo/2` 的 HTML 里直接带 `让注水不重复取数据`，载荷为
+    `[{"key":"app.tsx:34#1","ok":true,"value":{...}}]`（key 可读、无绝对路径泄漏）。
+  - 测试 `test/ssr-data.test.mjs` 新增 5 项：模板注入 + **按请求 URL 渲染对应路由** /
+    载荷里的 `</script>` 被转义 / 模板缺占位符 -> 500 / 占位符重复 -> 500 / 静态资源与非 GET 放行。
 - **SSR 数据预取（阶段二：首屏数据随 HTML 迁移）**：阶段一让首屏「有数据」，阶段二让注水
   「**不重复取、不闪一下**」。设计见 [`docs/rfcs/ssr-data.md`](docs/rfcs/ssr-data.md) §3.3。
   - **编译器注入调用点 key**：`resource(fn)` -> `resource(fn, undefined, "src/App.tsx:31#0")`。

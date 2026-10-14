@@ -30,6 +30,11 @@ export interface RenderOptions {
    * 不注入却在 SSR 里调 `server()` -> 明确报错，不静默去 fetch 自己。
    */
   handlers?: Record<string, (...args: any[]) => any> | null;
+  /**
+   * 本次请求的路径（如 `/todo/3`）。
+   * 服务端没有 `window`，router 靠它才知道这次该渲染哪一页 —— 不传就只渲染 `/`。
+   */
+  url?: string;
 }
 
 export interface RenderResult {
@@ -58,38 +63,42 @@ export async function renderToStringWithData(
   component: (() => any) | any,
   options: RenderOptions = {}
 ): Promise<RenderResult> {
-  const { wait = 0, container = true, handlers = null } = options || {};
+  const { wait = 0, container = true, handlers = null, url = null } = options || {};
   // 整个渲染（含下面的 await）都在**本次渲染自己的**作用域里跑 —— 并发安全
-  return runSSR(handlers, async (store) => {
-    const doc = store.doc;
-    // 在独立作用域里渲染：SSR 期间创建的 effect（insert/when/each/组件）会在
-    // 序列化完成后被整体回收。否则它们会继续订阅全局 signal —— 同一进程里随后
-    // 做 hydrate 时，点击等更新会同时触发「SSR 残留 effect（锚点是服务端垫片节点）
-    // + hydrate effect（锚点是真实 DOM 节点）」，导致在 shim 节点上做 DOM 操作而报错。
-    const scope = createScope(() => {
-      const root = doc.createElement(container ? "div" : "div");
-      const node = typeof component === "function" ? component() : component;
-      if (node) root.appendChild(node);
-      return root;
-    });
-    try {
-      await settleResources();
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      const html = scope.value.childNodes.map(serializeNode).join("");
-      return {
-        html: container ? `<div>${html}</div>` : html,
-        // 「没拿到值」也要带上（ok:false）：客户端按创建序消费，
-        // 少一条就会让同 key 的后续实例错位配对。
-        data: store.slots.map((s) =>
-          s.settled
-            ? { key: s.key, ok: true, value: s.value }
-            : { key: s.key, ok: false }
-        ),
-      };
-    } finally {
-      scope.dispose();
-    }
-  });
+  return runSSR(
+    handlers,
+    async (store) => {
+      const doc = store.doc;
+      // 在独立作用域里渲染：SSR 期间创建的 effect（insert/when/each/组件）会在
+      // 序列化完成后被整体回收。否则它们会继续订阅全局 signal —— 同一进程里随后
+      // 做 hydrate 时，点击等更新会同时触发「SSR 残留 effect（锚点是服务端垫片节点）
+      // + hydrate effect（锚点是真实 DOM 节点）」，导致在 shim 节点上做 DOM 操作而报错。
+      const scope = createScope(() => {
+        const root = doc.createElement(container ? "div" : "div");
+        const node = typeof component === "function" ? component() : component;
+        if (node) root.appendChild(node);
+        return root;
+      });
+      try {
+        await settleResources();
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        const html = scope.value.childNodes.map(serializeNode).join("");
+        return {
+          html: container ? `<div>${html}</div>` : html,
+          // 「没拿到值」也要带上（ok:false）：客户端按创建序消费，
+          // 少一条就会让同 key 的后续实例错位配对。
+          data: store.slots.map((s) =>
+            s.settled
+              ? { key: s.key, ok: true, value: s.value }
+              : { key: s.key, ok: false }
+          ),
+        };
+      } finally {
+        scope.dispose();
+      }
+    },
+    url ?? null
+  );
 }
 
 /** 只要 HTML 的便捷入口（= `renderToStringWithData(...).html`） */
@@ -122,18 +131,26 @@ async function settleResources(): Promise<void> {
 /** 同步版本：不含异步资源（resource 会停在 loading 态） */
 export function renderToStringSync(
   component: (() => any) | any,
-  options: { handlers?: Record<string, (...args: any[]) => any> | null } = {}
+  options: {
+    handlers?: Record<string, (...args: any[]) => any> | null;
+    /** 本次请求的路径（router 在服务端靠它知道该渲染哪一页） */
+    url?: string;
+  } = {}
 ): string {
   // 同样在自己的作用域里跑：SSR 里调 server() 一律直调，绝不尝试 fetch 自己
-  return runSSR(options.handlers ?? null, () => {
-    const scope = createScope(() => {
-      const node = typeof component === "function" ? component() : component;
-      return node;
-    });
-    try {
-      return serializeNode(scope.value);
-    } finally {
-      scope.dispose();
-    }
-  });
+  return runSSR(
+    options.handlers ?? null,
+    () => {
+      const scope = createScope(() => {
+        const node = typeof component === "function" ? component() : component;
+        return node;
+      });
+      try {
+        return serializeNode(scope.value);
+      } finally {
+        scope.dispose();
+      }
+    },
+    options.url ?? null
+  );
 }
