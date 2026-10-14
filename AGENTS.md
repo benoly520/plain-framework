@@ -148,6 +148,7 @@ pnpm run coverage           # 覆盖率；低于 .c8rc.json 门槛会失败
 pnpm run check              # 对 src 跑契约检查（默认自动修）
 npx plaindev check <dir>    # 对任意目录跑契约检查
 npx plaindev schema <dir>   # 产出机器可读的组件 / server / 路由契约 JSON
+                            # 组件 props 以它**声明的类型**为准（propsSource 标注来源）
 npx plaindev agent-context  # 打印本文件里「给 AI 的部分」
                             # --write 落盘 AGENTS.md / copilot / cursor（已存在的文件不覆盖）
 npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE 可直接调

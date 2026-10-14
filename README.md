@@ -457,12 +457,29 @@ src/Counter.tsx
 {
   "file": "main.tsx",
   "components": [
-    { "name": "TodoView", "props": [{ "name": "todo", "optional": false }], "renders": ["div", "p", "button"] }
+    {
+      "name": "TodoView",
+      "props": [{ "name": "todo", "optional": false, "type": "Todo" }],
+      "propsSource": "declared",
+      "renders": ["div", "p", "button"]
+    }
   ],
   "serverFunctions": [{ "name": "fetchStats", "params": [], "async": true }],
   "routes": [{ "path": "/todo/:id", "component": "Detail" }]
 }
 ```
+
+`props` 的事实来源是**组件自己声明的类型**（`props: CardProps`），不是猜：
+
+- `propsSource: "declared"` —— 按声明的类型解析：`optional` 来自 `?`、`type` 来自注解；
+- `propsSource: "declared-unresolved"` —— 声明了类型但解析不了（跨文件、`Pick<…>` 之类的工具类型），
+  此时附带 `declaredType` 并退回推断结果，**不假装解析成功**；
+- `propsSource: "inferred"` —— 组件没写类型注解，退回「读了什么 + 同文件调用点传了什么」的旧推断；
+- 声明与推断不一致时额外给出 `inferredProps`，AI 能一眼看出「猜」错在哪。
+
+> 「少传 / 多传 prop」这类错**不靠 schema 校验** —— Plain 用 TS，且 JSX 类型是收紧的，
+> `tsc` 在编译期就报（见 `test/types.test.mjs`）。schema 的价值是给 AI 一份**不用通读代码**的契约，
+> 而不是再造一个类型检查器。
 
 Agent 拿到这份 JSON 就知道「这个文件里能改什么、有哪些跨端调用」，不用先通读全文 ——
 这是减少推理量的关键一步。
@@ -512,6 +529,8 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ **JSX 类型收紧**：内建元素去掉 `[attr: string]: any` —— 属性名拼错 / 类型写错（`scr` /
   `checked="yes"` / `onClikc`）在编辑器与 `tsc` 下当场报错；`data-*` / `aria-*` 与常用属性、事件一并补全；
   未知标签保持宽松。`test/types.test.mjs` 用真 `tsc` 钉住（防索引签名被加回来）
+- ✅ **契约「声明化」**：`plaindev schema` 的 props 以组件**声明的类型**为准（带 `type` 与 `optional`），
+  解析不了就标 `declared-unresolved` 并退回推断 —— 不假装；「少传 / 多传 prop」交给 `tsc`，不重复造检查器
 - ✅ 结构化编译错误（`PLAIN_E100x` + 文件/行列/hint，可 JSON 序列化）
 - ✅ `server()` 自包含校验（`PLAIN_E1006`）：引用了外部变量在**编译期**报错，不再等运行时 `ReferenceError`
 - ✅ `server()` 参数与返回值可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
@@ -523,7 +542,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；`plaindev lsp` 把**同一条规则链**做成
   **编辑器实时诊断**（写时就报，不必等 dev / build）；确认误报可用行级抑制指令
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 236 项（内核 19 + 单元 217）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 242 项（内核 19 + 单元 223）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -532,7 +551,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 
 | 缺口 | 影响 | 优先级 |
 | --- | --- | --- |
-| **契约从「推断」变「声明」** | `plaindev schema` 的 props 仍是「读了什么 + 同文件调用点传了什么」推断出来的（跨文件会漏、可选性会判错、没有类型）；应以组件**声明的类型**为准，并校验全项目调用点 | P1 |
+| **`dynamic import()` 的 HMR 注册** | 懒加载进来的模块热替换没接上（也是「按路由自动分包」的技术前提） | P1 |
 | **RPC 请求合并 / 防抖** | 高频调用会各发一次请求 | P1 |
 | **多入口 / 代码分割** | 只验证了单入口 | P1 |
 | **并发渲染 / 时间切片** | 没有 | P2 |
@@ -551,7 +570,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 217 项
+pnpm test              # 构建 + 内核 19 项 + 单元 223 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -559,7 +578,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（217 项，`node:test`）：
+- `test/*.test.mjs`（223 项，`node:test`）：
   `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
   `errors` 统一错误码目录（唯一性 / lint 产出码都在表里 / 新旧抑制名都命中）、
   `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
@@ -572,6 +591,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
   `context` 跨层传值（默认值 / 嵌套遮蔽 / 兄弟隔离 / 响应性 / effect 路径 / 回收 / SSR 隔离 / 注水）、
   `lsp` 子命令（Content-Length 分帧 / 诊断往返 / 未知方法）、
   `types`（用真 `tsc` 钉住 JSX 类型收紧：拼错属性名 / 写错类型要报、合法写法不报）、
+  `schema` 的 props 声明化（`type` 别名 / 内联字面量 / `extends` 与 `&` 合并 / 解析不了如实标记）、
   异步资源生命周期与 context getter（`PLAIN_E1113` / `PLAIN_E1114`）、
   `eval` 上下文档位、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
@@ -641,8 +661,8 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
 | 语句 | 90% | 93.5% |
-| 分支 | 82% | 86.2% |
-| 函数 | 85% | 91.5% |
+| 分支 | 82% | 86.1% |
+| 函数 | 85% | 91.6% |
 | 行 | 90% | 93.5% |
 
 > 覆盖率最低的是 `src/cli/index.ts`（约 77%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
@@ -651,7 +671,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 217 / fail 0   # 单元
+# pass 223 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23
