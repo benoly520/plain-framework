@@ -55,7 +55,10 @@ AI 的失败模式不是「写不出」，而是「**自信地写错**」（P1�
 
 - 组件就是一个**普通函数**，返回视图节点（运行时版返回 `DocumentFragment`，编译版返回 DOM 构建指令）。
 - 逻辑与视图**同一作用域**：状态、派生、事件处理都写在组件函数体内，不拆文件、不拆 `<template>`。
-- 没有 `class 组件`、没有 `forwardRef`、没有 `Provider` 包裹层。跨组件共享状态 = 把 `signal` 提升到模块作用域后导入。
+- 没有 `class 组件`、没有 `forwardRef`。跨组件共享**普通**状态 = 把 `signal` 提升到模块作用域后导入；
+  **跨层传值**（主题 / 语言 / 当前用户）用 `createContext` + `<Ctx.Provider>` + `useContext`。
+  注意区分：**请求级**数据（当前用户 / 会话）**必须**走 Context 或 props ——
+  放进模块作用域的 signal 会在 SSR 下跨请求泄漏（见 `docs/rfcs/context-and-ssr-isolation.md`）。
 
 ```js
 function Counter() {
@@ -141,7 +144,7 @@ const loadUser = server((id) => db.users.find(id)); // 只跑在服务端
 > 3 已实现 10 条 lint 规则并**默认接入构建链路**（构建即失败），另有编译器侧的语义校验
 > `PLAIN_E1005`（key/index 冲突）、`PLAIN_E1006`（`server()` 引用外部变量）、
 > `PLAIN_E1007`（`server()` 的参数 / 返回值无法 JSON 序列化）。
-> 反模式目录 19 条均有静态检查；看不出的标识符不猜（见 `AGENTS.md`）。
+> 反模式目录 20 条均有静态检查；看不出的标识符不猜（见 `AGENTS.md`）。
 
 ---
 

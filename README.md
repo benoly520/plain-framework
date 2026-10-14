@@ -162,6 +162,18 @@ export default defineConfig({
 | `rpc(name, args)` | 底层调用（一般不用手写） |
 | `setRpcEndpoint(url)` | 改 RPC 端点（部署在子路径时用） |
 
+### 跨层传值（Context）
+
+| API | 说明 |
+| --- | --- |
+| `createContext<T>(默认值)` | 创建一个 Context（**必须给默认值**：没有 Provider 时读它，不会静默变 `undefined`） |
+| `<Ctx.Provider value={…}>…</Ctx.Provider>` | 在子树里提供值（普通组件标签，无需改编译器） |
+| `useContext(Ctx)` | 返回一个**可调用 getter**，读法 `useContext(Ctx)()` —— 与 `signal` 一致，结构上不可能快照住旧值 |
+| `Context<T>` | 类型：`value` 与 `useContext` 的返回类型由 `createContext<T>` 一处决定，传错 / 读错是 `tsc` 错误 |
+
+> 请求级数据（当前用户 / 会话）请走 Context 或 props，**不要放模块作用域的 signal** ——
+> SSR 下后者会在同进程的多个请求之间串味。设计与验收见 [`docs/rfcs/context-and-ssr-isolation.md`](docs/rfcs/context-and-ssr-isolation.md)。
+
 ### 路由
 
 ```tsx
@@ -292,6 +304,7 @@ function Card(props) {
 | `PLAIN_E1110` | `effect(() => count.set(count() + 1))` | ❌ 自触发会栈溢出，只报错（钳位写法不报） |
 | `PLAIN_E1111` | `computed(() => { s.set(…) })` | ❌ 派生值必须纯，只报错 |
 | `PLAIN_E1113` | 模块作用域创建 `resource()`（import 时立即执行 / SSR 导入即发请求） | ❌ 挪进组件 / `createScope`，只报错 |
+| `PLAIN_E1114` | 对 `useContext(Ctx)` 的返回值直接取属性（它是 getter） | ❌ 改成先调用：`useContext(Ctx)()`，只报错 |
 
 > 每个码还有一个**可读短名**（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`；
 > 旧写法 `plain/no-props-snapshot` 在抑制指令里仍被接受（向后兼容），但输出统一走新码。
@@ -492,17 +505,20 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ 列表 keyed 复用（`key={...}`）：头部插入 / 重排不重建已有节点
 - ✅ **命令式 DOM 逃逸口** `ref={(el) => …}`：元素连入文档后回调（≈ `connectedCallback`）、
   可返回清理函数、列表 / 分支回收正确、SSR 跳过、注水后执行；`PLAIN_E1009`–`E1011` 编译期拦截
+- ✅ **Context（跨层传值）+ SSR 请求级隔离**：`createContext` / `<Ctx.Provider>` / `useContext`
+  （读法同 signal，结构上不会快照住旧值）；作用域随父 owner 回收；请求级数据终于有正确的位置，
+  杜绝「模块作用域 signal 跨请求串味」；`PLAIN_E1114` 拦「直接取属性」
 - ✅ 结构化编译错误（`PLAIN_E100x` + 文件/行列/hint，可 JSON 序列化）
 - ✅ `server()` 自包含校验（`PLAIN_E1006`）：引用了外部变量在**编译期**报错，不再等运行时 `ReferenceError`
 - ✅ `server()` 参数与返回值可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
 - ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
 - ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
-- ✅ `AGENTS.md` + 反模式目录（19 条均有静态检查；看不出类型的不猜）
+- ✅ `AGENTS.md` + 反模式目录（20 条均有静态检查；看不出类型的不猜）
 - ✅ AI 可发现性：`plaindev agent-context [--write]` 把规则落盘成跨工具标准 `AGENTS.md`
   （外加 `.github/copilot-instructions.md` 与 `.cursor/rules/*.mdc` 兜底，已有文件不覆盖）；
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；确认误报可用行级抑制指令
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 218 项（内核 19 + 单元 199）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 232 项（内核 19 + 单元 213）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -530,7 +546,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 199 项
+pnpm test              # 构建 + 内核 19 项 + 单元 213 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -538,7 +554,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（199 项，`node:test`）：
+- `test/*.test.mjs`（213 项，`node:test`）：
   `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
   `errors` 统一错误码目录（唯一性 / lint 产出码都在表里 / 新旧抑制名都命中）、
   `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
@@ -548,6 +564,8 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
   `testing`（`plain/testing` 自己的单测 + 真编译 TSX 的端到端）、
   `keyed` 列表复用语义、`PLAIN_E1005` / `PLAIN_E1006` / `PLAIN_E1007`（参数与返回值）的诊断与不误报、
   `ref` 命令式逃逸口（编译正反例 + 连接 / 清理 / 列表 / 条件 / SSR 跳过 / 注水）、
+  `context` 跨层传值（默认值 / 嵌套遮蔽 / 兄弟隔离 / 响应性 / effect 路径 / 回收 / SSR 隔离 / 注水）、
+  异步资源生命周期与 context getter（`PLAIN_E1113` / `PLAIN_E1114`）、
   `eval` 上下文档位、SSR 序列化、运行时边界分支。
 - `test/browser.mjs`（23 项）：真实 Chromium 端到端，覆盖勾选 / 取消勾选、新增、筛选、删除、
   路由跳转、详情参数、`server()` 往返、404、ErrorBoundary 降级与重试，以及**控制台零报错**。
@@ -615,10 +633,10 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 
 | 指标 | 门槛 | 当前实测 |
 | --- | --- | --- |
-| 语句 | 90% | 92.9% |
-| 分支 | 82% | 86.3% |
-| 函数 | 85% | 90.8% |
-| 行 | 90% | 92.9% |
+| 语句 | 90% | 93.3% |
+| 分支 | 82% | 86.6% |
+| 函数 | 85% | 91.3% |
+| 行 | 90% | 93.3% |
 
 > 覆盖率最低的是 `src/cli/index.ts`（约 77%）：`dev` / `build` / `serve` 三个子命令要真起 vite，
 > 目前只在示例端到端里被间接验证（`src/cli` 目录整体约 87%）。
@@ -626,7 +644,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 199 / fail 0   # 单元
+# pass 213 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23

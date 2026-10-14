@@ -471,3 +471,38 @@ let dlg: HTMLDialogElement | undefined;
 | `ref` 回调里返回 JSX（如 `ref={(el) => <div/>}`） | 回调只做命令式操作，可返回清理函数 |
 | 组件上 `ref`（`PLAIN_E1009`） | 把 `ref` 放到组件内部的元素上 |
 | 自己 `document.body.appendChild` 造 Portal | 平台的 `<dialog>` / `popover` |
+
+---
+
+## 10. 跨层传值（Context）
+
+跨层数据（主题 / 语言 / 当前用户 / 功能开关）不要一层层传 props（漏传一层不报错，值静默变 `undefined`）。
+用 Context：
+
+```tsx
+import { createContext, useContext } from "plain";
+
+const ThemeCtx = createContext<"light" | "dark">("light");   // 必须给默认值
+
+function App() {
+  const theme = signal<"light" | "dark">("light");
+  return (
+    <ThemeCtx.Provider value={theme()}>
+      <DeepChild />
+    </ThemeCtx.Provider>
+  );
+}
+
+function DeepChild() {
+  const theme = useContext(ThemeCtx);
+  return <div className={`t-${theme()}`}>…</div>;   // 读法与 signal 一致：调用它
+}
+```
+
+要点：
+- **读法是调用**：`useContext(Ctx)()`（和 `signal()` 一样）。写成 `{theme}` 会被 `PLAIN_E1102` 自动修成
+  `{theme()}`；对返回值直接取属性（`theme.name`）会被 `PLAIN_E1114` 拦下；
+- **嵌套 Provider 内层遮蔽外层**；兄弟子树互不可见；无 Provider 时读到 `createContext` 的默认值；
+- **请求级数据必须走 Context（或 props），不能放模块作用域的 signal** —— SSR 下模块作用域是
+  同进程共享的，会把 A 请求的用户渲染进 B 请求的响应；
+- Provider 的作用域随父 owner 回收：组件卸载 / 列表行删除 / 分支切换时，子树 effect 一并回收。

@@ -20,6 +20,10 @@
 
 组件里取 props 一律 `resolve(props.x)` —— 动态属性在编译器里是 getter。
 
+跨层传值（主题 / 语言 / 当前用户）用 `createContext` / `<Ctx.Provider value={…}>` / `useContext`，
+**读法是调用** `useContext(Ctx)()`（与 `signal` 一致）。**请求级数据不要放模块作用域的 signal** ——
+SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 B 请求的响应；这类数据必须走 Context 或 props。
+
 ## 3. 反模式目录（Anti-Pattern Catalog）
 
 「自动拦截」那一列告诉你哪些错误**构建时就会失败**。标 ❌ 的必须自己保证正确。
@@ -45,6 +49,7 @@
 | 17 | `ref` 的值不是函数（`ref` / `ref="x"` / 返回 JSX） | `ref={(el) => { … }}` | ✅ `PLAIN_E1010` | — |
 | 18 | `ref={async (el) => …}` | 把 `await` 提到回调外 | ✅ `PLAIN_E1011` | — |
 | 19 | 在**模块作用域**创建 `resource(...)`（import 时立即执行、SSR 导入即发请求、无人回收） | 放进组件函数体，或 `createScope(() => …)` 里 | ✅ `PLAIN_E1113` | — |
+| 20 | 对 `useContext(Ctx)` 的返回值直接取属性（`t.name` / `useContext(Ctx).name`） | 先调用再取：`useContext(Ctx)().name` | ✅ `PLAIN_E1114` | — |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
 > **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
@@ -105,6 +110,7 @@
 | `PLAIN_E1110` | `effect` 自触发 | 派生值用 `computed`；`effect` 里只写没读过的 signal |
 | `PLAIN_E1111` | `computed` 里写 signal | `computed` 必须纯，副作用放 `effect` |
 | `PLAIN_E1113` | 在模块作用域创建 `resource()` | 放进组件函数体，或 `createScope(() => …)` 里 |
+| `PLAIN_E1114` | 对 `useContext(Ctx)` 的返回值直接取属性 | 先调用再取：`useContext(Ctx)().name` |
 | `PLAIN_E2001` | 契约检查未通过 | 跑 `npx plaindev check --fix <dir>` 自动修，再重新构建 |
 
 > `E11xx` 每条还带一个可读短名（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`。
@@ -151,7 +157,7 @@ npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE �
 
 | 路径 | 职责 |
 | --- | --- |
-| `src/runtime/` | signal / dom / ref / async / router / error / hydrate / hmr —— 运行时（**对外 API 面冻结**；`ref.ts` 是命令式逃逸口的运行时支撑） |
+| `src/runtime/` | signal / dom / ref / context / async / router / error / hydrate / hmr —— 运行时（**对外 API 面冻结**；`ref.ts` / `context.ts` 是近期新增，见 `docs/rfcs/`） |
 | `src/runtime/hydrate.ts` | SSR 注水：认领式 document 复用服务端节点（`claim-document.ts` / `hydration-context.ts` 为内核） |
 | `src/runtime/hmr.ts` | HMR 挂载点注册表与热替换（`hmrApply` / 模块级 signal 快照） |
 | `src/compiler/` | TSX → 建 DOM 代码、服务端清单、契约提取、sourcemap |
