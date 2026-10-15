@@ -69,7 +69,7 @@ test("sourcemap：helper import 行没有源码对应，生成块映射回原语
 
   assert.equal(decoded.has(0), false, "第 0 行是注入的 helper import，不应有映射");
 
-  const genLine = lineOfCode(code, 'document.createElement("p")');
+  const genLine = lineOfCode(code, '__createEl("p"');
   assert.ok(genLine > 0);
   assert.equal(
     decoded.get(genLine).srcLine,

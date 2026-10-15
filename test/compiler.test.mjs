@@ -11,7 +11,8 @@ test("基础元素：生成建 DOM 代码、无 innerHTML、helper 走别名 imp
     "a.jsx"
   );
   assert.ok(code.startsWith("import { effect as __effect"));
-  assert.ok(code.includes('document.createElement("p")'));
+  assert.ok(code.includes("createEl as __createEl"));
+  assert.ok(code.includes('__createEl("p"'));
   assert.ok(code.includes("document.createTextNode"));
   assert.ok(!code.includes("innerHTML"));
 });
@@ -129,7 +130,17 @@ test("普通表达式插值走 insert", () => {
 
 test("Fragment 子节点展开", () => {
   const { code } = compile("export function App(){ return <>{a}<b/></>; }", "f.jsx");
-  assert.ok(code.includes('document.createElement("b")'));
+  assert.ok(code.includes('__createEl("b"'));
+});
+
+test("SVG 命名空间：svg 及其专属子标签统一走 createEl（不再用 document.createElement）", () => {
+  const { code } = compile(
+    'export function App(){ return <svg><polyline points="0 0 1 1"></polyline></svg>; }',
+    "svg.jsx"
+  );
+  assert.ok(code.includes('__createEl("svg"'));
+  assert.ok(code.includes('__createEl("polyline"'));
+  assert.ok(!code.includes('document.createElement("polyline")'));
 });
 
 test("顶层裸 JSX（非 return）在编译期报错并带行号", () => {
