@@ -44,8 +44,13 @@ export async function loadHandlers(manifest = ".plain/server.mjs"): Promise<Reco
 }
 
 /**
- * 标准 Node (req, res, next) 中间件：处理 POST /_plain/rpc
+ * 标准 Node (req, res, next) 中间件：处理 POST /_plain/rpc 与 POST /_plain/rpc/batch
  * 选项：{ manifest, endpoint, handlers }
+ *
+ * 批量端点 `/_plain/rpc/batch` 接收 `{ calls: [{ name, args }] }`，返回
+ * `{ results: [{ result } | { error }] }`（逐项 200，单项错误放在 `error` 字段里，
+ * 不会让整批 500）。客户端开了 `setRpcBatching` 后会自动使用它；不支持批量协议的
+ * 老服务端只需实现单条端点即可，客户端会自动退化。
  */
 export function rpcMiddleware(options: {
   manifest?: string;
@@ -53,6 +58,7 @@ export function rpcMiddleware(options: {
   handlers?: Record<string, (...args: any[]) => any>;
 } = {}): (req: any, res: any, next?: () => void) => void {
   const { endpoint = "/_plain/rpc" } = options;
+  const batchEndpoint = endpoint + "/batch";
   let handlersPromise: Promise<Record<string, any>> | null = null;
   const getHandlers = async (): Promise<Record<string, any>> => {
     if (options.handlers) return options.handlers;
@@ -62,7 +68,7 @@ export function rpcMiddleware(options: {
 
   return async function plainRpc(req: any, res: any, next?: () => void) {
     const url = (req.url || "").split("?")[0];
-    if (url !== endpoint) return next ? next() : undefined;
+    if (url !== endpoint && url !== batchEndpoint) return next ? next() : undefined;
     if (req.method !== "POST") {
       res.statusCode = 405;
       return res.end("Method Not Allowed");
@@ -71,7 +77,27 @@ export function rpcMiddleware(options: {
     req.on("data", (c: any) => (raw += c));
     req.on("end", async () => {
       try {
-        const { name, args } = JSON.parse(raw || "{}");
+        const parsed = JSON.parse(raw || "{}");
+        // 批量端点：一次请求跑多个 server 函数，逐项返回结果 / 错误
+        if (url === batchEndpoint) {
+          const calls = Array.isArray(parsed.calls) ? parsed.calls : [];
+          const handlers = await getHandlers();
+          const results = await Promise.all(
+            calls.map(async (c: { name?: string; args?: unknown[] }) => {
+              const fn = handlers[c.name as string];
+              if (!fn) return { error: `unknown server fn: ${c.name}` };
+              try {
+                const result = await fn(...(c.args || []));
+                return { result: result === undefined ? null : result };
+              } catch (e) {
+                return { error: String((e && (e as any).message) || e) };
+              }
+            })
+          );
+          return json(res, { results });
+        }
+        // 单条端点（原协议，保持兼容）
+        const { name, args } = parsed;
         const handlers = await getHandlers();
         const fn = handlers[name];
         if (!fn) {

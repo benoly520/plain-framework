@@ -233,7 +233,10 @@ dev 内存注册表（不依赖 `.plain/server.mjs`）、模板过 `transformInd
        剩余粒度边界（组件级细粒度热替换）另记为 P2。
     - **已排除的伪问题**：「同页多棵独立 App 根」不会串味 —— 认领游标按 `hydrate` 的
       `container` 走，天然隔离（已用最小复现验证）。原先担心的「锚点 `plain-` 前缀冲突」不成立。
-- RPC 请求合并 / 防抖
+- **RPC 请求合并 / 防抖** ✅ 已落地（可选，非破坏性）：`setRpcBatching(true)` 开启后，
+  同一微任务内的多次 `rpc()` 合并成一次 `POST /_plain/rpc/batch`；服务端 `rpcMiddleware`
+  已内置批量端点，单条端点保持兼容；老服务端不支持批量协议时客户端**自动退化**成逐条请求。
+  默认关闭，应用行为零变化。验收：`test/server.test.mjs`（批量端点 / 单批并存 / 退化路径）。
 - 官方测试工具包（`render()` / `fireEvent` 之类）✅ 已落地：`plain/testing` 独立子路径、零依赖 ——
   `render`（挂载 + DOM 查询 + 干净解挂）/ `fireEvent`（click / input / change / submit / 键盘 /
   自定义）/ `flush` / `expectText`；缺 DOM 时报带安装指引的错。测试与文档齐。

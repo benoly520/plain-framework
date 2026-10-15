@@ -30,6 +30,11 @@
 
 ### 新增
 
+- **RPC 请求合并（可选，非破坏性）**：`setRpcBatching(true)` 开启后，同一微任务内的多次
+  `rpc()` 合并成一次 `POST /_plain/rpc/batch`（单次调用仍走普通端点），把一次渲染里
+  并发拉的多个 `resource` 的多轮往返压成一轮。服务端 `rpcMiddleware` 已内置批量端点、
+  单条端点保持兼容；老服务端不支持批量协议时客户端**自动退化**成逐条请求，调用不会失败。
+  默认关闭，应用行为零变化。验收：`test/server.test.mjs`（批量端点 / 单批并存 / 退化路径）。
 - **dev 下的 SSR：给源码入口就行，不必先构建**（vite 插件新增 `ssr` 选项）：
   ```js
   plain({ ssr: { entry: "./entry-server.tsx" } })

@@ -161,6 +161,7 @@ export default defineConfig({
 | `server(fn)` | 编译期物理剥离到服务端，客户端变 RPC 桩 |
 | `rpc(name, args)` | 底层调用（一般不用手写） |
 | `setRpcEndpoint(url)` | 改 RPC 端点（部署在子路径时用） |
+| `setRpcBatching(enabled)` | 开启 RPC 请求合并：同一微任务内的多次 `rpc` 合并成一次批量请求，老服务端自动退化 |
 
 ### 跨层传值（Context）
 
@@ -637,10 +638,12 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 | --- | --- | --- |
 | **组件级（细粒度）热替换** | 现在最细的粒度是「挂载点」：改动被别处使用的模块时会把挂载点的根组件全部重跑（会丢焦点 / 滚动），而不是只换那一棵子树 | P2 |
 | **SSR 流式输出（suspense 式内容渐进）** | 当前 `stream` 只做到「壳先 flush 抢首字节」，内容仍要等数据到齐才整段写（按路由缓存、分块流式已落地） | P3 |
-| **RPC 请求合并 / 防抖** | 高频调用会各发一次请求 | P1 |
-| **多入口 / 代码分割** | 只验证了单入口 | P1 |
-| **并发渲染 / 时间切片** | 没有 | P2 |
+| **RPC 请求合并 / 防抖** | 高频调用会各发一次请求（已提供 `setRpcBatching` 可选的请求合并，见 [`src/runtime/async.ts`](src/runtime/async.ts)） | P1 |
+| **多入口 / 代码分割** | 框架侧（清单隔离）已落地，打包侧走 Vite 配置即可；演示见 [`examples/multi-entry/`](examples/multi-entry) | P1 |
+| **动态 `import()` 的 Plain 模块 HMR** | 懒加载模块热替换的覆盖测试仍待补（根因已修，见 ROADMAP M7） | P2 |
 
+> ⚠️ **关于「并发渲染 / 时间切片」**：它**不是待做项，而是明确的非目标**（见 [`ROADMAP.md`](ROADMAP.md)「非目标」）。此前的表格误把它列为 P2，已更正 —— 与「编译到 DOM、稳定小核心」的核心取舍冲突，不计划实现。
+>
 > HMR 与 SSR 注水（hydration）均已落地（见上文两节与 [`ROADMAP.md`](ROADMAP.md) M4/M5）。
 
 ### 明确的设计取舍（不是缺陷）

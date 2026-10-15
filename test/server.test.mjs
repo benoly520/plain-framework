@@ -305,6 +305,91 @@ test("rpcMiddleware：清单缺失时给出可读的 500（而不是静默成功
   assert.match(JSON.parse(r.body).error, /找不到服务端清单/);
 });
 
+test("rpcMiddleware：批量端点 /_plain/rpc/batch 一次跑多个函数，单项错误不整批 500", async () => {
+  const mw = rpcMiddleware({
+    handlers: {
+      a: (x) => x * 2,
+      boom: () => {
+        throw new Error("批内炸了");
+      },
+      missing: () => 1, // 不在这个 handlers 里，用于测 unknown
+    },
+  });
+  // 故意把最后一个名字写成不存在的，验证「逐项 error」语义
+  const r = await call(mw, {
+    method: "POST",
+    url: "/_plain/rpc/batch",
+    payload: { calls: [{ name: "a", args: [3] }, { name: "boom", args: [] }, { name: "nope", args: [] }] },
+  });
+  assert.equal(r.statusCode, 200);
+  const { results } = JSON.parse(r.body);
+  assert.equal(results[0].result, 6);
+  assert.match(results[1].error, /批内炸了/);
+  assert.match(results[2].error, /unknown server fn/);
+});
+
+test("rpcMiddleware：批量端点与单条端点并存（老客户端照常单发）", async () => {
+  const mw = rpcMiddleware({ handlers: { a: () => 7 } });
+  const single = await call(mw, { method: "POST", url: "/_plain/rpc", payload: { name: "a", args: [] } });
+  assert.equal(JSON.parse(single.body).result, 7);
+  const batch = await call(mw, { method: "POST", url: "/_plain/rpc/batch", payload: { calls: [{ name: "a", args: [] }] } });
+  assert.equal(JSON.parse(batch.body).results[0].result, 7);
+});
+
+test("setRpcBatching：开启后同一微任务的多次 rpc 合并成一次批量请求", async () => {
+  const { rpc, setRpcBatching } = await import("../dist/runtime/async.js");
+  const seen = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url, body: JSON.parse(init.body) });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ results: (JSON.parse(init.body).calls || []).map((c) => ({ result: c.name })) }),
+    };
+  };
+  setRpcBatching(true);
+  try {
+    const [r1, r2] = await Promise.all([rpc("f1", [1]), rpc("f2", [2])]);
+    assert.equal(r1, "f1");
+    assert.equal(r2, "f2");
+    // 合并模式下：只发了一次批量请求（而非两条单发）
+    const batches = seen.filter((s) => String(s.url).endsWith("/batch"));
+    assert.equal(batches.length, 1, "应只发一次批量请求");
+    assert.equal(batches[0].body.calls.length, 2);
+  } finally {
+    setRpcBatching(false);
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("setRpcBatching：批量端点不可用时自动退化成逐条请求（不丢调用）", async () => {
+  const { rpc, setRpcBatching } = await import("../dist/runtime/async.js");
+  const seen = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    seen.push(String(url));
+    // 批量端点一律 404，模拟老服务端
+    if (String(url).endsWith("/batch")) {
+      return { ok: false, status: 404, json: async () => ({}) };
+    }
+    const { name } = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ result: name }) };
+  };
+  setRpcBatching(true);
+  try {
+    const [r1, r2] = await Promise.all([rpc("f1", [1]), rpc("f2", [2])]);
+    assert.equal(r1, "f1");
+    assert.equal(r2, "f2");
+    // 退化后：批量端点试了一次，随后两条单发成功
+    assert.ok(seen.some((u) => u.endsWith("/batch")));
+    assert.equal(seen.filter((u) => u === "/_plain/rpc").length, 2);
+  } finally {
+    setRpcBatching(false);
+    globalThis.fetch = origFetch;
+  }
+});
+
 // ---------------------------------------------------------------------------
 // serve
 // ---------------------------------------------------------------------------

@@ -34,6 +34,9 @@ compare/
     03-props-update/
     04-empty-branch/
     05-async-loading/
+    06-conditional-toggle/
+    07-input-add-list/
+    08-derived-filter/
 ```
 
 ## 交互协议
@@ -105,7 +108,7 @@ node eval/compare/run.mjs --prompt --context full  # 打印「提示词 + 规则
   〔full〕额外给 AGENTS.md 的 §1–§3（再加反模式目录）
 
 流程：
-  写完所有实现（5 个用例 × 2 = 10 个文件）后，直接跑
+  写完所有实现（8 个用例 × 2 = 16 个文件）后，直接跑
     node eval/compare/run.mjs --context <档位>
   把完整输出贴回来，并声明你用的是哪个档位。
   不要为了对答案去读 check.mjs —— 首次尝试才算数。
@@ -136,7 +139,7 @@ node eval/compare/run.mjs --prompt --context full  # 打印「提示词 + 规则
   这是**有意保留**的：Plain 卖的正是「构建期把错误变便宜」这件事，把它拿掉反而失真。
   但必须说清楚：**这一栏的优势来自框架自带闸门，不来自 I/O 或模型能力**。
   想更严格地比较，应给 React 侧也接上 lint / React Compiler，并把这个开关记进结果。
-- 只有 5 个用例，样本极小 —— 任何结论都只是**方向性**的，不是统计显著。
+- 只有 8 个用例，样本仍偏小 —— 任何结论都只是**方向性**的，不是统计显著。
 
 ## 自欺清单
 

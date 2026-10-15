@@ -29,7 +29,7 @@ export {
   syncRange,
   toNodes,
 } from "./dom.js";
-export { resource, rpc, server, setRpcEndpoint } from "./async.js";
+export { resource, rpc, server, setRpcEndpoint, setRpcBatching } from "./async.js";
 export { createContext, useContext } from "./context.js";
 export { ErrorBoundary } from "./error.js";
 export { createRouter } from "./router.js";
