@@ -30,6 +30,13 @@
 
 ### 新增
 
+- **官方脚手架 `create-plain`**：`packages/create-plain` 提供 `create-plain <项目名>` 命令，
+  复制内置 `minimal` 模板并替换 `__PROJECT_NAME__` 占位符。**不联网、不自动安装依赖、不自动 git init**，
+  安装与版本管理交给用户。根目录新增 `npm run create-plain` 便捷脚本。
+- **数据表格示例 `examples/data-table`**：5 万行数据的**窗口化（虚拟列表）+ 列排序 + 搜索**，
+  演示大规模数据下 signals 的细粒度更新与恒定 DOM 节点数（视口内恒为 ~20 行，
+  上下用占位 `div` 撑出真实滚动高度）。构建产物仅约 11.6 kB（gzip 4.5 kB）。
+  根目录新增 `npm run dev:example:data-table` / `build:example:data-table`，并纳入 `typecheck:example`。
 - **RPC 请求合并（可选，非破坏性）**：`setRpcBatching(true)` 开启后，同一微任务内的多次
   `rpc()` 合并成一次 `POST /_plain/rpc/batch`（单次调用仍走普通端点），把一次渲染里
   并发拉的多个 `resource` 的多轮往返压成一轮。服务端 `rpcMiddleware` 已内置批量端点、

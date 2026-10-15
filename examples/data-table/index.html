@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plain · 数据表格示例</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        --bg: #f5f7fa;
+        --card: #ffffff;
+        --fg: #14181f;
+        --muted: #5b6270;
+        --border: #e2e6ee;
+        --accent: #2563eb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC",
+          "Microsoft YaHei", sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.6;
+        font-size: 15px;
+      }
+      .app { max-width: 960px; margin: 0 auto; padding: 28px 20px 80px; }
+      .topbar {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        gap: 12px;
+      }
+      .topbar h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+      .topbar .muted { font-size: 13px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 18px 20px;
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+      }
+      .row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+      .input {
+        flex: 1;
+        border: 1px solid #cfd5df;
+        padding: 8px 10px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-family: inherit;
+        background: #fff;
+        color: var(--fg);
+      }
+      .input:focus { outline: 2px solid #c9dbfd; border-color: var(--accent); }
+
+      /* 表头与数据行共用同一套列模板，保证对齐 */
+      .cols {
+        display: grid;
+        grid-template-columns: 70px 1.2fr 2fr 1fr 80px 96px 120px;
+        align-items: center;
+      }
+      .head {
+        border: 1px solid var(--border);
+        border-bottom: 0;
+        border-radius: 10px 10px 0 0;
+        background: #fbfcfe;
+        overflow: hidden;
+      }
+      .head .h {
+        text-align: left;
+        background: transparent;
+        border: 0;
+        border-right: 1px solid var(--border);
+        padding: 10px 12px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--muted);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .head .h:last-child { border-right: 0; }
+      .head .h:hover { color: var(--accent); }
+
+      .viewport {
+        height: 480px;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: 0 0 10px 10px;
+        background: #fff;
+      }
+      .body-row {
+        border-bottom: 1px solid var(--border);
+        font-size: 14px;
+      }
+      .body-row:hover { background: #f7f9ff; }
+      .body-row > span {
+        padding: 0 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .badge {
+        justify-self: start;
+        font-size: 12px;
+        padding: 2px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+      }
+      .badge.active { background: #e7f6ec; color: #16a34a; border-color: #b7e4c7; }
+      .badge.idle { background: #eef1f6; color: #5b6270; border-color: #dfe3ea; }
+      .badge.blocked { background: #fdecec; color: #dc2626; border-color: #f7c5c5; }
+      .muted { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

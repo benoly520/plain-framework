@@ -775,7 +775,9 @@ $ pnpm run test:browser
 
 完整示例在 [`examples/todo/`](examples/todo/)：待办列表 + 详情路由 + 统计页（服务端数据）+ 错误边界，覆盖全部核心能力。
 
-> ⚠️ `examples/todo` 没有自己的 `package.json`，它依赖**根目录框架先编译成 `dist/`**。
+另有 [`examples/data-table/`](examples/data-table/)：5 万行数据的**窗口化（虚拟列表）+ 列排序 + 搜索**，展示大规模数据下 signals 的细粒度更新与恒定 DOM 节点数。
+
+> ⚠️ 这两个示例都没有自己的 `package.json`，它们依赖**根目录框架先编译成 `dist/`**。
 > 启动前必须先装依赖、编译框架，否则 `dist/cli/index.js` 等文件不存在。
 
 ```bash
@@ -803,6 +805,17 @@ node dist/cli/index.js dev examples/todo
 
 > 改了源码后需重新 `pnpm run build` 再刷新（框架自身源码的构建；示例应用的组件改动
 > 在 dev 下走 HMR，无需整页刷新）。
+
+### 从零新建项目：create-plain
+
+不想从示例改起？用官方脚手架一键初始化：
+
+```bash
+npx create-plain my-app
+cd my-app && npm install && npm run dev
+```
+
+脚手架源码见 [`packages/create-plain/`](packages/create-plain)，它只复制内置 `minimal` 模板并替换项目名，**不联网、不自动安装依赖、不自动 git init**。
 
 ---
 

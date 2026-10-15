@@ -64,10 +64,13 @@
     "benchmark": "tsc && node benchmark/size.mjs",
     "build:example": "tsc && vite build --config examples/todo/vite.config.js",
     "dev:example": "tsc && vite --config examples/todo/vite.config.js",
+    "build:example:data-table": "tsc && vite build --config examples/data-table/vite.config.js",
+    "dev:example:data-table": "tsc && vite --config examples/data-table/vite.config.js",
+    "create-plain": "node packages/create-plain/index.mjs",
     "build:example:ssr": "tsc && vite build --config examples/ssr/vite.config.js && vite build --ssr entry-server.tsx --config examples/ssr/vite.config.js --outDir .plain/ssr",
     "dev:example:ssr": "tsc && vite --config examples/ssr/vite.config.js",
     "start:example:ssr": "node examples/ssr/server.mjs",
-    "typecheck:example": "tsc && tsc --noEmit -p examples/todo/tsconfig.json && tsc --noEmit -p examples/ssr/tsconfig.json",
+    "typecheck:example": "tsc && tsc --noEmit -p examples/todo/tsconfig.json && tsc --noEmit -p examples/ssr/tsconfig.json && tsc --noEmit -p examples/data-table/tsconfig.json",
     "check": "tsc && node dist/cli/index.js check src"
   },
   "dependencies": {

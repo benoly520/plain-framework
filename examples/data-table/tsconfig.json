@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "plain": ["../../dist/index.d.ts"],
+      "plain/vite": ["../../dist/index.d.ts"],
+      "plain/server": ["../../dist/index.d.ts"]
+    }
+  },
+  "include": ["./**/*.tsx", "./**/*.ts", "../../dist/index.d.ts"]
+}

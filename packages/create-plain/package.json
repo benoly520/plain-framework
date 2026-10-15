@@ -1,0 +1,24 @@
+{
+  "name": "create-plain",
+  "version": "0.3.0",
+  "type": "module",
+  "description": "Plain 官方脚手架：一键创建新的 Plain 项目。",
+  "license": "MIT",
+  "bin": {
+    "create-plain": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "template"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "keywords": [
+    "plain",
+    "scaffold",
+    "create",
+    "frontend",
+    "framework"
+  ]
+}
