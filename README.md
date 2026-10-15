@@ -817,6 +817,9 @@ cd my-app && npm install && npm run dev
 
 脚手架源码见 [`packages/create-plain/`](packages/create-plain)，它只复制内置 `minimal` 模板并替换项目名，**不联网、不自动安装依赖、不自动 git init**。
 
+> 框架尚未发布到 npm 时，脚手架生成的 `plain` 依赖无法直接安装，本地接入方式见
+> [`packages/create-plain/README.md`](packages/create-plain/README.md) 的「本地开发」一节（用 `link:` 指向本地框架目录）。
+
 ---
 
 ## 目录结构

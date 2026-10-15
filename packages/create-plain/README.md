@@ -31,9 +31,45 @@ npm run dev
 
 `minimal` 模板是一个最小可运行的 Plain 应用：
 
-- `vite.config.ts`：使用 `plain/vite` 插件（需先 `npm i plain` 安装框架）。
+- `vite.config.ts`：使用 `plain/vite` 插件。
 - `src/main.tsx`：一个 `signal` + `mount` 的最小示例。
-- `tsconfig.json`：与框架一致的严格 TS 配置。
+- `tsconfig.json`：与框架一致的严格 TS 配置（`jsx: "preserve"` 必须保留）。
 
-> 在框架仓库内部开发时，如果想让模板指向本地构建的 `dist/`，可把模板
-> `vite.config.ts` 里的 `plain/vite` 改回相对路径别名（参考 `examples/*/vite.config.js`）。
+## 本地开发（框架尚未发布到 npm）
+
+脚手架生成的 `package.json` 把 `plain` 写成 `"^0.3.0"`，默认假设框架已发布到 npm。
+在**本地尚未发布**的情况下，直接 `npm install` / `pnpm install` 会找不到包。按下面三步即可指向本地源码：
+
+1. 生成项目（任选一种，都不联网）：
+
+   ```bash
+   # 方式 A：直接跑脚本
+   node /abs/path/plain-framework/packages/create-plain/index.mjs my-app
+
+   # 方式 B：先注册成全局命令，之后任意目录随时用
+   cd /abs/path/plain-framework/packages/create-plain && pnpm link --global
+   create-plain my-app
+   ```
+
+2. 把 `my-app/package.json` 里的依赖改成指向本地框架目录（`link:` 会建立软链，框架改动 rebuild 后即生效）：
+
+   ```json
+   "plain": "link:/abs/path/plain-framework"
+   ```
+
+3. 安装并启动：
+
+   ```bash
+   cd my-app && pnpm install
+   pnpm run dev
+   ```
+
+> 用 `link:` 后，`node_modules/plain` 是框架目录的软链，模板里的
+> `import plain from "plain/vite"` 与 `import { signal } from "plain"` 都能正常解析，
+> **无需改动 `vite.config.ts`**。
+>
+> 框架源码改动后，回到框架目录重跑 `pnpm run build` 即可（模板产物依赖 `dist/`；
+> 框架仓库根的 `dist/` 通常已构建好，只有改了 `src/` 才需要重新 build）。
+>
+> 不想用软链、只想要一份固定副本时，可改用 `"plain": "file:/abs/path/plain-framework"`，
+> 但 `file:` 默认是复制，框架改动后需重新 `pnpm install` 才能同步。
