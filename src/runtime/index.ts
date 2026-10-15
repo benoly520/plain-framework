@@ -25,6 +25,7 @@ export {
   each,
   nodesOf,
   place,
+  createEl,
   createSlot,
   syncRange,
   toNodes,

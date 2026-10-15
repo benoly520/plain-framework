@@ -108,13 +108,16 @@ const RPC = "__rpc";
 
 const PLACE = "__place";
 
+/** 按命名空间创建元素（svg / math 自动 createElementNS），避免图标等不渲染 */
+const CREATE_EL = "__createEl";
+
 /** 命令式 DOM 逃逸口（ref={fn}）的运行时入口；内部符号，见 docs/rfcs/ref-escape-hatch.md */
 const REF = "__ref";
 
 const HELPER_IMPORT =
   `import { effect as ${E}, stringify as ${S}, insert as ${INS}, ` +
   `each as ${EACH}, when as ${WHEN}, rpc as ${RPC}, place as ${PLACE}, ` +
-  `${REF} } from "plain";`;
+  `createEl as ${CREATE_EL}, ${REF} } from "plain";`;
 
 function isComponentTag(name: string): boolean {
   return /^[A-Z]/.test(name) || name.includes(".");
@@ -1327,7 +1330,9 @@ function emitElement(
   out: string[]
 ): void {
   const el = fresh("el");
-  out.push(`const ${el} = document.createElement(${JSON.stringify(tagText)});`);
+  // 用 createEl 而非裸 document.createElement：svg / math 及其后代需正确命名空间，
+  // 否则 <polyline> 等被当成未知 HTML 标签而不渲染（详见 runtime/dom.ts createEl）。
+  out.push(`const ${el} = ${CREATE_EL}(${JSON.stringify(tagText)}, ${parentVar});`);
 
   attrs.properties.forEach((p: any) => {
     if (ts.isJsxAttribute(p)) {
