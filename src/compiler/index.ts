@@ -936,6 +936,10 @@ function emitExprInto(node: any, parentVar: string, out: string[]): void {
   const m = detectMap(node);
   if (m) {
     const body: string[] = [];
+    // 把 map 回调里 return 之前的语句原样注入 item 模板（修复：之前会被整体丢弃）
+    for (const s of (m.preStmts || [])) {
+      body.push(s);
+    }
     genFragment(m.body, body);
     const params = `${m.param}${m.index ? `, ${m.index}` : ""}`;
     // 顶层元素带 key 时，把 key 作为第 4 个参数交给 each —— 走 keyed 复用
@@ -1383,9 +1387,17 @@ function detectMap(node: any): any {
       const param = cb.parameters[0].name.getText();
       const index =
         cb.parameters.length >= 2 ? cb.parameters[1].name.getText() : null;
+      let preStmts: string[] = [];
       const body = ts.isBlock(cb.body)
         ? (() => {
-            const ret = cb.body.statements.find((s: any) => ts.isReturnStatement(s));
+            const stmts = cb.body.statements;
+            const ret = stmts.find((s: any) => ts.isReturnStatement(s));
+            // return 之前的语句（const / effect / if 等）要随 item 模板一起保留，
+            // 否则会被编译器丢弃（导致 ReferenceError，或 effect 静默不执行）。
+            preStmts = (ret
+              ? stmts.slice(0, stmts.indexOf(ret))
+              : stmts
+            ).map((s: any) => s.getText());
             return ret && ret.expression ? unparen(ret.expression) : null;
           })()
         : unparen(cb.body);
@@ -1410,7 +1422,7 @@ function detectMap(node: any): any {
               `想用 index，就删掉 key`,
           });
         }
-        return { array, param, index, body, key: keyAttr ? keyAttr.text : null };
+        return { array, param, index, body, preStmts, key: keyAttr ? keyAttr.text : null };
       }
     }
   }
