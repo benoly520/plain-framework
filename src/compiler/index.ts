@@ -916,14 +916,58 @@ function serverVarName(node: any): string {
  * node 可以是 JSX，也可以是条件表达式 / && 表达式 / .map 调用，任意嵌套都支持。
  */
 function genFragment(node: any, out: string[]): string[] {
-  out.push(`const __f = document.createDocumentFragment();`);
-  emitExprInto(node, "__f", out);
-  out.push(`return __f;`);
+  const f = fresh("f");
+  out.push(`const ${f} = document.createDocumentFragment();`);
+  emitExprInto(node, f, out);
+  out.push(`return ${f};`);
   return out;
 }
 
 function genBlock(node: any): string {
   return genFragment(node, []).join("\n");
+}
+
+/** 把 map 回调体逐语句转成 item 模板：return <jsx> 编译成 fragment 返回，其余原样保留 */
+function emitMapItemBody(cbBody: any, out: string[]): void {
+  if (ts.isBlock(cbBody)) {
+    for (const stmt of cbBody.statements) emitStmt(stmt, out);
+  } else {
+    genFragment(unparen(cbBody), out);
+  }
+}
+
+/**
+ * 递归发射一条语句：
+ *  - return <jsx>  -> 编译成 fragment 并返回（支持多 return / if 内提前 return）
+ *  - 其它语句原样保留；if / 块 会递归处理其中嵌套的 return <jsx>
+ */
+function emitStmt(stmt: any, out: string[]): void {
+  if (ts.isReturnStatement(stmt)) {
+    if (stmt.expression) {
+      // 任何 return 表达式（JSX / 条件 / && / .map / 普通值）都交给 genFragment
+      // 统一编译成 fragment 返回，避免漏编译条件 / 布尔表达式里的 JSX。
+      genFragment(unparen(stmt.expression), out);
+    } else {
+      out.push(`return;`);
+    }
+    return;
+  }
+  if (ts.isBlock(stmt)) {
+    for (const s of stmt.statements) emitStmt(s, out);
+    return;
+  }
+  if (ts.isIfStatement(stmt)) {
+    out.push(`if (${stmt.expression.getText()}) {`);
+    emitStmt(stmt.thenStatement, out);
+    out.push(`}`);
+    if (stmt.elseStatement) {
+      out.push(`else {`);
+      emitStmt(stmt.elseStatement, out);
+      out.push(`}`);
+    }
+    return;
+  }
+  out.push(stmt.getText());
 }
 
 /**
@@ -935,17 +979,15 @@ function emitExprInto(node: any, parentVar: string, out: string[]): void {
   // arr.map(...)
   const m = detectMap(node);
   if (m) {
-    const body: string[] = [];
-    // 把 map 回调里 return 之前的语句原样注入 item 模板（修复：之前会被整体丢弃）
-    for (const s of (m.preStmts || [])) {
-      body.push(s);
-    }
-    genFragment(m.body, body);
+    const bodyArr: string[] = [];
+    // 把 map 回调体逐语句转成 item 模板（修复：之前会整体丢弃 return 之前的
+    // const / effect，或漏编译「提前 return」里的 JSX）。支持多 return / if 包裹的 return。
+    emitMapItemBody(m.cbBody, bodyArr);
     const params = `${m.param}${m.index ? `, ${m.index}` : ""}`;
     // 顶层元素带 key 时，把 key 作为第 4 个参数交给 each —— 走 keyed 复用
     const keyArg = m.key ? `, (${params}) => (${m.key})` : "";
     out.push(
-      `${EACH}(${parentVar}, () => (${m.array}), (${params}) => {\n${body.join(
+      `${EACH}(${parentVar}, () => (${m.array}), (${params}) => {\n${bodyArr.join(
         "\n"
       )}\n}${keyArg});`
     );
@@ -1387,20 +1429,14 @@ function detectMap(node: any): any {
       const param = cb.parameters[0].name.getText();
       const index =
         cb.parameters.length >= 2 ? cb.parameters[1].name.getText() : null;
-      let preStmts: string[] = [];
-      const body = ts.isBlock(cb.body)
+      const cbBody = cb.body;
+      const body = ts.isBlock(cbBody)
         ? (() => {
-            const stmts = cb.body.statements;
+            const stmts = cbBody.statements;
             const ret = stmts.find((s: any) => ts.isReturnStatement(s));
-            // return 之前的语句（const / effect / if 等）要随 item 模板一起保留，
-            // 否则会被编译器丢弃（导致 ReferenceError，或 effect 静默不执行）。
-            preStmts = (ret
-              ? stmts.slice(0, stmts.indexOf(ret))
-              : stmts
-            ).map((s: any) => s.getText());
             return ret && ret.expression ? unparen(ret.expression) : null;
           })()
-        : unparen(cb.body);
+        : unparen(cbBody);
       if (body) {
         const keyAttr = detectKeyAttr(body);
         // keyed 复用下行只构建一次，回调捕获的 index 无法随位置更新。
@@ -1422,7 +1458,7 @@ function detectMap(node: any): any {
               `想用 index，就删掉 key`,
           });
         }
-        return { array, param, index, body, preStmts, key: keyAttr ? keyAttr.text : null };
+        return { array, param, index, body, cbBody, key: keyAttr ? keyAttr.text : null };
       }
     }
   }

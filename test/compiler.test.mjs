@@ -26,8 +26,8 @@ test("块体 return：替换为「建 Fragment 并返回」", () => {
     ),
     "blk.jsx"
   );
-  assert.ok(code.includes("const __f = document.createDocumentFragment();"));
-  assert.ok(code.includes("return __f;"));
+  assert.ok(code.includes("const __f") && code.includes("document.createDocumentFragment();"));
+  assert.ok(code.includes("return __f"));
 });
 
 test("server() 物理剥离：客户端只剩 rpc 桩，函数体与闭包不外泄", () => {
