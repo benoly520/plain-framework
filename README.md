@@ -3,6 +3,8 @@
 > 一个**编译到 DOM** 的前端框架：TSX 视图 + signals 响应式 + **显式的服务端边界**。
 > 为「AI 写、人来维护」而设计 —— 少推理、少概念、少意外。
 
+> 中文 ｜ [English](README_EN.md)
+
 ```tsx
 import { signal, computed, mount, server } from "plain";
 
