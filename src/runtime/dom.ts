@@ -11,6 +11,9 @@
 // 细粒度更新（insert / each 的 keyed 复用）不经过 syncRange，节点照旧复用。
 
 import type { Renderable, Slot, Owner } from "../types.js";
+// 命名空间判定与属性归一化收敛在 ../attrs.js 一处：编译器与运行时共用同一张表，
+// 避免「编译期一套、运行期一套」再次漂移。
+import { SVG_NS, MATH_NS, nsForTag } from "../attrs.js";
 import {
   signal,
   effect,
@@ -31,38 +34,6 @@ export function stringifySafe(v: unknown): string {
 }
 
 export { stringifySafe as stringify };
-
-const SVG_NS = "http://www.w3.org/2000/svg";
-const MATH_NS = "http://www.w3.org/1998/Math/MathML";
-
-/**
- * 这些标签名只可能是 SVG / MathML 元素，绝不会是 HTML 元素；
- * 因此可以直接按命名空间创建，无需依赖「创建时的父节点上下文」。
- *
- * 为什么需要它：uni-ui 的图标用 <Svg> 组件包裹，真实的 <polyline>/<circle>
- * 是作为 children 在「外层组件作用域」里先创建、再 place 进 <svg> 的 —— 创建时
- * 它的直接父是 fragment（HTML 上下文），按父节点推断会建成 HTML 元素，塞进 svg
- * 后也改不了命名空间，于是图标不渲染。按标签名直接给命名空间即可根治。
- * （刻意排除 a / title 等 HTML/SVG 同名歧义标签，它们走下面的父节点推断。）
- */
-const SVG_TAGS = new Set([
-  "svg", "g", "path", "circle", "ellipse", "rect", "line", "polyline",
-  "polygon", "text", "tspan", "defs", "use", "symbol", "linearGradient",
-  "radialGradient", "stop", "clipPath", "image", "marker", "pattern", "mask",
-  "filter", "feGaussianBlur", "feOffset", "feMerge", "feMergeNode",
-  "feColorMatrix", "feBlend", "feComposite", "metadata", "switch", "view", "desc",
-]);
-const MATH_TAGS = new Set([
-  "math", "mi", "mn", "mo", "ms", "mtext", "mspace", "mrow", "mfrac", "msqrt",
-  "mroot", "msup", "msub", "msubsup", "mover", "munder", "mmultiscripts",
-  "mtable", "mtr", "mtd", "mlabeledtr",
-]);
-
-function nsForTag(tag: string): string | null {
-  if (SVG_TAGS.has(tag)) return SVG_NS;
-  if (MATH_TAGS.has(tag)) return MATH_NS;
-  return null;
-}
 
 /**
  * 按命名空间创建元素：

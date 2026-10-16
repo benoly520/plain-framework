@@ -10,6 +10,8 @@
 
 import ts from "typescript";
 import type { PlainErrorCode } from "../errors.js";
+// 属性「拼写 -> 落地方式」的唯一归一化表（静态 / 动态 / SVG 判定都走它）
+import { canonicalAttrName, resolveAttr } from "../attrs.js";
 
 export type { PlainErrorCode } from "../errors.js";
 
@@ -1544,38 +1546,74 @@ function genChildrenBody(children: any): string {
 
 // --- 原生元素 --------------------------------------------------------------
 
-const PROP_ALIAS: Record<string, string> = {
-  for: "htmlFor",
-  readonly: "readOnly",
-  maxlength: "maxLength",
-  minlength: "minLength",
-  tabindex: "tabIndex",
-  autofocus: "autofocus",
-};
+/**
+ * 内建元素上的单个属性 -> DOM 操作。
+ *
+ * **命名归一化必须走 src/attrs.ts 那一张表**：静态字面量与动态表达式只允许
+ * 「值从哪来」不同（字面量直接写死、表达式包进 effect），不允许「落到哪个属性」不同。
+ * 历史 bug 正是这里分叉：`<label htmlFor="x">` 静态落到属性 `htmlFor`
+ * （浏览器小写成 `htmlfor`，不是 label 认的 `for`），动态却落到 `.htmlFor`。
+ */
+function emitAttr(
+  el: string,
+  raw: string,
+  tag: string,
+  init: any,
+  out: string[]
+): void {
+  // 事件：onClick -> addEventListener("click")。字符串事件名由类型系统挡住。
+  if (
+    init &&
+    ts.isJsxExpression(init) &&
+    init.expression &&
+    /^on[A-Z]/.test(raw)
+  ) {
+    out.push(
+      `${el}.addEventListener(${JSON.stringify(
+        raw.slice(2).toLowerCase()
+      )}, ${valueCode(init.expression)});`
+    );
+    return;
+  }
+  // 无值简写（<input disabled />）：属性存在即语义，写空串
+  if (!init) {
+    out.push(
+      `${el}.setAttribute(${JSON.stringify(canonicalAttrName(raw, tag))}, "");`
+    );
+    return;
+  }
+  // 字面量：一次写死，走**属性**而不是 property —— 属性可被 SSR 序列化，
+  // 首屏不需要额外的反射层；需要跟随信号的响应式更新才必须走 property（见 attrs.ts）。
+  if (ts.isStringLiteral(init)) {
+    out.push(
+      `${el}.setAttribute(${JSON.stringify(
+        canonicalAttrName(raw, tag)
+      )}, ${JSON.stringify(init.text)});`
+    );
+    return;
+  }
+  if (!ts.isJsxExpression(init) || !init.expression) return;
 
-const DOM_PROPS = new Set<string>([
-  "value",
-  "checked",
-  "selected",
-  "disabled",
-  "multiple",
-  "id",
-  "type",
-  "placeholder",
-  "href",
-  "src",
-  "alt",
-  "title",
-  "name",
-  "min",
-  "max",
-  "step",
-  "pattern",
-  "readOnly",
-  "htmlFor",
-  "tabIndex",
-  "maxLength",
-]);
+  const expr = init.expression.getText();
+  const op = resolveAttr(raw, tag);
+  if (op.kind === "prop") {
+    // class 需要 stringify（null / undefined -> ""），其余按原值赋给 property
+    const value = op.prop === "className" ? `${S}(${expr})` : `(${expr})`;
+    out.push(`${E}(() => { ${el}.${op.prop} = ${value}; });`);
+    return;
+  }
+  if (op.name === "style") {
+    out.push(
+      `${E}(() => { const __s = (${expr}); if (typeof __s === 'string') ${el}.setAttribute('style', __s); else Object.assign(${el}.style, __s); });`
+    );
+    return;
+  }
+  out.push(
+    `${E}(() => { const __v = (${expr}); if (__v === false || __v == null) ${el}.removeAttribute(${JSON.stringify(
+      op.name
+    )}); else ${el}.setAttribute(${JSON.stringify(op.name)}, ${S}(__v)); });`
+  );
+}
 
 function emitElement(
   tagText: string,
@@ -1590,60 +1628,17 @@ function emitElement(
   out.push(`const ${el} = ${CREATE_EL}(${JSON.stringify(tagText)}, ${parentVar});`);
 
   attrs.properties.forEach((p: any) => {
-    if (ts.isJsxAttribute(p)) {
-      const raw = p.name.getText();
-      // key 由 each 消费，不能落到 DOM 属性上
-      if (raw === "key") return;
-      // ref 是命令式逃逸口的编译期指令（见 docs/rfcs/ref-escape-hatch.md）
-      if (raw === "ref") {
-        emitRefAttr(el, p, out);
-        return;
-      }
-      const key = PROP_ALIAS[raw] || raw;
-      const init = p.initializer;
-
-      if (!init) {
-        out.push(`${el}.setAttribute(${JSON.stringify(raw)}, "");`);
-        return;
-      }
-      if (ts.isStringLiteral(init)) {
-        if (key === "className") {
-          out.push(`${el}.className = ${JSON.stringify(init.text)};`);
-        } else {
-          out.push(
-            `${el}.setAttribute(${JSON.stringify(raw)}, ${JSON.stringify(
-              init.text
-            )});`
-          );
-        }
-        return;
-      }
-      if (ts.isJsxExpression(init) && init.expression) {
-        const expr = init.expression.getText();
-        if (/^on[A-Z]/.test(raw)) {
-          out.push(
-            `${el}.addEventListener(${JSON.stringify(
-              raw.slice(2).toLowerCase()
-            )}, ${valueCode(init.expression)});`
-          );
-        } else if (key === "className" || raw === "class") {
-          out.push(`${E}(() => { ${el}.className = ${S}(${expr}); });`);
-        } else if (key === "style") {
-          out.push(
-            `${E}(() => { const __s = (${expr}); if (typeof __s === 'string') ${el}.setAttribute('style', __s); else Object.assign(${el}.style, __s); });`
-          );
-        } else if (DOM_PROPS.has(key)) {
-          out.push(`${E}(() => { ${el}.${key} = (${expr}); });`);
-        } else {
-          out.push(
-            `${E}(() => { const __v = (${expr}); if (__v === false || __v == null) ${el}.removeAttribute(${JSON.stringify(
-              raw
-            )}); else ${el}.setAttribute(${JSON.stringify(raw)}, ${S}(__v)); });`
-          );
-        }
-      }
-    }
     // 展开属性 {...expr} 由 assertNoSpreadAttrs 在编译期直接拒绝（PLAIN_E1008）
+    if (!ts.isJsxAttribute(p)) return;
+    const raw = p.name.getText();
+    // key 由 each 消费，不能落到 DOM 属性上
+    if (raw === "key") return;
+    // ref 是命令式逃逸口的编译期指令（见 docs/rfcs/ref-escape-hatch.md）
+    if (raw === "ref") {
+      emitRefAttr(el, p, out);
+      return;
+    }
+    emitAttr(el, raw, tagText, p.initializer, out);
   });
 
   children.forEach((c: any) => emitChild(c, el, out));

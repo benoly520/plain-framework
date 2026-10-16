@@ -1,6 +1,15 @@
 // Plain 服务端最小 DOM 垫片
 // 用途：让同一份编译产物能在 Node 里直接跑并序列化成 HTML（SSR），无需 jsdom。
 // 只实现编译器会用到的那部分 API，保持极小。
+//
+// ⚠️ 这个垫片与浏览器是「同一语义的两份实现」，两者必须给出**一致的可观测结果**：
+//   1. 属性名规则一致（HTML 小写 / SVG 保留大小写，见 src/attrs.ts 的 canonicalAttrName）；
+//   2. 编译产物赋的 DOM property 必须反射回 attributes，否则 SSR 序列化会整条丢掉
+//      （历史 bug：SSR 下动态 href / value / checked 全部消失）。
+
+import { REFLECTED_ATTRS } from "../attrs.js";
+
+const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 const TEXT_ESCAPE: Record<string, string> = {
   "&": "&amp;",
@@ -95,26 +104,35 @@ class SElement extends SNode {
   attributes: Record<string, string>;
   style: Record<string, string>;
   _events: Record<string, Function[]>;
+  /** 是否 HTML 命名空间 —— 决定属性名是否小写（与浏览器一致） */
+  _html: boolean;
 
-  constructor(tag: any) {
+  constructor(tag: any, ns?: string) {
     super(1);
     this.tagName = String(tag).toLowerCase();
     this.localName = this.tagName;
     this.attributes = Object.create(null);
     this.style = {};
     this._events = Object.create(null);
+    // 浏览器只对 HTML 命名空间小写属性名；SVG / MathML 属性名大小写敏感（viewBox…）
+    this._html = !ns || ns === HTML_NS;
+  }
+  /** 属性名规范化：与浏览器保持一致（HTML 小写、SVG / MathML 原样） */
+  private _name(k: string): string {
+    return this._html ? String(k).toLowerCase() : String(k);
   }
   setAttribute(k: string, v: any): void {
-    this.attributes[k] = String(v);
+    this.attributes[this._name(k)] = String(v);
   }
   getAttribute(k: string): string | null {
-    return k in this.attributes ? this.attributes[k] : null;
+    const n = this._name(k);
+    return n in this.attributes ? this.attributes[n] : null;
   }
   removeAttribute(k: string): void {
-    delete this.attributes[k];
+    delete this.attributes[this._name(k)];
   }
   hasAttribute(k: string): boolean {
-    return k in this.attributes;
+    return this._name(k) in this.attributes;
   }
   addEventListener(type: string, fn: Function): void {
     (this._events[type] = this._events[type] || []).push(fn);
@@ -126,12 +144,6 @@ class SElement extends SNode {
   }
   get children(): any[] {
     return this.childNodes.filter((c) => c.nodeType === 1);
-  }
-  set className(v: any) {
-    this.attributes.class = String(v);
-  }
-  get className(): string {
-    return this.attributes.class || "";
   }
   set innerHTML(_v: any) {
     throw new Error("[plain] 禁止在服务端（以及客户端）使用 innerHTML");
@@ -173,6 +185,37 @@ class SFragment extends SNode {
   constructor() {
     super(11);
   }
+}
+
+// ---------------------------------------------------------------------------
+// DOM property -> 属性 的反射
+//
+// 编译产物对**响应式**属性用 `el.<prop> = v`（setAttribute 改不动已脏的表单状态，
+// 比如用户输入过的 input，设 value 属性不会改变当前值）。服务端垫片必须把这个赋值
+// 落到 attributes 里，否则 serializeNode 遍历 attributes 时会整条丢掉 ——
+// 历史 bug：SSR 下动态 href / value / checked 全部消失。
+//
+// 表与客户端共用 src/attrs.ts 的 REFLECTED_ATTRS：一端加属性，两端同时生效，
+// 不会再出现「客户端一套、服务端一套」的漂移。
+// ---------------------------------------------------------------------------
+for (const [attr, reflected] of Object.entries(REFLECTED_ATTRS)) {
+  const { prop, bool } = reflected;
+  Object.defineProperty(SElement.prototype, prop, {
+    configurable: true,
+    /** 布尔属性读「在不在」，字符串属性读属性值（无则空串，与 DOMString 反射一致） */
+    get(this: any): any {
+      return bool ? attr in this.attributes : this.attributes[attr] ?? "";
+    },
+    set(this: any, v: any): void {
+      if (bool) {
+        if (v) this.attributes[attr] = "";
+        else delete this.attributes[attr];
+        return;
+      }
+      // 对齐 DOMString 的转换（含 null -> "null"），保证 SSR 与客户端产物一致
+      this.attributes[attr] = String(v);
+    },
+  });
 }
 
 /**
@@ -237,7 +280,8 @@ export function createDocument(): ServerDocument {
   return {
     nodeType: 9,
     createElement: (tag) => new SElement(tag),
-    createElementNS: (_ns, tag) => new SElement(tag),
+    // 命名空间要带下去：SVG / MathML 的属性名大小写敏感，不能小写化
+    createElementNS: (ns, tag) => new SElement(tag, ns),
     createTextNode: (v) => new SText(v),
     createComment: (v) => new SComment(v),
     createDocumentFragment: () => new SFragment(),
