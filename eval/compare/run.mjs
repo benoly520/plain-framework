@@ -119,12 +119,13 @@ async function runSide(name, dir, side) {
     await check(loaded.api);
     return { status: "通过", file };
   } catch (e) {
+    const code = typeof e.code === "string" ? e.code : null;
     return {
       status: "失败",
       file,
       reason: String(e.message || e).split("\n")[0],
-      blocked:
-        typeof e.code === "string" && e.code.startsWith("PLAIN_") ? e.code : null,
+      // Plain：PLAIN_Exxxx（契约检查 / 编译期）；React：REACT_LINT/<rule>（eslint 闸门）
+      blocked: code && (code.startsWith("PLAIN_") || code.startsWith("REACT_LINT/")) ? code : null,
     };
   }
 }
@@ -182,11 +183,12 @@ async function main() {
   console.log(`通过率：Plain ${rate(p)}　React ${rate(q)}`);
 
   const blocked = rows.filter((r) => r.plain.blocked).length;
-  if (blocked) {
-    console.log(
-      `被构建期拦下：Plain ${blocked} 个（React 侧没有等价的构建期闸门，见 README 的公平性说明）`
-    );
-  }
+  const blockedReact = rows.filter((r) => r.react.blocked).length;
+  console.log(
+    `被构建期拦下：Plain ${blocked} 个（PLAIN_Exxxx）　React ${blockedReact} 个（eslint 规则）` +
+      `\n  ↳ 两侧都已接构建期闸门：Plain = 契约检查 + 编译；React = eslint（含 React Compiler 规则集，` +
+      `见 eval/compare/eslint.react.config.mjs）。仍不对称之处与已知边界见 README 的公平性说明。`
+  );
   console.log(
     `\n把结果记进 eval/RESULTS.md（连同上文档位 \`${context}\` 一起记；见 compare/README.md 的上下文对照）。` +
       `\n改断言要作废重跑 —— 见 eval/compare/README.md 的三条自欺清单。\n`

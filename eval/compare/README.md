@@ -120,25 +120,57 @@ node eval/compare/run.mjs --prompt --context full  # 打印「提示词 + 规则
 
 ## 公平性规则
 
-## 公平性规则
-
 1. **同一份提示词**：`task.md` 里不出现任何框架名，也不暗示写法（见「反例」）。
 2. **各自惯用写法**：React 版必须写成 React 的样子（`useState` / 解构 props / `onChange`），
    不能把 Plain 版翻译过去；Plain 版同理。
 3. **同一份断言**：不是「表达同一件事的两份断言」，是**同一份文件**。这条最容易被破坏，也最值钱。
 4. **同一个模型、同一批提示词**，记录模型名与版本；不能拿 A 的 Plain 结果比 B 的 React 结果。
-5. 失败信息要能直接读懂 —— 断言文案要说清「什么行为没发生」。
+5. **两侧都接构建期闸门**（详见下节）：Plain = 契约检查 + 编译；React = eslint。
+6. 失败信息要能直接读懂 —— 断言文案要说清「什么行为没发生」。
+
+## 构建期闸门：两侧对称（已落地）
+
+Plain 卖的是「构建期把错误变便宜」。如果 React 侧只做 JSX 转换，那比出来的就是
+**「框架带不带闸门」**，而不是「AI 写得更准」，结论会失真。
+
+所以 React 侧已接上 lint（见 [`eslint.react.config.mjs`](eslint.react.config.mjs)），
+让两侧都是「写错 → 构建期拦下」：
+
+| Plain 规则 | 对应 React 规则 | 拦得住吗 |
+| --- | --- | --- |
+| `PLAIN_E1106`（就地改 signal 持有的值） | `@eslint-react/immutability` | ✅ 实测拦住 `items.push(x)`（纯 JSX 即可，无需类型） |
+| `PLAIN_E1103`（React 习惯移植） | `react-hooks/rules-of-hooks` | ✅ |
+| `PLAIN_E1110`（effect 里同步写状态） | `react-hooks/set-state-in-effect` | ⚠️ 保留为 warn（见下） |
+| `PLAIN_E1105` / `E1112`（解构 props / 抓快照） | `react-hooks/immutability`（反应 compiler） | ⚠️ 需类型信息，JS 片段下可能漏报 |
+| （Plain 无 deps 数组） | `react-hooks/exhaustive-deps` | ⚠️ 此项**使 React 侧更难**，属不对称 |
+
+**实测记录（2026-10-16）**：同一个「就地改」错误，两侧都被构建期拦下：
+
+| 用例 | Plain 侧写 `items().push(x)` | React 侧写 `items.push(x)` |
+| --- | --- | --- |
+| `02-list-update` | `PLAIN_E2001`（规则 `PLAIN_E1106`） | `@eslint-react/immutability` |
+
+**已知边界（如实记录，不假装对称）**：
+
+- 官方 `eslint-plugin-react-hooks` 的 `immutability` 是 React Compiler 规则，
+  **未接编译器**时对 `items.push(x)` 这类 mutating method **会漏报**（已实测），
+  故改用 `@eslint-react/immutability`（独立实现、不需要编译器）作为主闸门，两者并存。
+- `react-hooks/set-state-in-effect` 官方默认是 `error`，但它**误伤了本仓的 React 参考实现**
+  （`cases/05-async-loading/react.jsx` 里合理的「重置加载态」写法被判为级联渲染风险）。
+  闸门只拦「确定错的」、不拦「有争议的」，故降为 `warn`。
+- `exhaustive-deps` 是 React 独有负担（Plain 没有 deps 数组）——
+  这一项**对 React 不公平**，记录结果时要意识到。
+- 候选文件是孤立片段、无项目 tsconfig，类型感知规则的能力弱于真实项目。
+
+开启方式：默认开启（`makeReactApi` 内联调用）。任何 `error` 级诊断都算「被构建期拦下」，
+在结果表里以 `REACT_LINT/<规则名>` 呈现，与 Plain 的 `PLAIN_Exxxx` 并列统计。
 
 ## 哪些**不可**比（必须承认）
 
 - **服务端边界类**（`eval/tasks/` 里的 `03` / `04` / `07`）在 React 侧没有等价物：
   React 的对应能力是 RSC / Server Actions，机制完全不同，塞进这套 harness 会变成比 RSC 而不是比框架。
   那几条留在 `eval/tasks/` 里，作为 Plain 自己的质量指标。
-- **构建期闸门不对称**：Plain 侧候选要走 `契约检查 → 编译`（会因 `PLAIN_E2001` / `E1005` / `E1006` / `E1007` 直接失败），
-  React 侧只有 JSX 转换，**没有等价闸门**（没接 eslint / React Compiler）。
-  这是**有意保留**的：Plain 卖的正是「构建期把错误变便宜」这件事，把它拿掉反而失真。
-  但必须说清楚：**这一栏的优势来自框架自带闸门，不来自 I/O 或模型能力**。
-  想更严格地比较，应给 React 侧也接上 lint / React Compiler，并把这个开关记进结果。
+- 上节列出的闸门**残差**（`exhaustive-deps` 不对称、类型感知弱、`set-state-in-effect` 降级）。
 - 只有 8 个用例，样本仍偏小 —— 任何结论都只是**方向性**的，不是统计显著。
 
 ## 自欺清单
@@ -159,3 +191,13 @@ node eval/compare/run.mjs --prompt --context full  # 打印「提示词 + 规则
 | `03-props-update` | `const t = resolve(props.title)`（取值快照） | `const [t] = useState(title)`（派生 state 快照） | `父状态变化后子组件的 <h2> 必须跟着更新` |
 
 这两组是**同一个概念错误的两种方言** —— 也正是这套对比想测的东西。
+
+接上 React 侧闸门后（2026-10-16），第一组**在构建期就被两侧各自拦下**，不再走到断言：
+
+| 用例 | 坏例 | Plain 侧结果 | React 侧结果 |
+| --- | --- | --- | --- |
+| `02-list-update` | 就地改数组 | `PLAIN_E2001`（规则 `PLAIN_E1106`） | `@eslint-react/immutability` |
+
+> 这正是「构建期闸门对称」的实证：**同一个概念错误，两边都在写代码时被拦下**，
+> 而不是等到运行时断言失败。`03` 那组仍走断言（React 侧的
+> `useState(title)` 快照检测需要类型信息，纯 JS 片段下漏报）—— 如实记录，不假装。

@@ -80,8 +80,56 @@ export async function makePlainApi(file) {
 // React 侧
 // ---------------------------------------------------------------------------
 
+/**
+ * React 侧的「构建期闸门」：与 Plain 的契约检查对称。
+ *
+ * 为什么需要：Plain 侧候选要走 `契约检查 → 编译`，写错会在构建期被 PLAIN_Exxxx 拦下。
+ * React 侧若只做 JSX 转换，就没有等价闸门 —— 那样比出来的是「框架带不带闸门」，
+ * 而不是「AI 写得更准」。所以这里跑一次 eslint（含 React Compiler 规则集）。
+ *
+ * 返回 `{ ok, errors }`；errors 是精简后的 `规则名: 行:列 消息` 列表。
+ * 任何一条 `error` 级诊断都算「被构建期拦下」，与 Plain 的 blocked 语义对齐。
+ */
+export async function lintReact(file) {
+  const eslint = await import("eslint");
+  const { ESLint } = eslint.default ?? eslint;
+
+  const engine = new ESLint({
+    cwd: HERE,
+    overrideConfigFile: path.join(HERE, "eslint.react.config.mjs"),
+    // 候选文件在 cases/ 下；base path 之外的路径会被忽略，故统一转绝对路径
+    ignore: false,
+  });
+
+  const results = await engine.lintFiles([path.resolve(file)]);
+  const messages = results.flatMap((r) =>
+    r.messages
+      .filter((m) => m.severity === 2) // 只把 error 当闸门
+      .map((m) => ({
+        rule: m.ruleId || "(parse)",
+        line: m.line,
+        column: m.column,
+        message: String(m.message.split("\n")[0]).slice(0, 200),
+      }))
+  );
+  return { ok: messages.length === 0, errors: messages };
+}
+
 /** React 适配器：JSX 走 esbuild 的 automatic runtime，渲染/交互用 act 包起来 */
 export async function makeReactApi(file) {
+  // 构建期闸门：先 lint，被拦下就不进入渲染阶段（与 Plain 侧同语义）
+  const lint = await lintReact(file);
+  if (!lint.ok) {
+    const first = lint.errors[0];
+    const err = new Error(
+      `[构建期拦下 ${first.rule}] ${file}:${first.line}:${first.column} ${first.message}` +
+        (lint.errors.length > 1 ? `（另有 ${lint.errors.length - 1} 条）` : "")
+    );
+    err.code = `REACT_LINT/${first.rule}`;
+    err.lintErrors = lint.errors;
+    throw err;
+  }
+
   const source = fs.readFileSync(file, "utf8");
   const transformed = await esbuild.transform(source, {
     loader: file.endsWith(".jsx") ? "jsx" : "tsx",
@@ -102,6 +150,7 @@ export async function makeReactApi(file) {
     mod,
     code: transformed.code,
     out: null,
+    lint,
     api: {
       async render(name = "App") {
         const { box } = mountBox();
