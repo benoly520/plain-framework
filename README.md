@@ -207,11 +207,11 @@ function currentPage() {
 ```tsx
 // 1. Component: return (<jsx />)
 function Card(props) {
-  return (<section className="card">{props.children()}</section>);
+  return (<section class="card">{props.children()}</section>);
 }
 
 // 2. List (keyed → key-based node reuse; otherwise position-based)
-<ul>{todos().map(t => <li key={t.id} className={t.done ? "done" : ""}>{t.text}</li>)}</ul>
+<ul>{todos().map(t => <li key={t.id} class={t.done ? "done" : ""}>{t.text}</li>)}</ul>
 
 // 3. Conditions (arbitrarily nested)
 {loading() ? <p>loading</p> : error() ? <p>{error().message}</p> : <div>{data().name}</div>}
@@ -308,6 +308,7 @@ so the AI's common mistakes will **fail the build** rather than blow up at runti
 | `PLAIN_E1111` | `computed(() => { s.set(…) })` | ❌ derived values must be pure, error only |
 | `PLAIN_E1113` | `resource()` created at module scope (runs on import / SSR import fires a request) | ❌ move into component / `createScope`, error only |
 | `PLAIN_E1114` | reading a property directly off `useContext(Ctx)`'s return (it's a getter) | ❌ call first: `useContext(Ctx)()`, error only |
+| `PLAIN_E1115` | React attribute spelling on a built-in element (`className` / `htmlFor`) | ✅ rewrite to `class` / `for` (**warn only** — equivalent, never fails the build) |
 
 > Each code also has a **readable short name** (`PLAIN_E1107` = `no-props-snapshot`), full index in `src/errors.ts`;
 > the old `plain/no-props-snapshot` form is still accepted in suppression directives (backward compatible), but output is unified to the new code.

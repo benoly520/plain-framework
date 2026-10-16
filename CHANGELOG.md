@@ -201,9 +201,44 @@
   求值一遍，只为填充 registry）—— 清单只需要函数体文本，少一处构建期 `new Function`，
   CSP 面更小、也避免构建机执行到只该跑在服务端运行时的代码。dev 仍求值（`/_plain/rpc` 需要），
   且不依赖调用顺序（`configureServer` 会补求值已登记的 body）。
+- **`PLAIN_E1115`（`react-attr-spelling`）：把 React 拼写的属性名自动收敛成原生 HTML 名**。
+  内建元素上写 `className` / `htmlFor` 会被提示并自动改写为 `class` / `for`
+  （`plaindev check` 默认就会改，AST 定位 + 源码切片，只动属性名、不动引号与格式）。
+  与 `class` / `for` 完全等价（编译器本来就会归一），所以这是**第一条 `warn` 级规则**：
+  只提示、**绝不阻断构建** —— 报成 `error` 会因为「写法偏好」把构建搞挂。
+  - 组件（大写开头 / `Ctx.Provider`）上的 `className` 是组件自己定的 prop 名，**不动**；
+    命令式 DOM 的 `el.className` 是平台 API，也不动（判定与编译器 `isComponentTag` 同一口径）。
+  - 兼容面直接复用 `src/attrs.ts` 的 `REACT_COMPAT_ALIASES`，与编译器**同一张表**：
+    以后新增兼容拼写，提示与归一同时生效，不会各写各的。
+  - `level` 从此有了实际语义：vite 插件只让 `error` 级失败（`lint: "warn" | false` 仍可调），
+    文档同步 `SPEC.md` §7、`README` / `README_CN` 规则表、`AGENTS.md` 反模式第 22 条与错误码表。
+  - 用新规则把仓库自己的 `examples/`（3 个文件 75 处）与 `docs/patterns.md`、README 片段
+    收敛到了规范名，作为「工具能收敛存量代码」的实证。
+  - 测试：`test/lint.test.mjs`（5 项：warn 级 + 自动改写 + 组件不误伤 + 规范写法不误伤 +
+    抑制指令）、`test/vite-plugin.test.mjs`（warn 级不阻断构建）。
 
 ### 修复
 
+- **属性名归一化收敛到一处（`src/attrs.ts`）：静态与动态不再各写各的**。修掉两个静默失效：
+  - `<label htmlFor="x">`（静态字面量）此前落到属性名 `htmlFor` —— 浏览器会把 HTML 属性名
+    小写成 `htmlfor`，不是 `<label>` 认的 `for`，于是**静默失效**；而同一处写的
+    `htmlFor={x}`（动态）走 `.htmlFor` 是对的 —— 同一个属性两种写法结论不同。
+  - 动态属性走 DOM property（`setAttribute` 改不动已脏的表单状态，响应式必须如此），
+    而服务端垫片不把 property 反射回 `attributes`，`serializeNode` 遍历 `attributes` 时
+    整条丢掉 —— **SSR 下动态 `href` / `value` / `checked` 全部消失**（示例待办的详情链接、
+    受控输入首屏都会丢）。
+  现在「拼写 -> 落地方式」只有一张表，静态 / 动态 / 运行时 `createEl` / SSR 垫片共用：
+  规范拼写是原生 HTML 名（`class` / `for`），camelCase 的 DOM 名（`className` / `htmlFor`）
+  作为**兼容输入**归一到同一个属性 —— 兼容面就这两个名字，集中在 `REACT_COMPAT_ALIASES`
+  里显式登记（收它们是为 AI / 存量代码的首次写对率，**不是**要兼容 React API；
+  其余 camelCase 如 `colSpan` / `tabIndex` 是 DOM property 名，靠「HTML 一律小写」成立）。
+  SVG / MathML 属性名大小写敏感（`viewBox` / `preserveAspectRatio`）原样保留 ——
+  所以不能无脑小写。静态字面量仍走「属性」而不是 property（属性可被 SSR 序列化，
+  首屏不需要反射层）。
+  顺带把垫片的属性名规则对齐浏览器（HTML 小写 / SVG 保留），hydrate 的属性对比才不会
+  因大小写差异反复增删。新增 `test/attrs.test.mjs`（13 项：拼写等价性 / `htmlFor` 回归 /
+  React 兼容面被钉住 / 兼容表幂等 / SVG 与 MathML 大小写 / 垫片小写与 property 反射 /
+  SSR 端到端不丢动态属性）。
 - **渲染函数 / 列表回调体里的控制流不再漏编译，也不再被静默丢掉**。承接上一条（裸控制流
   `return`），这次修的是 `return` **外面**那层语句：
   - `.map()` 回调体只有 `if (x) return <a/>; else return <b/>;`（没有顶层 return）时，

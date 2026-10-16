@@ -301,6 +301,22 @@ test("lint: 'warn' 只告警不阻断；lint: false 完全关闭", async () => {
   );
 });
 
+test("warn 级规则（PLAIN_E1115）不阻断构建，只在告警通道提示", async () => {
+  const root = tmpRoot();
+  const id = path.join(root, "WarnStyle.tsx");
+  const code = [
+    "import { signal } from 'plain';",
+    'export function App(){ return <div className="card">{1}</div>; }',
+  ].join("\n");
+
+  const warned = [];
+  const p = plugin();
+  p.configResolved({ root });
+  const res = await p.transform.call({ warn: (m) => warned.push(m) }, code, id);
+  assert.ok(res && typeof res.code === "string", "warn 级规则不应让构建失败");
+  assert.match(warned.join("\n"), /PLAIN_E1115/, "仍要在告警通道提示");
+});
+
 test("通过契约检查的模块不受影响", async () => {
   const root = tmpRoot();
   const p = plugin();

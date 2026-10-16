@@ -160,6 +160,61 @@ test("不误伤：声明 / 对象属性赋值 / 普通变量赋值", () => {
   assert.deepEqual(check(src, "a.tsx"), []);
 });
 
+// ---------------------------------------------------------------------------
+// PLAIN_E1115：React 拼写的属性名 —— 与规范写法**等价**，所以只提示 + 自动改写
+// ---------------------------------------------------------------------------
+
+test("PLAIN_E1115：className / htmlFor 只报 warn，并自动改写成 class / for", () => {
+  const src = [
+    "import { signal } from 'plain';",
+    "const cls = signal('a');",
+    'export function App() { return <div className={cls()} htmlFor="x">t</div>; }',
+  ].join("\n");
+  const issues = check(src, "App.tsx");
+  assert.deepEqual(codes(issues), ["PLAIN_E1115", "PLAIN_E1115"]);
+  assert.ok(
+    issues.every((i) => i.level === "warn"),
+    "等价写法只提示、不报错（报 error 会因为拼写偏好把构建搞挂）"
+  );
+
+  const fixed = autofix(src, issues);
+  assert.ok(fixed.includes("class={cls()}"), fixed);
+  assert.ok(fixed.includes('for="x"'), fixed);
+  assert.ok(!fixed.includes("className") && !fixed.includes("htmlFor"), fixed);
+  // 改完即收敛：再 check 不应再有 PLAIN_E1115
+  assert.deepEqual(check(fixed, "App.tsx"), []);
+});
+
+test("PLAIN_E1115 只在**内建元素**上生效，组件上的属性名是它自己的 prop", () => {
+  const src =
+    'export function App() { return <Card className="x" htmlFor={y}><Child className="z" /></Card>; }';
+  assert.deepEqual(check(src, "a.tsx"), [], "组件 tag 上的 className / htmlFor 不报");
+  // 点号形式（Ctx.Provider）同样算组件
+  assert.deepEqual(
+    check('export function App() { return <Ctx.Provider className="x" />; }', "a.tsx"),
+    []
+  );
+});
+
+test("PLAIN_E1115：规范写法与 SVG / 自定义元素上的其它属性不误伤", () => {
+  const good = [
+    'export function App() { return <label class="c" for="x">t</label>; }',
+    'export function App() { return <svg viewBox="0 0 1 1"><circle class="c" /></svg>; }',
+    'export function App() { return <div data-class="x" aria-label="y" />; }',
+    // 命令式 DOM 的 el.className 是平台 API，与 JSX 属性无关，不能报
+    'export function App() { return <canvas ref={(el) => { el.className = "c"; }} />; }',
+  ].join("\n");
+  assert.deepEqual(check(good, "a.tsx"), []);
+});
+
+test("PLAIN_E1115 可用抑制指令压掉（确认误报时的出口）", () => {
+  const src = [
+    "// plain-ignore-next-line PLAIN_E1115",
+    'export function App() { return <div className="c" />; }',
+  ].join("\n");
+  assert.deepEqual(check(src, "a.tsx"), []);
+});
+
 test("[回归] 属性场景只报一次，且 autofix 不会重复插入调用", () => {
   const src = [
     "import { signal } from 'plain';",

@@ -1,8 +1,12 @@
 // Plain 契约检查器：专治 AI（和人）在 Plain 里最高频的几类写法错误
-// 覆盖反模式目录 1–5（可自动修其中一部分）、7、9、11–14
+// 覆盖反模式目录 1–5（可自动修其中一部分）、7、9、11–14、22
 //
 // 设计取向：能自动修的就别只报错。所有 fix 都是 AST 定位 + 源码切片，
 // 不做正则瞎替换，所以不会误伤多行声明。
+//
+// 级别：`error` 是闸门（vite 插件默认据此让构建失败）；`warn` 只提示 + 自动改写。
+// 目前唯一的 warn 规则是 PLAIN_E1115（React 拼写的属性名）——它与规范写法**等价**，
+// 报成 error 会因为「写法偏好」把构建搞挂，明显过头。
 
 import ts from "typescript";
 import {
@@ -10,6 +14,9 @@ import {
   parseSuppressionCodes,
   type PlainErrorCode,
 } from "./errors.js";
+// React 拼写的兼容面（className / htmlFor）—— 与编译器用的是**同一张表**，
+// 于是「收下兼容拼写」与「提示改回规范名」不会各写各的（见 src/attrs.ts）。
+import { REACT_COMPAT_ALIASES } from "./attrs.js";
 
 export interface LintIssue {
   line: number;
@@ -201,6 +208,30 @@ export function check(
           text: `${id.text}()`,
         }
       );
+    }
+
+    // 反模式 22：React 拼写的属性名（className / htmlFor）
+    //    这两个与 class / for **等价**（编译器会归一，见 src/attrs.ts），所以只
+    //    「提示 + 自动改写」，绝不报错 —— 它不是 bug，是拼写偏好。
+    //    只在**内建元素**上生效：组件上的 className 是组件自己定的 prop 名，
+    //    改掉会破坏组件契约（没有任何理由假设组件收的是 class）。
+    if (ts.isJsxAttribute(node)) {
+      const renamed = REACT_COMPAT_ALIASES[jsxAttrName(node)];
+      if (renamed && isBuiltinTag(jsxOwnerTag(node))) {
+        const name = jsxAttrName(node);
+        add(
+          node,
+          "warn",
+          "PLAIN_E1115",
+          `属性名 "${name}" 是 React 拼写；规范写法是原生 HTML 名 "${renamed}"` +
+            `（两者等价，check 会自动改写）`,
+          {
+            start: node.name.getStart(sf),
+            end: node.name.getEnd(),
+            text: renamed,
+          }
+        );
+      }
     }
 
     // 反模式 3：React 肌肉记忆
@@ -472,6 +503,22 @@ function isEventAttrName(name: string): boolean {
 
 function jsxAttrName(attr: ts.JsxAttribute): string {
   return ts.isIdentifier(attr.name) ? attr.name.text : attr.name.getText();
+}
+
+/** 属性所在元素的标签名（<div …> -> "div"；取不到返回 null） */
+function jsxOwnerTag(attr: ts.JsxAttribute): string | null {
+  const holder: any = attr.parent && attr.parent.parent;
+  const tagName = holder && holder.tagName;
+  return tagName ? tagName.getText() : null;
+}
+
+/**
+ * 标签是内建元素还是组件 —— 口径与编译器一致（`src/compiler/index.ts` 的
+ * `isComponentTag`）：大写开头 / 含 `.`（`Ctx.Provider`）是组件。
+ */
+function isBuiltinTag(tag: string | null): boolean {
+  if (!tag) return false;
+  return !/^[A-Z]/.test(tag) && !tag.includes(".");
 }
 
 /** 表达式是否从组件 props 出发的属性读取（props.title / props.params.id / props["x"]） */

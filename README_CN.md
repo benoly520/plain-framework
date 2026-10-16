@@ -207,11 +207,11 @@ function currentPage() {
 ```tsx
 // 1. 组件：return (<jsx />)
 function Card(props) {
-  return (<section className="card">{props.children()}</section>);
+  return (<section class="card">{props.children()}</section>);
 }
 
 // 2. 列表（带 key 时按 key 复用节点；不带则按位置复用）
-<ul>{todos().map(t => <li key={t.id} className={t.done ? "done" : ""}>{t.text}</li>)}</ul>
+<ul>{todos().map(t => <li key={t.id} class={t.done ? "done" : ""}>{t.text}</li>)}</ul>
 
 // 3. 条件（可无限嵌套）
 {loading() ? <p>加载中</p> : error() ? <p>{error().message}</p> : <div>{data().name}</div>}
@@ -308,6 +308,7 @@ function Card(props) {
 | `PLAIN_E1111` | `computed(() => { s.set(…) })` | ❌ 派生值必须纯，只报错 |
 | `PLAIN_E1113` | 模块作用域创建 `resource()`（import 时立即执行 / SSR 导入即发请求） | ❌ 挪进组件 / `createScope`，只报错 |
 | `PLAIN_E1114` | 对 `useContext(Ctx)` 的返回值直接取属性（它是 getter） | ❌ 改成先调用：`useContext(Ctx)()`，只报错 |
+| `PLAIN_E1115` | 内建元素上用 React 拼写的属性名（`className` / `htmlFor`） | ✅ 改写成 `class` / `for`（**只告警**——两者等价，不阻断构建） |
 
 > 每个码还有一个**可读短名**（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`；
 > 旧写法 `plain/no-props-snapshot` 在抑制指令里仍被接受（向后兼容），但输出统一走新码。
@@ -623,7 +624,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ `server()` 参数与返回值可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
 - ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
 - ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
-- ✅ `AGENTS.md` + 反模式目录（21 条均有静态检查；看不出类型的不猜）
+- ✅ `AGENTS.md` + 反模式目录（22 条均有静态检查；看不出类型的不猜）
 - ✅ AI 可发现性：`plaindev agent-context [--write]` 把规则落盘成跨工具标准 `AGENTS.md`
   （外加 `.github/copilot-instructions.md` 与 `.cursor/rules/*.mdc` 兜底，已有文件不覆盖）；
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；`plaindev lsp` 把**同一条规则链**做成

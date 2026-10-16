@@ -169,7 +169,7 @@ async function onSubmit(e: SubmitEvent) {
   <button type="submit" disabled={saving()}>
     {saving() ? "提交中…" : "提交"}
   </button>
-  {error() ? <p className="error">{error()}</p> : null}
+  {error() ? <p class="error">{error()}</p> : null}
 </form>
 ```
 
@@ -307,7 +307,7 @@ const canSubmit = computed(() => emailError() === null);
 
 ```tsx
 <input value={email()} onInput={(e) => email.set(e.target.value)} />
-{emailError() ? <p className="error">{emailError()}</p> : null}
+{emailError() ? <p class="error">{emailError()}</p> : null}
 <button type="submit" disabled={!canSubmit()}>提交</button>
 ```
 
@@ -483,7 +483,7 @@ const getTodo = server(async (id: number) => ({ id, text: "…" }));   // 两端
 
 function Detail(props: RouteProps) {
   const todo = resource(() => getTodo(Number(props.params.id)));     // 服务端直调 / 客户端 RPC
-  return todo.data() ? <h2>{todo.data()!.text}</h2> : <p className="muted">加载中…</p>;
+  return todo.data() ? <h2>{todo.data()!.text}</h2> : <p class="muted">加载中…</p>;
 }
 ```
 
@@ -569,7 +569,7 @@ function App() {
 
 function DeepChild() {
   const theme = useContext(ThemeCtx);
-  return <div className={`t-${theme()}`}>…</div>;   // 读法与 signal 一致：调用它
+  return <div class={`t-${theme()}`}>…</div>;   // 读法与 signal 一致：调用它
 }
 ```
 

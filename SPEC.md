@@ -125,6 +125,20 @@ function Counter() {
 - 布尔属性（`checked`/`disabled`/...）按属性语义处理，不依赖字符串 `"false"` 的歧义。
 - **属性名与类型受类型系统约束**：未知属性名 / 类型写错（`scr` / `checked="yes"` / `onClikc`）
   在编辑器与 `tsc` 下当场报错（见 `test/types.test.mjs`）。
+- **属性名归一化只有一处**（`src/attrs.ts`）：静态字面量与动态表达式**只允许「值从哪来」不同，
+  不允许「落到哪个属性」不同**。**规范拼写是原生 HTML 名**（`class` / `for`）；
+  camelCase 的 DOM 名（`className` / `htmlFor`）只作为**兼容输入**接受，归一到同一个属性 ——
+  收它们不是为了「兼容 React API」，而是为了 AI / 存量代码的首次写对率；代价是方言多一种，
+  所以兼容面就这两个名字、集中在 `REACT_COMPAT_ALIASES` 里显式登记（**扩大它是一次显式决定**，
+  由 `test/attrs.test.mjs` 钉住）。其余 camelCase（`colSpan` / `tabIndex`）是 DOM property 名，
+  靠「HTML 一律小写」成立，不在兼容表里。
+  写法会**自动收敛**到规范名：内建元素上写 `className` / `htmlFor` 由 `PLAIN_E1115`
+  提示并自动改写（`plaindev check` 默认就会改），因为它与 `class` / `for` 完全等价，
+  所以只告警、绝不阻断构建；组件上的 `className` 是组件自己定的 prop 名，不动。
+  SVG / MathML 属性名大小写敏感（`viewBox` / `preserveAspectRatio`）必须原样保留。
+  响应式属性在客户端走 property（`setAttribute` 改不动已脏的表单状态），
+  服务端垫片把同一批 property 反射回 `attributes`，SSR 才不会丢动态 `href` / `value` / `checked`；
+  等价性由 `test/attrs.test.mjs` 钉住。
 - **不支持属性展开 `{...expr}`**（编译期报错 `PLAIN_E1008`）：展开只做了半套 —— 不进响应式更新，
   且绕过 class / style / value 的正确属性路径，会静默跑错。与 `PLAIN_E1005` 同一条理由：
   **不做静默降级**，宁可在编译期挡住。
@@ -180,10 +194,11 @@ const loadUser = server((id) => db.users.find(id)); // 只跑在服务端
 >   `optional` 来自 `?`、`type` 来自注解；解析不了时附 `propsSource: "declared-unresolved"` 退回推断，**不假装**。
 > 2 ✅ 已实现（`PLAIN_E100x` / `PLAIN_E11xx` / `PLAIN_E2001` + `hint`，可 JSON 序列化）；
 >   错误码单一来源见 `src/errors.ts` 的 `ERROR_CATALOG`。
-> 3 ✅ 已实现 **14 条 lint 规则**（`PLAIN_E1101`–`PLAIN_E1114`）+ 编译器侧语义校验，
->   并**默认接入构建链路**（构建即失败，`lint: "warn" | false` 可调）；
+> 3 ✅ 已实现 **15 条 lint 规则**（`PLAIN_E1101`–`PLAIN_E1115`）+ 编译器侧语义校验，
+>   并**默认接入构建链路**（`error` 级即构建失败；`warn` 级只提示、不阻断，
+>   `lint: "warn" | false` 可调 —— 目前唯一的 `warn` 规则是 `PLAIN_E1115`）；
 >   VS Code 侧的同一套诊断由 `plaindev lsp` 提供，MCP 侧由 `plaindev mcp` 提供。
->   [`AGENTS.md`](AGENTS.md) 反模式目录当前 **21 条**（含 §3.1 的视图语法边界），逐条标注是否被静态检查覆盖。
+>   [`AGENTS.md`](AGENTS.md) 反模式目录当前 **22 条**（含 §3.1 的视图语法边界），逐条标注是否被静态检查覆盖。
 >   **看不出的标识符不猜**（不误报优先于多报），未覆盖的条目明确写「未拦截，自己保证」。
 > 另有零依赖官方测试工具包 `plain/testing`（`render` / `fireEvent` / `flush`）。
 
@@ -208,6 +223,7 @@ const loadUser = server((id) => db.users.find(id)); // 只跑在服务端
 | §3 signal / computed / effect | `src/runtime/signal.ts` | `test/runtime-extra.test.mjs` |
 | §4 视图与控制流 / keyed 复用 | `src/compiler/index.ts` + `src/runtime/dom.ts` | `test/keyed.test.mjs` |
 | §4 属性类型收紧 | `src/types.ts` | `test/types.test.mjs`（真 `tsc`） |
+| §4 属性名归一化（静态 / 动态等价、SVG 大小写、SSR 反射） | `src/attrs.ts` + `src/server/dom-shim.ts` | `test/attrs.test.mjs` |
 | §4 `ref` 逃逸口 | `src/runtime/ref.ts` | `test/ref.test.mjs` |
 | §5 `server()` 边界 | `src/compiler/index.ts` + `src/runtime/async.ts` | `test/eval-context.test.mjs` |
 | §6 编译到 DOM | `src/compiler/` | `test/compiler.test.mjs` |

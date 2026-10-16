@@ -130,7 +130,7 @@ const boom = signal(false);
 
 function Fragile() {
   return (
-    <div className="muted">
+    <div class="muted">
       {(() => {
         if (boom()) throw new Error("人为触发的渲染错误");
         return "当前状态正常，子组件渲染成功。";
@@ -146,68 +146,68 @@ function Home() {
   return (
     <main>
       <Card title="待办清单">
-        <div className="row">
+        <div class="row">
           <input
-            className="input"
+            class="input"
             placeholder="加一条待办，回车也行…"
             value={draft()}
             onInput={(e) => draft.set(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addTodo()}
           />
-          <button className="btn" onClick={addTodo}>
+          <button class="btn" onClick={addTodo}>
             添加
           </button>
         </div>
-        <div className="row small">
-          <span className="muted">剩 {remaining()} 项未完成</span>
-          <span className="spacer" />
+        <div class="row small">
+          <span class="muted">剩 {remaining()} 项未完成</span>
+          <span class="spacer" />
           <button
-            className={filter() === "all" ? "chip on" : "chip"}
+            class={filter() === "all" ? "chip on" : "chip"}
             onClick={() => filter.set("all")}
           >
             全部
           </button>
           <button
-            className={filter() === "active" ? "chip on" : "chip"}
+            class={filter() === "active" ? "chip on" : "chip"}
             onClick={() => filter.set("active")}
           >
             未完成
           </button>
           <button
-            className={filter() === "done" ? "chip on" : "chip"}
+            class={filter() === "done" ? "chip on" : "chip"}
             onClick={() => filter.set("done")}
           >
             已完成
           </button>
         </div>
-        <ul className="todos">
+        <ul class="todos">
           {visible().map((t) => (
-            <li className={t.done ? "todo done" : "todo"}>
+            <li class={t.done ? "todo done" : "todo"}>
               <input
                 type="checkbox"
                 checked={t.done}
                 onChange={() => toggleTodo(t.id)}
               />
               <span>{t.text}</span>
-              <a className="detail" href={"#/todo/" + t.id}>
+              <a class="detail" href={"#/todo/" + t.id}>
                 详情
               </a>
-              <a className="del" href="#" onClick={() => removeTodo(t.id)}>
+              <a class="del" href="#" onClick={() => removeTodo(t.id)}>
                 删除
               </a>
             </li>
           ))}
         </ul>
-        {visible().length === 0 ? <p className="ok">这里空了</p> : null}
+        {visible().length === 0 ? <p class="ok">这里空了</p> : null}
       </Card>
 
       <Card title="错误边界">
         <ErrorBoundary
           fallback={(e, retry) => (
-            <div className="error-box">
+            <div class="error-box">
               <strong>已降级：</strong>
               {e.message}
-              <button className="btn ghost" onClick={retry}>
+              <button class="btn ghost" onClick={retry}>
                 重试
               </button>
             </div>
@@ -215,8 +215,8 @@ function Home() {
         >
           <Fragile />
         </ErrorBoundary>
-        <div className="row" style={{ marginTop: "12px", marginBottom: 0 }}>
-          <button className="btn ghost" onClick={() => boom.set(!boom())}>
+        <div class="row" style={{ marginTop: "12px", marginBottom: 0 }}>
+          <button class="btn ghost" onClick={() => boom.set(!boom())}>
             {boom() ? "关掉错误开关" : "人为触发错误"}
           </button>
         </div>
@@ -232,14 +232,14 @@ function TodoView(props: { todo: Todo }) {
   const t = () => resolve(props.todo);
   return (
     <div>
-      <p className="big">{t().text}</p>
-      <p className={t().done ? "ok" : "muted"}>
+      <p class="big">{t().text}</p>
+      <p class={t().done ? "ok" : "muted"}>
         {t().done ? "已经完成" : "还没完成"}
       </p>
-      <button className="btn ghost" onClick={() => toggleTodo(t().id)}>
+      <button class="btn ghost" onClick={() => toggleTodo(t().id)}>
         切换状态
       </button>
-      <a className="link" href="#/">
+      <a class="link" href="#/">
         返回列表
       </a>
     </div>
@@ -250,12 +250,12 @@ function Detail(props: RouteProps) {
   const id = () => String(props.params.id);
   const found = () => todos().find((t) => String(t.id) === id());
   return (
-    <section className="card">
-      <h2 className="card-title">待办 #{id()}</h2>
+    <section class="card">
+      <h2 class="card-title">待办 #{id()}</h2>
       {found() ? (
         <TodoView todo={found()!} />
       ) : (
-        <p className="muted">找不到 #{id()}，可能已经被删了。</p>
+        <p class="muted">找不到 #{id()}，可能已经被删了。</p>
       )}
     </section>
   );
@@ -263,10 +263,10 @@ function Detail(props: RouteProps) {
 
 function NotFound() {
   return (
-    <section className="card">
-      <h2 className="card-title">404</h2>
-      <p className="muted">这个地址不存在。</p>
-      <a className="link" href="#/">
+    <section class="card">
+      <h2 class="card-title">404</h2>
+      <p class="muted">这个地址不存在。</p>
+      <a class="link" href="#/">
         回到首页
       </a>
     </section>
@@ -285,38 +285,38 @@ function Stats() {
 
   return (
     <main>
-      <section className="card">
-        <h2 className="card-title">服务端数据（server() + RPC）</h2>
+      <section class="card">
+        <h2 class="card-title">服务端数据（server() + RPC）</h2>
         {stats.loading() ? (
-          <p className="muted">加载中…</p>
+          <p class="muted">加载中…</p>
         ) : (
-          <div className="stats">
+          <div class="stats">
             <StatCard label="用户总数" value={stats.data()?.users} />
             <StatCard label="在线" value={stats.data()?.online} />
             <StatCard label="框架版本" value={stats.data()?.version} />
           </div>
         )}
-        <button className="btn ghost" onClick={() => stats.refetch()}>
+        <button class="btn ghost" onClick={() => stats.refetch()}>
           重新拉取
         </button>
       </section>
 
-      <section className="card">
-        <h2 className="card-title">带参数的 server 调用</h2>
-        <div className="row">
+      <section class="card">
+        <h2 class="card-title">带参数的 server 调用</h2>
+        <div class="row">
           <input
-            className="input"
+            class="input"
             placeholder="输入一个词试试敏感词校验"
             value={word()}
             onInput={(e) => word.set(e.target.value)}
           />
         </div>
         {word() === "" ? (
-          <p className="muted">输入内容后自动调用服务端校验</p>
+          <p class="muted">输入内容后自动调用服务端校验</p>
         ) : audit.loading() ? (
-          <p className="muted">校验中…</p>
+          <p class="muted">校验中…</p>
         ) : (
-          <p className={audit.data()?.ok ? "ok" : "warn"}>
+          <p class={audit.data()?.ok ? "ok" : "warn"}>
             {audit.data()?.ok ? `「${word()}」可以用` : `「${word()}」是敏感词`}
           </p>
         )}
@@ -346,19 +346,19 @@ function currentPage() {
 
 function App() {
   return (
-    <div className="app">
-      <header className="topbar">
+    <div class="app">
+      <header class="topbar">
         <h1>Plain App</h1>
         <nav>
           <a
-            className={router.current().path === "/" ? "nav on" : "nav"}
+            class={router.current().path === "/" ? "nav on" : "nav"}
             href="#/"
             onClick={() => router.navigate("/")}
           >
             待办
           </a>
           <a
-            className={router.current().path === "/stats" ? "nav on" : "nav"}
+            class={router.current().path === "/stats" ? "nav on" : "nav"}
             href="#/stats"
             onClick={() => router.navigate("/stats")}
           >

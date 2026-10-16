@@ -110,7 +110,7 @@ function HeaderCell(props: { col: (typeof COLUMNS)[number] }) {
   const c = () => resolve(props.col);
   const sorted = () => sortKey() === c().key;
   return (
-    <button className="h" onClick={() => setSort(c().key)}>
+    <button class="h" onClick={() => setSort(c().key)}>
       {c().label}
       {sorted() ? (sortDir() === "asc" ? " ▲" : " ▼") : ""}
     </button>
@@ -120,13 +120,13 @@ function HeaderCell(props: { col: (typeof COLUMNS)[number] }) {
 function BodyRow(props: { row: Row }) {
   const r = () => resolve(props.row);
   return (
-    <div className="cols body-row">
+    <div class="cols body-row">
       <span>{r().id}</span>
       <span>{r().name}</span>
       <span>{r().email}</span>
       <span>{r().dept}</span>
       <span>{r().score}</span>
-      <span className={"badge " + r().status}>{r().status}</span>
+      <span class={"badge " + r().status}>{r().status}</span>
       <span>{r().joined}</span>
     </div>
   );
@@ -134,26 +134,26 @@ function BodyRow(props: { row: Row }) {
 
 function App() {
   return (
-    <div className="app">
-      <header className="topbar">
+    <div class="app">
+      <header class="topbar">
         <h1>Plain · 数据表格</h1>
-        <span className="muted">
+        <span class="muted">
           共 {total()} 行 · DOM 中恒为 {VISIBLE} 行（窗口化）
         </span>
       </header>
 
-      <section className="card">
-        <div className="row">
+      <section class="card">
+        <div class="row">
           <input
-            className="input"
+            class="input"
             placeholder="搜索姓名 / 邮箱 / 部门…"
             value={query()}
             onInput={(e) => query.set(e.target.value)}
           />
         </div>
 
-        <div className="table">
-          <div className="cols head">
+        <div class="table">
+          <div class="cols head">
             {COLUMNS.map((c) => (
               <HeaderCell col={c} />
             ))}
@@ -161,7 +161,7 @@ function App() {
 
           {/* 视口：滚动时只更新上下占位高度 + 少量可见行 */}
           <div
-            className="viewport"
+            class="viewport"
             onScroll={(e) => scrollTop.set((e.currentTarget as HTMLDivElement).scrollTop)}
           >
             <div style={"height:" + start() * ROW_H + "px"} />

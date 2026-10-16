@@ -135,7 +135,12 @@ export default function plainPlugin(options: {
       if (lint) {
         const issues = check(code, fileName);
         if (issues.length) {
-          if (lint === "error") throw toLintError(issues, fileName);
+          // level 决定它是不是闸门：`error` 让构建失败；`warn`（写法偏好类规则，
+          // 如 PLAIN_E1115 React 拼写属性名）只提示，绝不阻断构建。
+          const blocking = issues.filter((i: any) => i.level === "error");
+          if (blocking.length && lint === "error") {
+            throw toLintError(issues, fileName);
+          }
           reportWarn(this, formatIssues(issues, fileName));
         }
       }

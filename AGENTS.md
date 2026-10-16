@@ -51,6 +51,7 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | 19 | 在**模块作用域**创建 `resource(...)`（import 时立即执行、SSR 导入即发请求、无人回收） | 放进组件函数体，或 `createScope(() => …)` 里 | ✅ `PLAIN_E1113` | — |
 | 20 | 对 `useContext(Ctx)` 的返回值直接取属性（`t.name` / `useContext(Ctx).name`） | 先调用再取：`useContext(Ctx)().name` | ✅ `PLAIN_E1114` | — |
 | 21 | 在不支持的位置写 JSX：`{cond \|\| <a/>}`、`{cond ?? <a/>}`（含裸 `return cond \|\| <a/>`）、数组字面量 `{[<a/>]}`、IIFE、IIFE 内 `try/catch` 的 `return <a/>`、链式后置 `.map().filter()` | 先赋值给变量再插值，或抽成组件函数（详见第 3.1 节） | ✅ `PLAIN_E1001` | — |
+| 22 | 在**内建元素**上写 React 拼写的属性名（`className` / `htmlFor`） | 用原生 HTML 名 `class` / `for`（两者等价，编译器会归一；组件上的 prop 名不受影响） | ✅ `PLAIN_E1115`（可自动修，**只告警**） | — |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
 > **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
@@ -149,6 +150,7 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | `PLAIN_E1111` | `computed` 里写 signal | `computed` 必须纯，副作用放 `effect` |
 | `PLAIN_E1113` | 在模块作用域创建 `resource()` | 放进组件函数体，或 `createScope(() => …)` 里 |
 | `PLAIN_E1114` | 对 `useContext(Ctx)` 的返回值直接取属性 | 先调用再取：`useContext(Ctx)().name` |
+| `PLAIN_E1115` | 内建元素上写 React 拼写的属性名（`className` / `htmlFor`） | 用原生 HTML 名 `class` / `for`（**只告警**，两者等价，`check` 自动改写） |
 | `PLAIN_E2001` | 契约检查未通过 | 跑 `npx plaindev check --fix <dir>` 自动修，再重新构建 |
 
 > `E11xx` 每条还带一个可读短名（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`。
@@ -202,6 +204,7 @@ npx plaindev lsp            # LSP stdio server：把契约检查接进编辑器�
 | `src/runtime/` | signal / dom / ref / context / async / router / error / hydrate / hmr —— 运行时（**对外 API 面冻结**；`ref.ts` / `context.ts` 是近期新增，见 `docs/rfcs/`） |
 | `src/runtime/hydrate.ts` | SSR 注水：认领式 document 复用服务端节点（`claim-document.ts` / `hydration-context.ts` 为内核） |
 | `src/runtime/hmr.ts` | HMR 挂载点注册表与热替换（`hmrApply` / 模块级 signal 快照） |
+| `src/attrs.ts` | **属性名归一化唯一表**（命名空间判定 + 拼写 → 落地方式 + property 反射表），编译器 / 运行时 / SSR 垫片共用 |
 | `src/compiler/` | TSX → 建 DOM 代码、服务端清单、契约提取、sourcemap |
 | `src/vite/` | Vite 插件：契约检查 → 类型剥离 → 编译 → `server()` 剥离 → HMR 注入 → 回传 sourcemap |
 | `src/lint.ts` | 契约检查与自动修复（反模式目录 1–5、7、9、11–13 的执行者） |
@@ -225,6 +228,14 @@ npx plaindev lsp            # LSP stdio server：把契约检查接进编辑器�
 7. **不要给 `CommonAttributes` 加回 `[attr: string]: any`**（`src/types.ts`）：那会让内建元素上的
    属性名拼错 / 类型写错在 `tsc` 下静默通过（`<img scr>` / `<input checked="yes">` / `<div onClikc>`）。
    要支持冷门属性，就往那个枚举里**补一个名字**。防回归测试见 `test/types.test.mjs`。
+8. **属性名归一化只有 `src/attrs.ts` 一张表**：不要在编译器里给单个属性加特判分支 ——
+   `<label htmlFor="x">` 曾因为「静态分支只特判了 className」而让静态产物落到 `htmlfor`、
+   动态产物落到 `.htmlFor`（静默分叉）。静态 / 动态只允许「值从哪来」不同，
+   「落到哪个属性」必须一致；服务端垫片的 property ↔ attribute 反射也共用这张表。
+   规范拼写是**原生 HTML 名**（`class` / `for`）；React 拼写（`className` / `htmlFor`）是
+   **兼容输入**，兼容面就这两个名字、集中在 `REACT_COMPAT_ALIASES` 显式登记 ——
+   **扩大它要同步改 `test/attrs.test.mjs` 钉住的清单，属于显式决定，不是顺手加一行**。
+   改这里必须让 `test/attrs.test.mjs` 的等价性用例如实通过。
 
 ## 8. 帮这个框架变好（重要）
 

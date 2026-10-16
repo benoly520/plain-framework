@@ -42,6 +42,7 @@ export type PlainErrorCode =
   | "PLAIN_E1112"
   | "PLAIN_E1113"
   | "PLAIN_E1114"
+  | "PLAIN_E1115"
   | "PLAIN_E2001";
 
 /** lint 规则短名（无前缀）：一种反模式一个短名，与 `plain/<短名>` 一一对应 */
@@ -58,7 +59,8 @@ export type LintRuleName =
   | "no-effect-loop"
   | "no-computed-side-effect"
   | "no-module-scope-resource"
-  | "no-context-getter-property";
+  | "no-context-getter-property"
+  | "react-attr-spelling";
 
 export interface ErrorEntry {
   code: PlainErrorCode;
@@ -217,6 +219,12 @@ export const ERROR_CATALOG: Record<PlainErrorCode, ErrorEntry> = {
     rule: "no-context-getter-property",
     suppressible: true,
     summary: "对 `useContext(Ctx)` 的返回值直接取属性（它是 getter，要先调用 `()`）",
+  },
+  PLAIN_E1115: {
+    code: "PLAIN_E1115",
+    rule: "react-attr-spelling",
+    suppressible: true,
+    summary: "React 拼写的属性名（`className` / `htmlFor`）—— 规范写法是 `class` / `for`",
   },
 
   // --- E2xxx 构建期 ------------------------------------------------------

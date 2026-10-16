@@ -45,15 +45,15 @@ function Home() {
   return (
     <main>
       <h1>待办（服务端渲染）</h1>
-      <p className="muted">
+      <p class="muted">
         这段 HTML 是服务端直出的：右键「查看网页源代码」就能看到数据，而不是空骨架。
       </p>
       {todos.loading() ? (
-        <p className="muted">加载中…</p>
+        <p class="muted">加载中…</p>
       ) : (
-        <ul className="todos">
+        <ul class="todos">
           {todos.data()!.map((t) => (
-            <li className={t.done ? "done" : ""}>
+            <li class={t.done ? "done" : ""}>
               <a href={"/todo/" + t.id}>{t.text}</a>
             </li>
           ))}
@@ -69,21 +69,21 @@ function Detail(props: RouteProps) {
   return (
     <main>
       <p>
-        <a className="back" href="/">
+        <a class="back" href="/">
           ← 返回列表
         </a>
       </p>
       {todo.loading() ? (
-        <p className="muted">加载中…</p>
+        <p class="muted">加载中…</p>
       ) : todo.data() ? (
         <article>
           <h2>{todo.data()!.text}</h2>
-          <p className={todo.data()!.done ? "ok" : "muted"}>
+          <p class={todo.data()!.done ? "ok" : "muted"}>
             {todo.data()!.done ? "已完成" : "未完成"}
           </p>
         </article>
       ) : (
-        <p className="muted">找不到 #{id()}。</p>
+        <p class="muted">找不到 #{id()}。</p>
       )}
     </main>
   );
@@ -93,8 +93,8 @@ function NotFound() {
   return (
     <main>
       <h2>404</h2>
-      <p className="muted">这个地址不存在。</p>
-      <a className="back" href="/">
+      <p class="muted">这个地址不存在。</p>
+      <a class="back" href="/">
         回到首页
       </a>
     </main>
@@ -120,19 +120,19 @@ export function App() {
     ? m.route.component({ params: m.params, path: m.path })
     : null;
   return (
-    <div className="app">
-      <header className="topbar">
-        <a className="brand" href="/">
+    <div class="app">
+      <header class="topbar">
+        <a class="brand" href="/">
           Plain SSR
         </a>
-        <span className="muted">服务端渲染 + 首屏数据 + 注水接管</span>
+        <span class="muted">服务端渲染 + 首屏数据 + 注水接管</span>
       </header>
       {page}
-      <footer className="foot">
-        <button className="btn" onClick={() => clicks.set(clicks() + 1)}>
+      <footer class="foot">
+        <button class="btn" onClick={() => clicks.set(clicks() + 1)}>
           点了 {clicks()} 次
         </button>
-        <span className="muted">
+        <span class="muted">
           服务端渲染时它是 0；注水后点一下会动 —— 事件与响应式接上了
         </span>
       </footer>
