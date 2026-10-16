@@ -1,8 +1,14 @@
-# Plain —— 面向 AI 的最小可行前端框架规范（草案 α）
+# Plain —— 面向 AI 的前端框架规范
 
 > 本文是《面向 AI 时代的前端框架》讨论的落地规范。目标：**让 AI 基于本框架更好、更容易、更快地实现复杂前端项目；更少推理、更简单、长期可维护。**
 >
-> 配套可运行原型（"草案 α"，已被 `src/` 下的正式编译型实现取代）：[`prototype/framework.js`](prototype/framework.js)（内核）、[`prototype/app.js`](prototype/app.js)（演示）、[`prototype/index.html`](prototype/index.html)（预览）。设计缘起见 [`docs/ai_frontend_framework_discussion.md`](docs/ai_frontend_framework_discussion.md)。
+> 设计缘起见 [`docs/ai_frontend_framework_discussion.md`](docs/ai_frontend_framework_discussion.md)。
+>
+> **本文描述「规范」，[`src/`](src/) 是它的正式实现（当前 0.3.0）。** 规范与实现不一致时以本文件为准，
+> 并应提 issue；本文档末尾 [§9](#9-实现状态对照) 给出逐条落地对照。
+>
+> 历史：早期曾有一个 ~200 行的运行时原型（`html` 标签模板 + 运行时 diff），
+> 已被编译型实现取代，源码保留在 [`prototype/`](prototype/) 仅供追溯（**不是本规范的现行形态**）。
 
 ---
 
@@ -20,7 +26,7 @@ AI 生成代码的失败模式不是"写不出"，而是"写出的代码依赖�
 |---|---|---|---|
 | 1 | **Locality 本地可推** | 无 hook 顺序、无 deps 数组、无 Proxy 魔法；effect 自动追踪读取了什么 | React deps 数组、Vue Proxy、Svelte `$:` |
 | 2 | **唯一状态原语** | 只有 `signal` / `computed` / `effect` | React 20+ hooks、Vue Composition/Options 双范式 |
-| 3 | **单文件单语言** | 逻辑与 markup 同作用域（hyperscript），无模板/逻辑分离 | Vue/Svelte/Angular 模板与脚本分离 |
+| 3 | **单文件单语言** | 逻辑与 markup 同作用域（TSX），无模板/逻辑分离 | Vue/Svelte/Angular 模板与脚本分离 |
 | 4 | **显式执行边界** | `server()` 一个关键字声明代码在哪端跑 | RSC、Svelte `load`、SolidStart 靠约定 |
 | 5 | **编译到 DOM** | 零框架运行时，组件编译成直接 DOM 操作 | React/Vue 虚拟 DOM diff |
 | 6 | **稳定小核心** | ~10 个导出，API 长期冻结 | Angular 全功能栈 |
@@ -53,22 +59,28 @@ AI 的失败模式不是「写不出」，而是「**自信地写错**」（P1�
 
 ## 2. 组件模型
 
-- 组件就是一个**普通函数**，返回视图节点（运行时版返回 `DocumentFragment`，编译版返回 DOM 构建指令）。
+- 组件就是一个**普通函数**，返回视图节点（源码用 TSX 表达，编译后返回 DOM 构建指令）。
 - 逻辑与视图**同一作用域**：状态、派生、事件处理都写在组件函数体内，不拆文件、不拆 `<template>`。
 - 没有 `class 组件`、没有 `forwardRef`。跨组件共享**普通**状态 = 把 `signal` 提升到模块作用域后导入；
   **跨层传值**（主题 / 语言 / 当前用户）用 `createContext` + `<Ctx.Provider>` + `useContext`。
   注意区分：**请求级**数据（当前用户 / 会话）**必须**走 Context 或 props ——
   放进模块作用域的 signal 会在 SSR 下跨请求泄漏（见 `docs/rfcs/context-and-ssr-isolation.md`）。
 
-```js
+```tsx
 function Counter() {
-  const count = signal(0);                 // 状态
-  const doubled = computed(() => count() * 2); // 派生
-  return html`<button onclick=${() => count(count() + 1)}>
-    点我 ${count}（doubled: ${doubled}）
-  </button>`;
+  const count = signal(0);                      // 状态
+  const doubled = computed(() => count() * 2);  // 派生
+  return (
+    <button onClick={() => count.set(count() + 1)}>
+      点我 {count()}（doubled: {doubled()}）
+    </button>
+  );
 }
 ```
+
+> **视图语法是 TSX，不是模板字符串。** 没有 `html\`...\``、没有 `v-model`、没有 `bind`：
+> 插值 `{signal()}` 即细粒度绑定，属性用原生 HTML 名（`class` / `onClick` 由编译器映射到
+> `className` / `addEventListener`），布尔属性按属性语义处理（见 §4）。
 
 ---
 
@@ -83,23 +95,36 @@ function Counter() {
 **铁律**：
 1. 读取 signal 只发生在 `effect` / `computed` / 视图绑定内部才会建立依赖——不在这些上下文里读就是普通取值。
 2. **状态更新走 immutable**（生成新值/新数组），不用深代理。理由：对 AI 更可预测，消灭"原地改了但忘了触发"这一类最难查的 bug。
-3. 没有 `useMemo` / `useCallback` / `React.memo`——`computed` 与视图绑定天然细粒度，编译器（或运行时）负责只更新依赖的 DOM 节点。
+   - 就地改（`items().push(x)`）由契约 lint **构建期**拦截（`PLAIN_E1106`），不是靠文档提醒。
+3. 没有 `useMemo` / `useCallback` / `React.memo`——`computed` 与视图绑定天然细粒度，编译器负责只更新依赖的 DOM 节点。
+4. `effect` 是**同步**的：`effect(async () => …)` 会在第一个 `await` 之后丢失依赖收集（`PLAIN_E1109`）。
+   要取异步数据用 `resource()`，不要拿 `effect` 当 `useEffect` 使。
 
 ---
 
 ## 4. 视图与控制流
 
-- 视图用 `html\`...\`` 构造，插值 `${signal}` 即**细粒度绑定**（只有该文本/属性节点更新，不重渲染整棵子树）。
-- 控制流用**普通函数**，不发明新的模板 DSL（避免"框架方言"增加 AI 的学习与出错面）：
-  - `when(cond, thenFn, elseFn)` —— 条件
-  - `each(items, keyFn, itemFn)` —— keyed 列表，按 key 复用未变节点
-    - 落地形态（见 `src/compiler` + `src/runtime/dom.ts`）：用户写 `key={...}`，
-      编译器把 `arr.map(x => <li key={x.id}/>)` 编译成 `each(parent, getter, itemFn, keyFn)`。
-    - 边界：同一条 map 回调里若同时用到 index 参数，**编译期报错 `PLAIN_E1005`（二者选一）**——
-      keyed 复用下行只构建一次，捕获的 index 无法随位置更新，两者同时生效必有一个语义是错的。
-      这里刻意不做静默降级：静默的语义降级是本规范最想消灭的失败模式。
-- 事件：`onclick=${fn}` 等，编译期转 `addEventListener`。
+- 视图用 **TSX** 书写，插值 `{expr}` 即**细粒度绑定**（只有该文本/属性节点更新，不重渲染整棵子树）。
+- 控制流用**普通 JS 表达式**，不发明新的模板 DSL（避免"框架方言"增加 AI 的学习与出错面）。
+  编译器把下列四种形状直接编译成对应的运行时原语，**其余表达式一律按「普通值插入」处理**：
+
+  | 源码形状 | 编译成 | 说明 |
+  |---|---|---|
+  | `arr.map((x, i) => <li key={x.id}/>)` | `each(parent, getter, itemFn, keyFn)` | keyed 列表，按 key 复用未变节点 |
+  | `cond ? <A/> : <B/>` | `when(parent, cond, thenFn, elseFn)` | 条件分支，可任意嵌套 |
+  | `cond && <A/>` | `when(parent, cond, thenFn, null)` | 逻辑与短路 |
+  | 其它表达式 | `insert(parent, () => expr)` | 求值后作为节点插入（文本 / 节点 / 数组） |
+
+  - **key 与 index 不能并存**：同一条 map 回调里同时用到 index 参数，**编译期报错 `PLAIN_E1005`**——
+    keyed 复用下行只构建一次，捕获的 index 无法随位置更新，两者同时生效必有一个语义是错的。
+    这里刻意不做静默降级：静默的语义降级是本规范最想消灭的失败模式。
+  - **JSX 位置只支持上表四种形状**；`||` / `??` 短路、`filter().map()` 链式、
+    `try/catch` 包裹 JSX、`switch` 返回 JSX 等属于「其它表达式」，会走 `insert` 兜底。
+    需要响应式或 keyed 复用时要**先赋值给变量再插值**，写法见 [`AGENTS.md`](AGENTS.md)。
+- 事件：`onClick={fn}` 等，编译期转 `addEventListener`（字符串事件名会被拒，避免静默失效）。
 - 布尔属性（`checked`/`disabled`/...）按属性语义处理，不依赖字符串 `"false"` 的歧义。
+- **属性名与类型受类型系统约束**：未知属性名 / 类型写错（`scr` / `checked="yes"` / `onClikc`）
+  在编辑器与 `tsc` 下当场报错（见 `test/types.test.mjs`）。
 - **不支持属性展开 `{...expr}`**（编译期报错 `PLAIN_E1008`）：展开只做了半套 —— 不进响应式更新，
   且绕过 class / style / value 的正确属性路径，会静默跑错。与 `PLAIN_E1005` 同一条理由：
   **不做静默降级**，宁可在编译期挡住。
@@ -112,23 +137,35 @@ function Counter() {
 
 ## 5. 显式执行边界
 
-```js
+```tsx
 const loadUser = server((id) => db.users.find(id)); // 只跑在服务端
 ```
 
-- `server()` 标注的函数：运行时版透传；**编译版从客户端 bundle 剥离**，在调用处生成 RPC 桩（参数序列化、返回 Promise）。
+- `server()` 标注的函数：**编译版从客户端 bundle 物理剥离**，在调用处生成 RPC 桩（参数序列化、返回 Promise）。
 - 这是消除"服务端/客户端边界靠猜"的根本手段：AI 只需决定"这函数在哪端"，不必推断。
+- 边界靠**编译器静态校验**兜底，而不是靠文档提醒：
+  - 函数体引用「本文件里绑定了、却不在函数体内」的名字（模块变量 / import / 外层参数）
+    → `PLAIN_E1006`（搬过去必然 `ReferenceError`）；
+  - 参数或返回值不是 JSON 可序列化（函数 / 类实例 / Stream）→ `PLAIN_E1007`；
+  - 函数名在整个应用内必须唯一，同名跨文件在**构建期**报冲突并点名两处来源
+    （清单是单文件 `.plain/server.mjs`，不允许多入口互相覆盖）。
 
 ---
 
-## 6. 编译目标（下一步：把运行时换成编译期）
+## 6. 编译目标
 
-运行时原型已证明模型成立。正式版应做**编译到 DOM**，把框架运行时也消除（对标 Svelte）：
+本框架**已经**是编译到 DOM 的形态（`src/compiler/`），运行时只保留响应式内核与 DOM 原语：
 
-1. `.plain` 单文件组件 → 编译为创建真实 DOM 的指令，无虚拟 DOM、无 diff。
-2. `signal` 裸变量写法（如 `count = count + 1`）可由编译器在赋值处插入写入指令——魔法被限制在"赋值"一个语法点，且编译器直接报错 misuse。
-3. `server()` 边界在编译期物理割裂客户端/服务端产物。
-4. 结果：首屏零框架 JS、极致细粒度、AI 生成的代码几乎 1:1 映射到底层 DOM 操作。
+1. TSX → 编译为创建真实 DOM 的**指令**，无虚拟 DOM、无 diff、无模板 DSL。
+2. 组件是纯函数 → 可以「重跑组件 + 替换它产出的 DOM 子树」，
+   这也是 HMR 不整页刷新的基础（见 `src/runtime/hmr.ts`）。
+3. `server()` 边界在编译期物理割裂客户端/服务端产物（见 §5）。
+4. 文档 / 属性 / 列表 key 的具体编译形态见 §4 的对照表。
+5. 服务端可产出 HTML（SSR）并由客户端**复用同一批节点**注水（`src/server/dom-shim.ts` +
+   `src/runtime/claim-document.ts`）；两端共用同一份编译产物，靠「换掉 `globalThis.document`」实现。
+
+> 结果：框架运行时被压到 **~1.7 KB gzip**（最小计数器应用，含框架；对比 React 同应用 67.4 KB，
+> 见 `benchmark/size.mjs`）。这不是"运行时原型"，是正式实现的实测值。
 
 ---
 
@@ -139,15 +176,43 @@ const loadUser = server((id) => db.users.find(id)); // 只跑在服务端
 3. **契约式 lint**：把上面的"铁律"变成可自动修复的规则（如检测到在 effect 外写入却期望响应，直接提示）。
 
 > **落地状态**（详见 [README](README.md) 与 [AGENTS.md](AGENTS.md)）：
-> 1 已实现（`plaindev schema`，但 props 仍是"推断"而非"声明"，待补）；
-> 2 已实现（`PLAIN_E100x` / `PLAIN_E2001` + `hint`，可 JSON 序列化）；
-> 3 已实现 10 条 lint 规则并**默认接入构建链路**（构建即失败），另有编译器侧的语义校验
-> `PLAIN_E1005`（key/index 冲突）、`PLAIN_E1006`（`server()` 引用外部变量）、
-> `PLAIN_E1007`（`server()` 的参数 / 返回值无法 JSON 序列化）。
-> 反模式目录 20 条均有静态检查；看不出的标识符不猜（见 `AGENTS.md`）。
+> 1 ✅ 已实现（`plaindev schema`）：props 的事实来源是**组件声明的类型**（`props: CardProps`），
+>   `optional` 来自 `?`、`type` 来自注解；解析不了时附 `propsSource: "declared-unresolved"` 退回推断，**不假装**。
+> 2 ✅ 已实现（`PLAIN_E100x` / `PLAIN_E11xx` / `PLAIN_E2001` + `hint`，可 JSON 序列化）；
+>   错误码单一来源见 `src/errors.ts` 的 `ERROR_CATALOG`。
+> 3 ✅ 已实现 **14 条 lint 规则**（`PLAIN_E1101`–`PLAIN_E1114`）+ 编译器侧语义校验，
+>   并**默认接入构建链路**（构建即失败，`lint: "warn" | false` 可调）；
+>   VS Code 侧的同一套诊断由 `plaindev lsp` 提供，MCP 侧由 `plaindev mcp` 提供。
+>   [`AGENTS.md`](AGENTS.md) 反模式目录当前 **21 条**（含 §3.1 的视图语法边界），逐条标注是否被静态检查覆盖。
+>   **看不出的标识符不猜**（不误报优先于多报），未覆盖的条目明确写「未拦截，自己保证」。
+> 另有零依赖官方测试工具包 `plain/testing`（`render` / `fireEvent` / `flush`）。
 
 ---
 
 ## 8. 与"直接造一个全新编译器"的关系
 
-不建议从零写编译器。务实路径：**取 Solid/Svelte 的响应式 + 编译内核，套一层本规范的"减法外壳"**——砍掉模板/逻辑分离、钉死 `server/client` 边界、冻结小 API 面。本原型用 200 行运行时先验证模型，正是这条路的起点。
+不建议从零写编译器。务实路径：**取 Solid/Svelte 的响应式 + 编译内核，套一层本规范的"减法外壳"**——砍掉模板/逻辑分离、钉死 `server/client` 边界、冻结小 API 面。
+
+本框架正是这条路的**已完成形态**：编译前端基于 TypeScript 官方解析器（不自造 parser），
+编译后端产出裸 DOM 指令，运行时只剩信号内核与 DOM 原语。早期用 200 行运行时原型验证过模型
+（保留在 `prototype/` 供追溯），此后换成编译器实现。
+
+---
+
+## 9. 实现状态对照
+
+| 规范条目 | 实现 | 测试 |
+|---|---|---|
+| §1.1 四道闸（P1–P4） | 决策记录散见 `docs/rfcs/` | — |
+| §2 组件模型 / TSX | `src/compiler/index.ts` | `test/compiler.test.mjs` |
+| §3 signal / computed / effect | `src/runtime/signal.ts` | `test/runtime-extra.test.mjs` |
+| §4 视图与控制流 / keyed 复用 | `src/compiler/index.ts` + `src/runtime/dom.ts` | `test/keyed.test.mjs` |
+| §4 属性类型收紧 | `src/types.ts` | `test/types.test.mjs`（真 `tsc`） |
+| §4 `ref` 逃逸口 | `src/runtime/ref.ts` | `test/ref.test.mjs` |
+| §5 `server()` 边界 | `src/compiler/index.ts` + `src/runtime/async.ts` | `test/eval-context.test.mjs` |
+| §6 编译到 DOM | `src/compiler/` | `test/compiler.test.mjs` |
+| §6 SSR / 注水 | `src/server/` + `src/runtime/hydrate.ts` | `test/ssr-data.test.mjs`、`test/hydrate.test.mjs` |
+| §6 HMR | `src/runtime/hmr.ts` + `src/vite/index.ts` | `test/hmr.test.mjs` |
+| §7 schema / 错误 / lint | `src/compiler/schema.ts` + `src/cli/` + `src/lint.ts` + `src/errors.ts` | `test/cli.test.mjs`、`test/schema.test.mjs`、`test/lint.test.mjs` |
+
+> 进度与验收标准的**权威来源**是 [`ROADMAP.md`](ROADMAP.md)；本节只做"规范条目 ↔ 代码"的索引。
