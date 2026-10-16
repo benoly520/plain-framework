@@ -206,3 +206,72 @@ test("JSX 位置：不支持的形状报 PLAIN_E1001（而不是 PLAIN_E1003 编
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// 裸控制流 return：`return cond ? <a/> : <b/>` 这类「表达式本身就是控制流」的写法
+//
+// 曾经的 bug：规则 3 只认 `isJsxLike(expression)`，于是裸三元 / 裸 && / 裸 map
+// 因为「expression 不是 JSX 字样」而漏编译，JSX 残留到产物里，最后被 assertClean
+// 误报成 PLAIN_E1003「编译器 bug」。以下用例把修复后的边界钉死。
+// ---------------------------------------------------------------------------
+
+test("裸控制流 return：三元 / && / map / 提前 return 都应正常编译（不再误报 E1003）", () => {
+  const cases = {
+    ternary: "export function C(){ const a=true; return a ? <p>y</p> : <p>n</p>; }",
+    and: "export function C(){ const a=true; return a && <p>y</p>; }",
+    mapReturn: "export function C(){ const xs=[1]; return xs.map(x => <li>{x}</li>); }",
+    nestedTernary:
+      "export function C(){ const a=true,b=false; return a ? (b ? <p>1</p> : <p>2</p>) : <p>3</p>; }",
+    varComponent:
+      "export function C(){ const a=true; return a ? <A/> : <B/>; }",
+    earlyReturn: "export function C(){ const y=1; if (y) return <p>x</p>; return <i/>; }",
+    ifElseReturn:
+      "export function C(){ const y=1; if (y) { return <p>x</p>; } else { return <i/>; } }",
+    tryReturn:
+      "export function C(){ try { return <p>t</p>; } catch(e) { return <i/>; } }",
+    arrowTernary: "export const C = () => true ? <p>y</p> : <p>n</p>;",
+    // map 回调体内也用裸三元（块体 / 简洁体）
+    mapCbTernary:
+      "export function C(){ const xs=[1]; return <ul>{xs.map(x => x ? <li>a</li> : <li>b</li>)}</ul>; }",
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    assert.doesNotThrow(() => compile(src, name + ".jsx"), name + " 应正常编译");
+  }
+});
+
+test("裸控制流 return：产物里不应残留 JSX（真正编译成建 DOM 的代码）", () => {
+  const { code } = compile(
+    "export function C(){ const a=true; return a ? <p>y</p> : <i>n</i>; }",
+    "bare.jsx"
+  );
+  assert.ok(!/<p>|<i>/.test(code), "产物里不应残留原始 JSX 标签：" + code);
+  assert.ok(code.includes("__when("), "裸三元应编译成 when");
+  assert.ok(code.includes("__createEl("), "应编译成建 DOM 的代码");
+});
+
+test("裸控制流 return：`||` / `??` 仍不支持，报 PLAIN_E1001 而不是 E1003", () => {
+  const cases = {
+    bareOr: "export function C(){ const a=true; return a || <p>y</p>; }",
+    bareNullish: "export function C(){ const a=null; return a ?? <p>y</p>; }",
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    assert.throws(
+      () => compile(src, name + ".jsx"),
+      (e) => e.code === "PLAIN_E1001" && /编译器还不认识/.test(e.detail),
+      name + " 应报 PLAIN_E1001"
+    );
+  }
+});
+
+test("组件工厂：`return () => <jsx/>` 由内层箭头自己编译，外层 return 不抢（曾误报 E1003）", () => {
+  // 关键：外层 return 的表达式是「箭头函数值」，不是含 JSX 的表达式。
+  // JSX 归内层箭头（规则 2）编译；若外层 return 抢着整体替换，就会漏编译内层 JSX。
+  const cases = {
+    arrowFactory:
+      "export function makeApp(){ return () => <UserCtx.Provider value={'x'}><Who/></UserCtx.Provider>; }",
+    fnFactory: "export function makeApp(){ return function App(){ return <p>hi</p>; }; }",
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    assert.doesNotThrow(() => compile(src, name + ".jsx"), name + " 应正常编译");
+  }
+});

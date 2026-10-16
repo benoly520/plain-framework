@@ -259,12 +259,17 @@ export function compile(
     }
 
     // 2) 组件：箭头函数简洁体 => { 生成 fragment; return fragment; }
+    //    同样不能只认「简洁体本身是 JSX」：`() => cond ? <a/> : <b/>` 的体是三元，
+    //    但 emitMapItemBody / genFragment 会正确编译它。只认 JSX 会让它漏编译成
+    //    PLAIN_E1003（JSX 残留）。与规则 3 口径一致：含 JSX 且函数会被 emit，就整体替换。
     if (
       (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
       node.body &&
-      isJsxLike(unparen(node.body)) &&
+      !ts.isBlock(node.body) &&
+      containsJsx(node.body) &&
       !insideJsx(node) &&
-      !isCallArgument(node)
+      !isCallArgument(node) &&
+      (isMapCallback(node) || isTopLevelRenderFn(node))
     ) {
       edits.push({
         start: node.body.getStart(sf),
@@ -273,14 +278,19 @@ export function compile(
       });
     }
 
-    // 3) 组件：块体内的 return <jsx/> => { ... return __f; }
+    // 3) 组件：渲染函数体里的 return（JSX / 条件 / && / .map / 普通值） => { ... return __f; }
+    // 不能只认 `isJsxLike(expression)`：`return cond ? <a/> : <b/>` 的表达式不是 JSX，
+    // 但 emitStmt 本来就会把它交给 genFragment（emitExprInto 按形状分派 when/each/insert）。
+    // 只认 JSX 会让这类写法**漏编译**，JSX 残留到产物里，最后误报成 PLAIN_E1003「编译器 bug」。
+    //
+    // 位置范围也与 emitStmt 对齐：emitStmt 会递归 if / 块，所以 `if (x) return <p/>;`
+    // 这种「提前 return」同样合法。判定交给 isEmittableReturnBody（只看最近的渲染函数），
+    // 不再要求 return 必须直接挂在函数体上。
     if (
       ts.isReturnStatement(node) &&
       node.expression &&
-      isJsxLike(unparen(node.expression)) &&
-      node.parent &&
-      ts.isBlock(node.parent) &&
-      !insideJsx(node)
+      !insideJsx(node) &&
+      isEmittableReturnBody(node)
     ) {
       edits.push({
         start: node.getStart(sf),
@@ -926,6 +936,56 @@ function genFragment(node: any, out: string[]): string[] {
   return out;
 }
 
+/**
+ * 该 return 的表达式是否应当整体编译成「建 fragment 并返回」。
+ *
+ * 判据与 `emitStmt` 对齐（emitStmt 对组件体/渲染函数体内的 return 一律走 genFragment），
+ * 条件：
+ *   1. 表达式里**确实含、且由本表达式自己 emit** 的 JSX（见 containsJsx —— 函数边界为准，
+ *      所以 `return () => <jsx/>` 这种「返回一个组件」不算，归内层箭头自己编译）；
+ *   2. 该 return 直接位于「会被 emit 的函数体」—— 即最近的函数是渲染函数
+ *      （组件顶层 / 函数声明 / 工厂 return 的箭头）或 `.map(cb)` 回调（与 assertJsxCovered
+ *      的口径一致），排除 IIFE 等不会走 emitStmt 的匿名调用。
+ */
+function isEmittableReturnBody(ret: any): boolean {
+  if (!containsJsx(ret.expression)) return false;
+  const fn = nearestFunction(ret);
+  if (!fn) return false;
+  return isMapCallback(fn) || isTopLevelRenderFn(fn);
+}
+
+/**
+ * 该表达式里是否含「**会被本表达式自己 emit** 的 JSX」——
+ * 即 JSX 直接暴露在 genFragment 的形状分派里（JSX / 三元 / `&&` / `.map`），
+ * 而不是藏在一个独立的嵌套渲染函数里（那种由该函数自己的编译规则处理）。
+ *
+ * ★ 边界就是「函数边界」：
+ *   - `xs.map(x => <li/>)` 的 JSX **属于本表达式**（emitMapItemBody 会编译它）→ 穿透回调；
+ *   - `() => <JSX/>`（工厂返回值）的 JSX 属于**那个箭头函数自己**（由规则 2 处理）→ 不穿透。
+ *   所以：遇到函数就停，`.map(cb)` 的回调例外；**顶层 node 本身是函数时也停**
+ *   （`return () => <JSX/>` 问的是「这个箭头值是不是含 JSX 的表达式」—— 不是，它是个函数）。
+ */
+function containsJsx(node: any): boolean {
+  if (!node) return false;
+  if (isJsxLike(node)) return true;
+  // 顶层就是函数字面量：它是「值」，里面的 JSX 归它自己编译，不算本表达式持有
+  if (ts.isFunctionLike(node)) return false;
+  let found = false;
+  const visit = (n: any) => {
+    if (found) return;
+    // 遇到嵌套函数就停 —— 但 `.map(cb)` 的回调例外：它的 JSX 由 emitMapItemBody
+    // 负责编译（是「本表达式的一部分」），不是独立的渲染函数。
+    if (ts.isFunctionLike(n) && !isMapCallback(n)) return;
+    if (isJsxLike(n)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(node);
+  return found;
+}
+
 function genBlock(node: any): string {
   return genFragment(node, []).join("\n");
 }
@@ -1530,10 +1590,15 @@ function detectKeyAttr(jsx: any): { text: string; node: any } | null {
  *   - ConditionalExpression 的 whenTrue/whenFalse
  *   - `&&` BinaryExpression 的 right
  *   - ReturnStatement —— 但要求该 return 所在的最近函数是 map 回调，
- *     或者是组件的顶层 return（emitNode/emitComponent 的入口）
+ *     或者是渲染函数（组件顶层 / 函数声明 / 工厂 return 的箭头）
  *
- * 其余情况（`||` / `??` 右侧、数组字面量、IIFE / try 里的 return、
- * 嵌套函数里返回的 JSX、链式 `.filter()` 尾部的箭头体）一律报错。
+ * 注意：JSX 可以先藏在**一层控制流表达式**里再被 emit —— `return cond ? <a/> : <b/>`
+ * 的 JSX 父节点是 ConditionalExpression，emit 它的是外层 return（emitStmt 把任何
+ * return 表达式都交给 genFragment）。所以判定前要**向上穿透**括号 / as / 三元 / `&&`。
+ * 唯独 `||` / `??` 不穿透：它们不在支持的控制流形状里，会落到 insert 兜底，JSX 不会被
+ * emit —— 必须报错，而不是放过去等到 assertClean 报成「编译器 bug」。
+ *
+ * 其余情况（`||` / `??` 右侧、数组字面量、IIFE、链式 `.filter()` 尾部的箭头体）一律报错。
  */
 function assertJsxCovered(sf: any, fileName: string): void {
   const missing: { line: number; column: number }[] = [];
@@ -1556,65 +1621,84 @@ function assertJsxCovered(sf: any, fileName: string): void {
         "这些位置的 JSX 编译器还不认识：" +
         missing.map((m) => `${fileName}:${m.line}`).join(", "),
       hint:
-        "组件用 'return (<jsx/>)'；列表用 'arr.map(x => <jsx/>)'；" +
+        "组件渲染函数的 'return' 里可以写任意含 JSX 的表达式：" +
+        "'return (<jsx/>)'、'return cond ? <a/> : <b/>'、'return cond && <a/>'、" +
+        "'return xs.map(x => <li/>)'；列表用 'arr.map(x => <jsx/>)'；" +
         "条件用 '{cond ? <a/> : <b/>}' 或 '{cond && <a/>}'。" +
-        "其它表达式（'||' / '??' 短路、数组字面量、IIFE、try/catch、链式后置 .filter()、" +
-        "嵌套函数里返回的 JSX）若不在此列，请先赋值给变量再插值：" +
-        "const node = cond || <a/>; 然后 {node}；" +
+        "不支持的形状（'||' / '??' 短路的 JSX、数组字面量、IIFE、链式后置 .filter()）" +
+        "请先赋值给变量再插值：const node = cond || <a/>; 然后 {node}；" +
         "或把该分支抽成一个返回 JSX 的组件函数。",
     });
   }
 }
 
-/** 该 JSX 是否处于编译器会 emit 它的位置（见 assertJsxCovered 注释） */
+/**
+ * 该 JSX 是否处于编译器会 emit 它的位置（见 assertJsxCovered 注释）
+ *
+ * 关键：JSX 可以**藏在一层控制流表达式里**再被 emit。
+ * 例如 `return cond ? <a/> : <b/>` —— JSX 的父节点是 ConditionalExpression，
+ * 而真正 emit 它的是外层那条 return（emitStmt 把**任何** return 表达式交给
+ * genFragment，再由 emitExprInto 按形状分派）。所以要**向上穿透**这些
+ * 「会原样透传给 emitExprInto 的表达式」，落到真正的 holder 再判定。
+ *
+ * 穿透的边界：只允许「结构性」节点（括号 / as / 三元 / && / || / ?? / 逗号），
+ * 一旦遇到 CallExpression / ArrayLiteral / 函数字面量等就停 —— 那些是
+ * 编译器**不会**自动展开的位置（要用户先赋值给变量）。
+ */
 function isEmittedJsx(node: any): boolean {
-  // 允许把 JSX 包一层括号：(<jsx/>) 与 {cond ? (<a/>) : (<b/>)}
+  // 第一步：从 node 出发，向上穿过「括号 / as / 控制流」直到真正的 holder
   let expr = node;
-  while (
-    ts.isParenthesizedExpression(expr.parent) ||
-    (ts.isAsExpression(expr.parent) && expr.parent.expression === expr)
-  ) {
-    expr = expr.parent;
+  for (;;) {
+    const p = expr.parent;
+    if (!p) return false;
+
+    // 括号 / as：语义透明，继续上穿
+    if (ts.isParenthesizedExpression(p) || (ts.isAsExpression(p) && p.expression === expr)) {
+      expr = p;
+      continue;
+    }
+    // 三元分支：当分支本身就是 JSX（或包裹它的表达式）时，继续上穿到三元整体
+    if (ts.isConditionalExpression(p) && (p.whenTrue === expr || p.whenFalse === expr)) {
+      expr = p;
+      continue;
+    }
+    // `&&` 的右侧可以上穿（emitExprInto 会编译成 when）。
+    // `||` / `??` **不能**：它们不在编译器支持的控制流形状里，会落到 insert 兜底，
+    // 而 insert 直接内联表达式源码 —— 里面的 JSX 不会被 emit，最后残留成 PLAIN_E1003。
+    // 因此这里不穿透，让这些 JSX 落回「不支持」判定，报出正确的 PLAIN_E1001。
+    if (ts.isBinaryExpression(p)) {
+      const k = p.operatorToken.kind;
+      if (k === ts.SyntaxKind.AmpersandAmpersandToken && p.right === expr) {
+        expr = p;
+        continue;
+      }
+    }
+    break; // 遇到不透明节点，expr 就是 holder（或它所在的直接表达式）
   }
+
   const holder = expr.parent;
   if (!holder) return false;
 
   // 直接子节点：<div><p/></div>
   if (ts.isJsxElement(holder) || ts.isJsxFragment(holder)) return true;
 
-  // {expr} 子表达式：JSX 必须是该表达式本身（不含在更深的子表达式里）
+  // {expr} 子表达式：穿透后 expr 必须正好是 holder 的表达式
   if (ts.isJsxExpression(holder)) return holder.expression === expr;
 
-  // 三元分支
-  if (ts.isConditionalExpression(holder)) {
-    return holder.whenTrue === expr || holder.whenFalse === expr;
-  }
-
-  // && 右侧
-  if (
-    ts.isBinaryExpression(holder) &&
-    holder.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
-    holder.right === expr
-  ) {
-    return true;
-  }
-
   // 箭头函数隐式返回体：() => <jsx/>
-  // 合法来源有两种：① 作为 .map(cb) 的回调（emitMapItemBody）；
-  // ② 作为 JSX 属性值（fallback={() => <jsx/>}，由 valueCode -> genFnWithJsxBody）。
+  // 合法来源：① .map(cb) 回调（emitMapItemBody）；② JSX 属性值（渲染函数 prop）。
   if (ts.isArrowFunction(holder) && holder.body === expr) {
     return isMapCallback(holder) || isTopLevelRenderFn(holder);
   }
 
-  // return <jsx/>：要求该 return 直接位于「会被 emit 的函数体」，
-  // 且该函数是 map 回调或组件顶层。
+  // return <expr>：要求该 return 位于「会被 emit 的渲染函数」，
+  // 且该函数是 map 回调或组件顶层。注意 expr 可能是 JSX 本身，也可能是
+  // 穿透上来的三元 / && —— 两者都由 emitStmt -> genFragment 统一处理。
+  // emitStmt 会递归 if / 块，所以提前 return（`if (x) return <p/>;`）同样合法，
+  // 这里不再要求 return 必须直接挂在函数体上。
   if (ts.isReturnStatement(holder)) {
     const fn = nearestFunction(holder);
     if (!fn) return false;
-    // 必须直接是函数体语句，而不是嵌在 IIFE / try / if 块里
-    const inDirectBlock =
-      fn.body && ts.isBlock(fn.body) && fn.body.statements.indexOf(holder) >= 0;
-    if (!inDirectBlock) return false;
     if (isMapCallback(fn)) return true;
     return isTopLevelRenderFn(fn);
   }
