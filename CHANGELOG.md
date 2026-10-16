@@ -204,6 +204,33 @@
 
 ### 修复
 
+- **裸控制流 `return` 不再漏编译，也不再误报成「编译器 bug」**。此前编辑规则只认
+  `isJsxLike(表达式)`，于是 `return cond ? <a/> : <b/>`、`return cond && <a/>`、
+  `return xs.map(x => <li/>)` 这类**表达式本身是控制流**的写法被判为「不含 JSX」而漏编译 —
+  产物里残留原始 JSX 标签，一路漏到 `assertClean`，最后报成 `PLAIN_E1003`
+  （"这是编译器 bug，请附最小复现提 issue"）——**把用户完全合法的写法误导成框架缺陷**。
+  同期 `if (x) return <a/>;`（渲染函数里的提前 return）、渲染函数 `try/catch` 分支里的
+  `return <a/>` 也被同一原因漏掉。
+  现在：
+  - 编辑规则 3 的判据从「表达式是 JSX」改成 `isEmittableReturnBody`（**含 JSX** +
+    最近的函数是渲染函数 / `.map()` 回调），与 `emitStmt → genFragment` 的实际行为对齐；
+  - 编辑规则 2（箭头简洁体）同样放宽：`() => cond ? <a/> : <b/>` 不再漏编译；
+  - `isEmittedJsx` 改为「先向上穿透括号 / 三元 / `&&`，再判定 holder」，并支持提前 `return`；
+  - **边界保持不变**：`||` / `??` 短路的 JSX、数组字面量、IIFE、链式后置 `.map().filter()`
+    仍报 `PLAIN_E1001`（`||` / `??` **不**参与穿透 —— 它们会落到 `insert` 兜底，JSX 不会被 emit）。
+  - **关键区分**：JSX 是「本表达式的控制流结果」还是「一个独立函数的返回值」。
+    后者（`return () => <jsx/>` 组件工厂）由内层箭头自己编译，外层 `return` 不抢它 ——
+    否则会漏编译内层 JSX。`containsJsx` 因此以**函数边界**为准（`.map(cb)` 回调例外）。
+  新增回归测试 `test/compiler.test.mjs` 4 组（裸控制流 return 合法 10 例 / 产物不残留 JSX /
+  `||`·`??` 仍报 E1001 / 组件工厂不被外层抢编译）。
+  文档同步：更新 [`AGENTS.md`](AGENTS.md) §3.1 与反模式第 21 条、`PLAIN_E1001` 的 `hint`。
+- **HMR 单测补上「真实 `import()` 懒加载」覆盖**。此前「改动非挂载模块 → 重跑挂载点」只有
+  一个**用假模块 id 模拟**的用例，没有真正走一遍动态 `import()`。新增
+  `test/hmr.test.mjs` 用例：父模块懒加载子模块并渲染，子模块改动后 `hmrApply(子模块 id)`
+  重跑父挂载点、父模块重新取到子模块新代码，DOM 显示新内容（且不整页刷新）；另补
+  「注册表为空时 `hmrApply` 返回 false，交给整页刷新」的失败边界。
+  顺带修正测试基建 `inDom`：回调是异步时**等 Promise 落定再还原全局**（原先 `try/finally`
+  在首个 `await` 处就拆了 jsdom 全局）。
 - **不支持的 JSX 位置改为报「用户可见的语法错误」，不再伪装成编译器 bug**。
   此前 `{cond || <a/>}`、`{cond ?? <a/>}`、数组字面量 `{[<a/>, <b/>]}`、IIFE 里的 JSX、
   `try/catch` 分支里 `return <a/>`、链式后置 `.map(...).filter(...)` 等写法，

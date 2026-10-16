@@ -623,7 +623,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 - ✅ `server()` 参数与返回值可序列化校验（`PLAIN_E1007`）：函数 / 类实例 / Stream 在编译期报错
 - ✅ 编译产物 line 级 sourcemap，经 vite 链式回传给 devtools
 - ✅ 契约检查**默认接在构建链路**（`lint: "warn" | false` 可调）：AI 典型错误构建即失败
-- ✅ `AGENTS.md` + 反模式目录（20 条均有静态检查；看不出类型的不猜）
+- ✅ `AGENTS.md` + 反模式目录（21 条均有静态检查；看不出类型的不猜）
 - ✅ AI 可发现性：`plaindev agent-context [--write]` 把规则落盘成跨工具标准 `AGENTS.md`
   （外加 `.github/copilot-instructions.md` 与 `.cursor/rules/*.mdc` 兜底，已有文件不覆盖）；
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；`plaindev lsp` 把**同一条规则链**做成
@@ -734,17 +734,18 @@ test("点一次加一", () => {
 「Plain 比 React 更适合 AI」目前还是个**主张**。`eval/` 把它变成可比的数据，分两套：
 
 ```bash
-pnpm run eval              # Plain 自己的质量指标（7 个任务）
-pnpm run eval:compare      # Plain vs React 对称对比（3 个用例，共用提示词与断言）
+pnpm run eval              # Plain 自己的质量指标（13 个任务）
+pnpm run eval:compare      # Plain vs React 对称对比（8 个用例，共用提示词与断言）
 
 node eval/run.mjs --prompt          # 打印任务提示词，交给代理
 node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 # 两者都支持 --reference：跑参考实现自检 harness（不算指标）
 ```
 
-- `eval/tasks/`：代理会不会犯这些错、构建期拦不拦得住。与 `AGENTS.md` 反模式目录对齐。
+- `eval/tasks/`：代理会不会犯这些错、构建期拦不拦得住。与 `AGENTS.md` 反模式目录对齐
+  （13 个任务覆盖其中 9 条反模式）。
 - `eval/compare/`：**同一份提示词 + 同一份断言**，框架差异全部收在适配器里；
-  服务端边界类任务不可比，已排除并说明理由。
+  两侧都接构建期闸门（Plain = 契约检查 + 编译，React = eslint），服务端边界类任务不可比，已排除并说明理由。
 
 指标口径是**首次通过率 / 平均迭代轮次 / 拦截率**（失败里有多少是被构建时拦下的），
 而不是满意度或上手时间。协议与公平性要求见 [`eval/README.md`](eval/README.md) 与
