@@ -120,7 +120,10 @@ test("内联函数 prop（返回 JSX）编译成真正的函数体", () => {
     'export function App(){ return <Card label="x" value={() => <b>1</b>} />; }',
     "fn.jsx"
   );
-  assert.ok(code.includes("const __fb = document.createDocumentFragment();"));
+  // 函数体与普通渲染函数同口径：建 Fragment 再 return（细节见 control-flow.test.mjs）
+  assert.match(code, /value: \(\) => \{\nconst __f\d+ = document\.createDocumentFragment\(\);/);
+  assert.ok(code.includes('__createEl("b"'));
+  assert.ok(!/<b>/.test(code), "产物不该残留 JSX");
 });
 
 test("普通表达式插值走 insert", () => {
@@ -274,4 +277,119 @@ test("组件工厂：`return () => <jsx/>` 由内层箭头自己编译，外层 
   for (const [name, src] of Object.entries(cases)) {
     assert.doesNotThrow(() => compile(src, name + ".jsx"), name + " 应正常编译");
   }
+});
+
+// ---------------------------------------------------------------------------
+// 渲染函数 / 列表回调体里的控制流
+//
+// 曾经的 bug：`emitStmt` 只递归 块 / if，`detectMap` 只认「回调体顶层的 return」，
+// 于是「if / else 两个分支都是提前 return」的回调直接退化成 __insert（里面的 JSX 不编译），
+// try / 循环 / switch / 就地小渲染函数里的 return 则被原样塞进产物 —— 两者都残留 JSX，
+// 最后被 assertClean 误报成 PLAIN_E1003「编译器 bug」。
+// 另一处静默失败：渲染函数 prop 只挑一个 JSX 体再 emitNode，`if (e) return <a/>; return <b/>;`
+// 的提前 return 会被整个丢掉（产物只剩最后一个分支）。以下用例把修复后的边界钉死。
+// ---------------------------------------------------------------------------
+
+test("回调体内的控制流：if·else / try / 循环 / switch / 就地小渲染函数都应正常编译", () => {
+  const cb = (body) => `export function C(){ return <ul>{xs().map((x) => ${body})}</ul>; }`;
+  const cases = {
+    ifElseOnly: cb("{ if (x.ok) return <li>y</li>; else return <li>n</li>; }"),
+    tryCatch: cb("{ try { return <li>{x}</li>; } catch (e) { return <li>err</li>; } }"),
+    tryFinally: cb("{ try { return <li/>; } finally { log(); } }"),
+    forOf: cb("{ for (const y of x) { if (y) return <li>{y}</li>; } return <li/>; }"),
+    whileLoop: cb("{ while (x.ok) { return <li/>; } return <li/>; }"),
+    switchCase: cb('{ switch (x.k) { case 1: return <li>1</li>; default: return <li>d</li>; } }'),
+    labeled: cb("{ outer: { return <li/>; } }"),
+    fnDecl: cb("{ function row() { return <li>{x}</li>; } return <div>{row()}</div>; }"),
+    fnExprVar: cb("{ const row = function () { return <li>{x}</li>; }; return <div>{row()}</div>; }"),
+    arrowVar: cb("{ const row = () => <li>{x}</li>; return <div>{row()}</div>; }"),
+    plainFnUntouched:
+      cb("{ function double(n) { return n * 2; } return <li>{double(x)}</li>; }"),
+    ifElseKey:
+      "export function C(){ return <ul>{xs().map((x) => { if (x.ok) return <li key={x.id}>y</li>; else return <li key={x.id}>n</li>; })}</ul>; }",
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    assert.doesNotThrow(() => compile(src, name + ".jsx"), name + " 应正常编译");
+  }
+  // key 只认「回调返回的顶层元素」：回调体没有顶层 return 时也要能识别到 key
+  const { code: keyed } = compile(cases.ifElseKey, "keyed.jsx");
+  assert.ok(keyed.includes("(x) => ((x.id))"), "纯 if / else 回调的 key 应被识别：" + keyed);
+});
+
+test("回调体内的控制流：产物里不应残留 JSX，普通辅助函数的 return 不被改写", () => {
+  const { code } = compile(
+    `export function C(){ return <ul>{xs().map((x) => {
+      if (x.ok) return <li>y</li>;
+      else return <li>n</li>;
+    })}</ul>; }`,
+    "cb-residue.jsx"
+  );
+  assert.ok(!/<li>|<\/li>/.test(code), "产物里不应残留原始 JSX 标签：" + code);
+  assert.ok(code.includes('__createEl("li"'), "应编译成建 DOM 的代码");
+
+  const helper = compile(
+    `export function C(){ return <ul>{xs().map((x) => {
+      function double(n) { return n * 2; }
+      return <li>{double(x)}</li>;
+    })}</ul>; }`,
+    "cb-helper.jsx"
+  ).code;
+  assert.ok(
+    helper.includes("function double(n) { return n * 2; }"),
+    "不含 JSX 的辅助函数应原样保留：" + helper
+  );
+});
+
+test("回调体内分解不开的语句：报 PLAIN_E1001（而不是 PLAIN_E1003 编译器 bug）", () => {
+  const cb = (body) => `export function C(){ return <ul>{xs().map((x) => ${body})}</ul>; }`;
+  const cases = {
+    exprStmtFn: cb("{ open(() => <p/>); return <li/>; }"),
+    constJsxValue: cb("{ const el = <li/>; return <div>{el}</div>; }"),
+    iife: cb("{ const v = (() => { return <li/>; })(); return <b>{v}</b>; }"),
+    objPropFn: cb("{ const p = { children: () => <p/> }; return <li/>; }"),
+    attrFn: "export function C(){ return <Box fallback={() => { open(() => <p/>); }} />; }",
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    assert.throws(
+      () => compile(src, name + ".jsx"),
+      (e) =>
+        e.code === "PLAIN_E1001" &&
+        /编译器还不认识/.test(e.detail) &&
+        new RegExp(`${name}\\.jsx:1`).test(e.detail),
+      name + " 应报 PLAIN_E1001 并带上出错行号"
+    );
+  }
+});
+
+test("渲染函数 prop：控制流里的 return 不再被静默丢掉（也不是 E1003）", () => {
+  const cases = {
+    ifElse:
+      "export function C(){ return <Box render={(ok) => { if (ok) return <p>y</p>; return <p>n</p>; }} />; }",
+    tryCatch:
+      "export function C(){ return <Box render={() => { try { return <p>y</p>; } catch (e) { return <p>n</p>; } }} />; }",
+    ternary: "export function C(){ return <Box render={(ok) => (ok ? <p>y</p> : <p>n</p>)} />; }",
+    map: "export function C(){ return <Box render={() => <ul>{xs().map((x) => <li>{x}</li>)}</ul>} />; }",
+    asyncRender: "export function C(){ return <Box render={async (ok) => <p>{ok}</p>} />; }",
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    const { code } = (() => {
+      try {
+        return compile(src, name + ".jsx");
+      } catch (e) {
+        assert.fail(name + " 应正常编译，实际：" + e.code);
+      }
+    })();
+    assert.ok(!/<\/?[a-z][^>]*>/.test(code), name + " 产物里不应残留 JSX：" + code);
+  }
+  // 提前 return 必须真的进了产物（旧实现只留下最后一个分支）
+  const { code } = compile(
+    "export function C(){ return <Box render={(ok) => { if (ok) return <p>y</p>; return <p>n</p>; }} />; }",
+    "prop-early.jsx"
+  );
+  assert.ok(code.includes("if (ok) {"), "提前 return 的条件分支应保留：" + code);
+  // async 渲染函数不能被编译成同步函数
+  assert.ok(
+    /async \(ok\) =>/.test(compile(cases.asyncRender, "prop-async.jsx").code),
+    "async 修饰符应保留"
+  );
 });

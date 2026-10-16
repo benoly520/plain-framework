@@ -88,16 +88,17 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | 允许 ✅ | 示例 |
 | --- | --- |
 | 组件 / 渲染函数的 `return`（**表达式随便是什么**，只要含 JSX） | `return <div/>;`、`return cond ? <a/> : <b/>;`、`return cond && <a/>;`、`return xs.map(x => <li/>);` |
-| 渲染函数里的提前 `return`（`if` / `try` 里） | `if (x) return <a/>;`、`try { return <a/>; } catch (e) { return <b/>; }` |
+| 渲染函数 / 列表回调里的提前 `return`（`if` / `else` / `try` / 循环 / `switch` 里） | `if (x) return <a/>;`、`try { return <a/>; } catch (e) { return <b/>; }`、`for (…) { return <a/>; }` |
 | 箭头函数的隐式返回体 | `const C = () => <p/>;`、`const C = () => cond ? <a/> : <b/>;` |
 | 工厂函数返回组件 | `return () => <Ctx.Provider><Who/></Ctx.Provider>;` |
 | JSX 的直接子节点 | `<div><p/></div>` |
 | `{...}` 里的三元 | `{cond ? <a/> : <b/>}` |
 | `{...}` 里的 `&&` | `{cond && <a/>}` |
-| `{...}` 里的 `.map()` 回调 | `{xs().map(x => <li>{x}</li>)}` |
+| `{...}` 里的 `.map()` 回调 | `{xs().map(x => <li>{x}</li>)}`，回调体里可以有多条语句 / 提前 return（`if…else` 全分支提前 return 也算） |
 | `{...}` 里的普通表达式 | `{count()}`、`{v()}`（变量 / 函数返回值） |
-| 作为 JSX 属性值的箭头 | `fallback={(e) => <p>{e}</p>}` |
+| 作为 JSX 属性值的箭头 | `fallback={(e) => <p>{e}</p>}`、`render={(ok) => (ok ? <a/> : <b/>)}` |
 | 具名函数声明返回 JSX（会被当作渲染函数） | `function Inner(){ return <a/>; }` |
+| 就地定义的函数初始化返回 JSX | `const Row = () => <li/>;` 然后 `{Row()}` |
 
 | 不允许 ❌（都报 `PLAIN_E1001`） | 改成 |
 | --- | --- |
@@ -106,12 +107,15 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | IIFE `{(() => <a/>)()}` / `return (() => <a/>)()` | 抽成组件函数：`function A(){ return <a/>; }` 然后 `<A/>` |
 | IIFE 内 `try/catch` 里 `return <a/>` | 抽成组件函数，或把结果赋值给变量再插值 |
 | 链式后置 `.map(...).filter(...)` | 换成前置换算：`.filter(...).map(x => <li/>)` |
+| JSX 当值用：`const el = <a/>;`、`open(() => <a/>)` | 挪进 `return`，或抽成 `const Row = () => <a/>;` 再调用 |
 
 > **判据**：`{...}` 里的响应式条件、以及渲染函数的 `return`，编译器认识的**控制流形状**只有
 > **三元**、**`&&`**、**`.map()`** 三种（外加普通 JSX / 值）。想让 `||` / `??` 生效，
 > 就先算出节点值、再插值 —— 编译器不猜你的短路意图。
 > **关键区分**：JSX 是「本表达式的控制流结果」还是「一个独立函数的返回值」。
 > 后者（`return () => <jsx/>`）由那个内层函数自己编译，外层 `return` 不抢它。
+> 渲染函数 / 列表回调体里，`return` 外面套 `if` / `else` / `try` / 循环 / `switch` / 块都能编译；
+> 唯独「JSX 当值用」（`const el = <a/>`、传给别的函数当参数）不行 —— 编译器不猜这种意图。
 > 反例的报错信息里会给出具体行号与改法（不会只说"语法错误"）。
 
 ## 4. 错误码

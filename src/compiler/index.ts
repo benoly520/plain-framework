@@ -1001,36 +1001,236 @@ function emitMapItemBody(cbBody: any, out: string[]): void {
 
 /**
  * 递归发射一条语句：
- *  - return <jsx>  -> 编译成 fragment 并返回（支持多 return / if 内提前 return）
- *  - 其它语句原样保留；if / 块 会递归处理其中嵌套的 return <jsx>
+ *  - `return <expr>` -> 编译成 fragment 并返回（支持多 return / 提前 return）
+ *  - 控制流语句（块 / if / try / 循环 / switch / label）递归处理其中的 return ——
+ *    `if (x) return <a/>; else return <b/>;`、`try { return <a/>; } catch { return <b/>; }`、
+ *    循环与 switch 里的提前 return 都能编译
+ *  - 就地定义的小渲染函数（`function Row() { return <li/>; }`、`const Row = () => <li/>;`）
+ *    递归进它的函数体：跨进嵌套函数后**只改写含 JSX 的 return**，
+ *    普通辅助函数（`function double(n) { return n * 2; }`）保持原样
+ *  - 兜底：分解不开却还含着 JSX 的语句直接报 PLAIN_E1001 —— 原样塞进产物会一路漏到
+ *    assertClean，最后误报成「编译器 bug」PLAIN_E1003
+ *
+ * @param isItemValue 当前 return 是否是「这个渲染值本身」：回调 / 渲染函数自己的 return
+ *   一律编译成 fragment（值可以是三元 / && / .map / 普通值）；跨进嵌套函数后为 false。
  */
-function emitStmt(stmt: any, out: string[]): void {
+function emitStmt(stmt: any, out: string[], isItemValue = true): void {
   if (ts.isReturnStatement(stmt)) {
-    if (stmt.expression) {
+    if (!stmt.expression) {
+      out.push(`return;`);
+      return;
+    }
+    if (isItemValue || containsJsx(stmt.expression)) {
       // 任何 return 表达式（JSX / 条件 / && / .map / 普通值）都交给 genFragment
       // 统一编译成 fragment 返回，避免漏编译条件 / 布尔表达式里的 JSX。
       genFragment(unparen(stmt.expression), out);
     } else {
-      out.push(`return;`);
+      // 嵌套函数里的普通返回值：原样保留，绝不改成 fragment
+      out.push(`return ${stmt.expression.getText()};`);
     }
     return;
   }
   if (ts.isBlock(stmt)) {
-    for (const s of stmt.statements) emitStmt(s, out);
+    for (const s of stmt.statements) emitStmt(s, out, isItemValue);
     return;
   }
   if (ts.isIfStatement(stmt)) {
     out.push(`if (${stmt.expression.getText()}) {`);
-    emitStmt(stmt.thenStatement, out);
+    emitStmt(stmt.thenStatement, out, isItemValue);
     out.push(`}`);
     if (stmt.elseStatement) {
       out.push(`else {`);
-      emitStmt(stmt.elseStatement, out);
+      emitStmt(stmt.elseStatement, out, isItemValue);
       out.push(`}`);
     }
     return;
   }
+  if (ts.isTryStatement(stmt)) {
+    out.push(`try {`);
+    emitStmt(stmt.tryBlock, out, isItemValue);
+    out.push(`}`);
+    if (stmt.catchClause) {
+      const bind = stmt.catchClause.variableDeclaration;
+      out.push(`catch${bind ? ` (${bind.getText()})` : ""} {`);
+      emitStmt(stmt.catchClause.block, out, isItemValue);
+      out.push(`}`);
+    }
+    if (stmt.finallyBlock) {
+      out.push(`finally {`);
+      emitStmt(stmt.finallyBlock, out, isItemValue);
+      out.push(`}`);
+    }
+    return;
+  }
+  if (ts.isSwitchStatement(stmt)) {
+    out.push(`switch (${stmt.expression.getText()}) {`);
+    for (const clause of stmt.caseBlock.clauses) {
+      const inner = clause.statements;
+      // 只重建 `case x:` / `default:` 标签，语句本身交给 emitStmt（可能含提前 return）
+      out.push(
+        inner.length
+          ? clause.getText().slice(0, inner[0].getStart() - clause.getStart()).trim()
+          : clause.getText().trim()
+      );
+      for (const s of inner) emitStmt(s, out, isItemValue);
+    }
+    out.push(`}`);
+    return;
+  }
+  if (
+    ts.isForStatement(stmt) ||
+    ts.isForInStatement(stmt) ||
+    ts.isForOfStatement(stmt) ||
+    ts.isWhileStatement(stmt) ||
+    ts.isDoStatement(stmt) ||
+    ts.isLabeledStatement(stmt)
+  ) {
+    emitStmtWithBody(stmt, stmt.statement, out, isItemValue);
+    return;
+  }
+  // 具名 / 匿名函数声明：里面的 return 是「它自己的渲染值」，但只改写含 JSX 的那些
+  if (ts.isFunctionDeclaration(stmt) || ts.isFunctionExpression(stmt)) {
+    if (!fnBodyHasJsx(stmt)) {
+      out.push(stmt.getText());
+      return;
+    }
+    out.push(genFnLiteral(stmt));
+    return;
+  }
+  // 就地定义的小渲染函数：`const Row = () => <li/>;`
+  if (ts.isVariableStatement(stmt) && hasFnInitWithJsx(stmt)) {
+    emitVarDecls(stmt, out);
+    return;
+  }
+  if (containsJsxDeep(stmt)) throwStmtJsxUncovered(stmt);
   out.push(stmt.getText());
+}
+
+/** 把一条语句的「主体」递归发射，头部（for / while / label …）与尾部原样保留 */
+function emitStmtWithBody(stmt: any, body: any, out: string[], isItemValue: boolean): void {
+  const sf = stmt.getSourceFile();
+  const text = stmt.getText(sf);
+  const base = stmt.getStart(sf);
+  const head = text.slice(0, body.getStart(sf) - base);
+  const tail = text.slice(body.getEnd() - base);
+  out.push(`${head}{`);
+  emitStmt(body, out, isItemValue);
+  out.push(`}${tail}`);
+}
+
+/** 函数字面量的函数体里是否含会被它自己 emit 的 JSX（跨函数边界停，`.map()` 回调除外） */
+function fnBodyHasJsx(fn: any): boolean {
+  return !!fn.body && containsJsx(fn.body);
+}
+
+/** 这条变量声明里是否至少有一个「含 JSX 的函数初始化」（就地小渲染函数） */
+function hasFnInitWithJsx(stmt: any): boolean {
+  return stmt.declarationList.declarations.some(
+    (d: any) => d.initializer && ts.isFunctionLike(d.initializer) && fnBodyHasJsx(d.initializer)
+  );
+}
+
+/**
+ * 重写一条变量声明：把「含 JSX 的函数初始化」编译成正常函数
+ * （`const Row = () => <li/>;` -> `const Row = () => { const __f = …; return __f; };`），
+ * 其余声明原样保留。
+ */
+function emitVarDecls(stmt: any, out: string[]): void {
+  const sf = stmt.getSourceFile();
+  const list = stmt.declarationList;
+  const decls = list.declarations;
+  const keyword = list
+    .getText(sf)
+    .slice(0, decls[0].getStart(sf) - list.getStart(sf))
+    .trim();
+  const parts: string[] = [];
+  for (const d of decls) {
+    if (d.initializer && ts.isFunctionLike(d.initializer) && fnBodyHasJsx(d.initializer)) {
+      parts.push(`${d.name.getText()} = ${genFnLiteral(d.initializer)}`);
+      continue;
+    }
+    // `const el = <li/>;` —— JSX 当值用是编译器不认的位置，报 E1001 而不是把 JSX 塞进产物
+    if (containsJsxDeep(d)) throwStmtJsxUncovered(d);
+    parts.push(d.getText(sf));
+  }
+  out.push(`${keyword} ${parts.join(", ")};`);
+}
+
+/**
+ * 把一个含 JSX 的函数字面量编译成正常函数：函数体的 return 交给 emitStmt / genFragment。
+ * 两处用到 —— JSX 属性值里的渲染函数（`fallback={(e) => <p>{e}</p>}`）、
+ * 以及渲染函数 / `.map()` 回调里就地定义的小渲染函数（`const Row = () => <li/>;`）。
+ */
+function genFnLiteral(fn: any): string {
+  const out: string[] = [];
+  if (ts.isBlock(fn.body)) {
+    for (const s of fn.body.statements) emitStmt(s, out, false);
+  } else {
+    genFragment(unparen(fn.body), out);
+  }
+  const body = `{\n${out.join("\n")}\n}`;
+  const head = ts.isArrowFunction(fn)
+    ? `(${paramList(fn)}) =>`
+    : `${fn.name ? `function ${fn.name.getText()}` : "function"}(${paramList(fn)})`;
+  // async 修饰符必须带上：漏掉会把 async 渲染函数悄悄变成同步的
+  return `${isAsyncFn(fn) ? "async " : ""}${head} ${body}`;
+}
+
+/** 是否 async 函数（async modifier） */
+function isAsyncFn(fn: any): boolean {
+  return !!fn.modifiers?.some((m: any) => m.kind === ts.SyntaxKind.AsyncKeyword);
+}
+
+/** 深度扫描（跨函数边界）：这条语句里还有没有 JSX —— 兜底判定用 */
+function containsJsxDeep(node: any): boolean {
+  if (!node) return false;
+  if (isJsxLike(node)) return true;
+  let found = false;
+  const visit = (n: any) => {
+    if (found) return;
+    if (isJsxLike(n)) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(node);
+  return found;
+}
+
+/**
+ * 兜底报错（PLAIN_E1001）：这条语句里还有 JSX 没被编译。
+ * 绝不把原始 JSX 塞进产物 —— 那会一路漏到 assertClean，最后误报成「编译器 bug」PLAIN_E1003，
+ * 把用户合法的写法误导成框架缺陷（见 AGENTS.md §3 反模式 21）。
+ */
+function throwStmtJsxUncovered(stmt: any, at?: any): never {
+  const sf = stmt.getSourceFile();
+  let jsx: any = at || null;
+  if (!jsx) {
+    const visit = (n: any) => {
+      if (jsx) return;
+      if (isJsxLike(n)) {
+        jsx = n;
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(stmt);
+  }
+  const pos = (jsx || stmt).getStart(sf);
+  const loc = sf.getLineAndCharacterOfPosition(pos);
+  throw new PlainCompileError({
+    code: "PLAIN_E1001",
+    file: sf.fileName,
+    line: loc.line + 1,
+    column: loc.character + 1,
+    detail: `这条语句里的 JSX 编译器还不认识：${sf.fileName}:${loc.line + 1}`,
+    hint:
+      "渲染函数 / 列表回调里能直接写 JSX 的位置是 `return`（含 if / try / 循环 / switch / 块），" +
+      "以及 `const Row = () => <jsx/>;` 这种函数初始化。" +
+      "其它写法请把 JSX 挪进 `return`，或抽成一个返回 JSX 的组件函数；" +
+      "确要当值使用就先赋值给变量再插值。",
+  });
 }
 
 /**
@@ -1250,22 +1450,17 @@ function paramList(fn: any): string {
   return fn.parameters.map((p: any) => p.getText()).join(", ");
 }
 
-/** 把「返回 JSX 的箭头函数」编译成正常的函数：主要出现在组件 props 里 */
+/**
+ * 把「含 JSX 的函数」编译成正常的函数：主要出现在组件 props 里。
+ *
+ * 判据是**函数体里含 JSX**（而不是「函数体是 JSX」）—— 只挑一个 JSX 体再 emitNode 的旧写法
+ * 有两个静默失败：`(e) => { if (e) return <a/>; return <b/>; }` 会把提前 return 整个丢掉
+ * （产物只剩最后一个分支），`(e) => e ? <a/> : <b/>` / try 里的 JSX 则残留成 PLAIN_E1003。
+ * 统一交给 genFnLiteral：函数体的 return 由 emitStmt / genFragment 按控制流形状编译。
+ */
 function genFnWithJsxBody(fn: any): string | null {
-  let bodyNode: any = null;
-  if (isJsxLike(unparen(fn.body))) bodyNode = unparen(fn.body);
-  else if (ts.isBlock(fn.body)) {
-    const ret = fn.body.statements.find(
-      (s: any) => ts.isReturnStatement(s) && s.expression && isJsxLike(unparen(s.expression))
-    );
-    if (ret) bodyNode = unparen(ret.expression);
-  }
-  if (!bodyNode) return null;
-  const out: string[] = [];
-  emitNode(bodyNode, "__fb", out);
-  return `(${paramList(fn)}) => {\nconst __fb = document.createDocumentFragment();\n${out.join(
-    "\n"
-  )}\nreturn __fb;\n}`;
+  if (!fnBodyHasJsx(fn)) return null;
+  return genFnLiteral(fn);
 }
 
 function valueCode(exprNode: any): string {
@@ -1495,13 +1690,7 @@ function detectMap(node: any): any {
       const index =
         cb.parameters.length >= 2 ? cb.parameters[1].name.getText() : null;
       const cbBody = cb.body;
-      const body = ts.isBlock(cbBody)
-        ? (() => {
-            const stmts = cbBody.statements;
-            const ret = stmts.find((s: any) => ts.isReturnStatement(s));
-            return ret && ret.expression ? unparen(ret.expression) : null;
-          })()
-        : unparen(cbBody);
+      const body = mapKeyBody(cbBody);
       if (body) {
         const keyAttr = detectKeyAttr(body);
         // keyed 复用下行只构建一次，回调捕获的 index 无法随位置更新。
@@ -1528,6 +1717,34 @@ function detectMap(node: any): any {
     }
   }
   return null;
+}
+
+/**
+ * 取 `.map()` 回调「返回的顶层元素」—— 只用来识别 key（与 PLAIN_E1005 的报位置）。
+ *
+ * 优先取回调体顶层的 return；没有顶层 return 时（典型：整个回调只有
+ * `if (x) return <a/>; else return <b/>;`）退到第一个含 JSX 的嵌套 return。
+ * 不这么做的话回调识别不到，整段表达式会退化成 `__insert` —— 里面的 JSX 不会被编译，
+ * 产物残留原始标签，最后误报成「编译器 bug」PLAIN_E1003。
+ * 真正的发射始终由 emitStmt 逐语句完成（见 emitMapItemBody）。
+ */
+function mapKeyBody(cbBody: any): any {
+  if (!ts.isBlock(cbBody)) return unparen(cbBody);
+  const top: any = cbBody.statements.find((s: any) => ts.isReturnStatement(s) && s.expression);
+  if (top) return unparen(top.expression);
+  let found: any = null;
+  const visit = (n: any) => {
+    if (found) return;
+    // 不跨函数边界：嵌套函数里的 return 不是这个列表项的根
+    if (ts.isFunctionLike(n) && (n as any) !== cbBody) return;
+    if (ts.isReturnStatement(n) && n.expression && containsJsx(n.expression)) {
+      found = unparen(n.expression);
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(cbBody);
+  return found;
 }
 
 /** 判断子树里是否真正引用了某个标识符（排除 obj.name / {name: 1} / key={name} 这类非变量引用） */
@@ -1597,6 +1814,11 @@ function detectKeyAttr(jsx: any): { text: string; node: any } | null {
  * return 表达式都交给 genFragment）。所以判定前要**向上穿透**括号 / as / 三元 / `&&`。
  * 唯独 `||` / `??` 不穿透：它们不在支持的控制流形状里，会落到 insert 兜底，JSX 不会被
  * emit —— 必须报错，而不是放过去等到 assertClean 报成「编译器 bug」。
+ *
+ * 这里只判「JSX 是否挂在一个会被 emit 的 return / 表达式上」；return 外面套了什么语句
+ * （if / try / 循环 / switch / 块 / 就地小渲染函数）由 emitStmt 负责递归 ——
+ * 万一有分解不开的形状，emitStmt 会自己报同样的 PLAIN_E1001（见 throwStmtJsxUncovered），
+ * 不会把原始 JSX 塞进产物。
  *
  * 其余情况（`||` / `??` 右侧、数组字面量、IIFE、链式 `.filter()` 尾部的箭头体）一律报错。
  */

@@ -204,6 +204,30 @@
 
 ### 修复
 
+- **渲染函数 / 列表回调体里的控制流不再漏编译，也不再被静默丢掉**。承接上一条（裸控制流
+  `return`），这次修的是 `return` **外面**那层语句：
+  - `.map()` 回调体只有 `if (x) return <a/>; else return <b/>;`（没有顶层 return）时，
+    `detectMap` 取不到「返回的顶层元素」→ 整段 `xs().map(...)` 退化成 `__insert`，
+    里面的 JSX 一个都没编译，产物残留标签 → 报成 `PLAIN_E1003`（"编译器 bug"）。
+    现在 `mapKeyBody` 在没有顶层 return 时退到第一个含 JSX 的嵌套 return（key 识别不落空），
+    真正的发射仍由 `emitStmt` 逐语句完成。
+  - `emitStmt` 只递归「块 / if」，于是回调体 / 渲染函数 prop 里的 `try`、`for` / `while` /
+    `do`、`switch`、`label`、就地定义的小渲染函数（`function Row(){ return <li/>; }`、
+    `const Row = () => <li/>;`）里的 `return <jsx/>` 被**原样塞进产物** → 同样报成 E1003。
+    现在这些语句一律递归发射；跨进嵌套函数后**只改写含 JSX 的 return**
+    （`function double(n) { return n * 2; }` 保持原样，不会被改成 fragment）。
+  - 兜底：万一还有分解不开却含着 JSX 的语句（`const el = <a/>;`、`open(() => <a/>)`、
+    `{ children: () => <a/> }` 这类「JSX 当值用」），直接报 `PLAIN_E1001` 并给出行号与
+    改法，而不是漏到 `assertClean` 报成「编译器 bug」。
+  - 渲染函数 prop（`fallback={(e) => …}` / `render={(ok) => …}`）此前**只挑一个 JSX 体再
+    emitNode**：`(e) => { if (e) return <a/>; return <b/>; }` 的提前 return 被整个丢掉
+    （产物只剩最后一个分支 —— 静默渲染错内容），`(e) => e ? <a/> : <b/>` / try 里的 JSX
+    则残留成 E1003。现在统一走 `genFnLiteral`，并保留 `async` 修饰符。
+  新增 `test/control-flow.test.mjs`（7 项：跑编译结果断言真实 DOM，覆盖 if/else、try、
+  for-of、switch、就地小渲染函数、渲染函数 prop 的提前 return 与三元 / map 体），
+  `test/compiler.test.mjs` 新增 4 组（合法形状 12 例 / 产物不残留 JSX 且辅助函数不被改写 /
+  分解不开的语句报 E1001 带行号 / prop 控制流不被丢弃）。
+  文档同步：[`AGENTS.md`](AGENTS.md) §3.1 允许与不允许两张表。
 - **裸控制流 `return` 不再漏编译，也不再误报成「编译器 bug」**。此前编辑规则只认
   `isJsxLike(表达式)`，于是 `return cond ? <a/> : <b/>`、`return cond && <a/>`、
   `return xs.map(x => <li/>)` 这类**表达式本身是控制流**的写法被判为「不含 JSX」而漏编译 —
