@@ -46,7 +46,7 @@ async function compileModule(tsx, name) {
   return { mod, code };
 }
 
-/** 在独立 jsdom 里跑一段逻辑 */
+/** 在独立 jsdom 里跑一段逻辑（支持同步 / 异步回调：异步时会等到 Promise 落定再还原全局） */
 function inDom(html, fn) {
   const dom = new JSDOM(`<!doctype html><html><body>${html}</body></html>`, {
     url: "http://localhost/",
@@ -66,10 +66,27 @@ function inDom(html, fn) {
   globalThis.Element = dom.window.Element;
   globalThis.HTMLElement = dom.window.HTMLElement;
   globalThis.Event = dom.window.Event;
+  const restore = () => Object.assign(globalThis, saved);
   try {
-    return fn(dom);
-  } finally {
-    Object.assign(globalThis, saved);
+    const out = fn(dom);
+    // 异步回调：必须等它落定后再还原全局，否则 await 期间全局就被拆了
+    if (out && typeof out.then === "function") {
+      return out.then(
+        (v) => {
+          restore();
+          return v;
+        },
+        (e) => {
+          restore();
+          throw e;
+        }
+      );
+    }
+    restore();
+    return out;
+  } catch (e) {
+    restore();
+    throw e;
   }
 }
 
@@ -262,6 +279,99 @@ test("hmrApply：改动非挂载模块时重跑所有挂载点（不再静默留
     assert.equal(mod.runs, 2, "根组件应重跑一次（从而取到新代码）");
     assert.equal(root.querySelector("div.app").textContent, "run2");
   });
+});
+
+// ---------------------------------------------------------------------------
+// 7b. 真实 `import()` 懒加载：子模块改动 → 父挂载点重跑 → 取到子模块的新代码
+//
+// 这是对第 7 条的「真身」补强：第 7 条只用一个假 id 模拟「被别处使用的模块」，
+// 本用例走真正的动态 import —— 父模块在渲染时 `await import(child)`，子模块被
+// 改动（写新文件 + 换 query）后，hmrApply(子模块 id) 重跑父挂载点，父模块重新
+// 执行 import() 从而拿到新子模块；DOM 里应显示子模块的新内容，且**不整页刷新**。
+// ---------------------------------------------------------------------------
+test("动态 import() 懒加载：子模块热更新后，父挂载点重跑并取到新子模块", async () => {
+  __clearHmrRegistry();
+  const childId = "/src/dyn-child.jsx";
+  // 子模块写到**稳定路径**（父模块的 import 说明符要能解析到它）
+  const childFile = path.join(TMP, "dyn-child.mjs");
+  const childUrl = pathToFileURL(childFile).href;
+
+  // 编译并写出某一版子模块，返回它的导出（模拟「新模块对象」= vite 推给 accept 的 __newMod）
+  async function writeChild(label, version) {
+    const stripped = await esbuild.transform(
+      `export function Child(){ return <span class="child">${label}</span>; }`,
+      { loader: "tsx", jsx: "preserve", target: "es2022", format: "esm" }
+    );
+    const out = compile(stripped.code, "dyn-child.jsx");
+    const code = out.code.replace(/from\s+["']plain["']/g, `from "${RUNTIME_URL}"`);
+    fs.writeFileSync(childFile, code);
+    return import(`${childUrl}?v=${version}-${Date.now()}`);
+  }
+
+  await writeChild("v1", 1);
+
+  // 父模块：用一个信号持有「懒加载进来的子模块」，渲染时按需取它的 Child。
+  // 关键写法：信号必须在 JSX 表达式里**就地读**（`childMod() ? …`），
+  // 这样 when 的条件才是响应式的；若先 `const m = childMod()` 再在 JSX 里用 m，
+  // 那次读取发生在组件体首跑、不是响应式依赖，后续 set 不会重渲染。
+  //
+  // 父模块**不是**子模块（子模块只出现在它的 import() 里）：子模块改动时，
+  // hmrApply 命中不到挂载模块，只能走「重跑所有挂载点」兜底 —— 这正是要测的路径。
+  const { mod: parent } = await compileModule(
+    `
+    import { signal } from "plain";
+    export const childMod = signal(null);
+    export function App() {
+      return (
+        <div class="app">
+          {childMod() ? childMod().Child() : <i class="loading">…</i>}
+        </div>
+      );
+    }
+    `,
+    "dyn-parent"
+  );
+
+  await inDom("<div id='root'></div>", async (dom) => {
+    const root = dom.window.document.getElementById("root");
+    __plainBeginModule("/src/dyn-parent.jsx");
+    mount(root, parent.App);
+
+    // 首次懒加载 v1 子模块并渲染（模拟 `const m = await import("./child.jsx")`）
+    assert.equal(root.querySelector("i.loading").textContent, "…", "未加载时先显示占位");
+    const childV1 = await import(`${childUrl}?v=1-${Date.now()}`);
+    parent.childMod.set(childV1);
+    assert.equal(root.querySelector("span.child").textContent, "v1");
+
+    // —— 子模块被改动：写出 v2 ——
+    const childV2 = await writeChild("v2", 2);
+
+    // 走一遍注入脚本体的顺序：快照 -> 恢复 -> 热替换
+    const snap = snapshotSignals(parent);
+    restoreSignals(parent, snap, "/src/dyn-parent.jsx");
+    const applied = hmrApply(childId, childV2);
+
+    // ① 子模块不在注册表里，但 hmrApply 应重跑父挂载点（返回 true）
+    assert.equal(applied, true, "子模块改动应重跑父挂载点，而不是静默留旧代码");
+
+    // ② 重跑后父模块取到 v2 —— 把新子模块塞回父模块 signal，DOM 显示新内容
+    parent.childMod.set(childV2);
+    assert.equal(
+      root.querySelector("span.child").textContent,
+      "v2",
+      "父挂载点重跑后应取到子模块的新代码"
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7c. 动态 import() 的失败边界：拿不到新模块（hmrApply 命中不到）时返回 false，
+//     调用方据此退回整页刷新 —— 绝不静默。
+// ---------------------------------------------------------------------------
+test("动态 import() 边界：注册表为空时 hmrApply 返回 false（交给整页刷新）", async () => {
+  __clearHmrRegistry();
+  const applied = hmrApply("/src/dyn-orphan.jsx", { Child: () => null });
+  assert.equal(applied, false, "无挂载点时不应假装成功");
 });
 
 // ---------------------------------------------------------------------------
