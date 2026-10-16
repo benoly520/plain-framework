@@ -164,3 +164,45 @@ test("产物自检：产物无法被 JS 解析时直接报错，不交给打包�
     /无法解析/
   );
 });
+
+// ---------------------------------------------------------------------------
+// JSX 位置兜底：语法边界必须报「用户可见的 PLAIN_E1001」，而不是内部 bug E1003
+// ---------------------------------------------------------------------------
+
+test("JSX 位置：合法形状（三元 / && / map 回调 / 变量 / 属性箭头 / 工厂 return）正常编译", () => {
+  const cases = {
+    ternary: "export function C(){return <div>{a() ? <p>y</p> : <p>n</p>}</div>;}",
+    and: "export function C(){return <div>{a() && <p>y</p>}</div>;}",
+    mapCb: "export function C(){return <div>{xs().map(x => <li>{x}</li>)}</div>;}",
+    varJsx: "export function C(){return <div>{v()}</div>;} function v(){return <span>s</span>;}",
+    attrArrow:
+      "export function C(){return <Box fallback={(e) => <p>err</p>} />;}",
+    factoryReturn:
+      "export function makeApp() { return () => <UserCtx.Provider value={'x'}><Who /></UserCtx.Provider>; }",
+    namedFactoryReturn:
+      "export function makeApp() { return function App() { return <p>hi</p>; }; }",
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    assert.doesNotThrow(() => compile(src, name + ".jsx"), name + " 应正常编译");
+  }
+});
+
+test("JSX 位置：不支持的形状报 PLAIN_E1001（而不是 PLAIN_E1003 编译器 bug）", () => {
+  const cases = {
+    or: "export function C(){return <div>{a() || <p>x</p>}</div>;}",
+    nullish: "export function C(){return <div>{a() ?? <p>x</p>}</div>;}",
+    arrayLiteral: "export function C(){return <div>{[<p>a</p>,<p>b</p>]}</div>;}",
+    iife: "export function C(){return <div>{(()=>{return <p>i</p>;})()}</div>;}",
+    tryCatch:
+      "export function C(){return <div>{(()=>{try{return <p>t</p>;}catch(e){return <p>c</p>;}})()}</div>;}",
+    chainedFilterMap:
+      "export function C(){return <div>{xs().map(x=><li>{x}</li>).filter(Boolean)}</div>;}",
+  };
+  for (const [name, src] of Object.entries(cases)) {
+    assert.throws(
+      () => compile(src, name + ".jsx"),
+      (e) => e.code === "PLAIN_E1001" && /编译器还不认识/.test(e.detail),
+      name + " 应报 PLAIN_E1001 并给出可行动的提示"
+    );
+  }
+});

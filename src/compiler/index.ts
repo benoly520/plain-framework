@@ -293,7 +293,7 @@ export function compile(
   };
 
   walk(sf);
-  assertJsxCovered(sf, edits, fileName);
+  assertJsxCovered(sf, fileName);
 
   const applied = applyEdits(source, edits);
   const code = `${HELPER_IMPORT}\n${applied.code}`;
@@ -1515,17 +1515,32 @@ function detectKeyAttr(jsx: any): { text: string; node: any } | null {
 // ---------------------------------------------------------------------------
 // 兜底校验：任何没被处理到的 JSX 都不能悄悄漏出去
 // ---------------------------------------------------------------------------
-function assertJsxCovered(sf: any, edits: any[], fileName: string): void {
+/**
+ * 兜底校验：任何 JSX 都必须落在「编译器会 emit 它的位置」。
+ *
+ * 编译器的 JSX 处理入口只有两处，判定也按这两处反推：
+ *   A. `emitChild` → `emitExprInto`：处理 `<div>{expr}</div>` 里的子表达式，
+ *      且只认 4 种形状（map / 三元 / && / 直接 JSX 或普通表达式）。
+ *   B. `emitMapItemBody`：处理 `arr.map(cb)` 回调体内的 `return <jsx/>`。
+ *
+ * 于是「被 emit」的充要条件是：沿父链向上，在**不跨过函数边界**的前提下，
+ * 遇到的第一个「持有者」必须是下列之一：
+ *   - JsxElement / JsxFragment（直接子节点）
+ *   - JsxExpression（`{expr}`，且 JSX 就是该表达式本身）
+ *   - ConditionalExpression 的 whenTrue/whenFalse
+ *   - `&&` BinaryExpression 的 right
+ *   - ReturnStatement —— 但要求该 return 所在的最近函数是 map 回调，
+ *     或者是组件的顶层 return（emitNode/emitComponent 的入口）
+ *
+ * 其余情况（`||` / `??` 右侧、数组字面量、IIFE / try 里的 return、
+ * 嵌套函数里返回的 JSX、链式 `.filter()` 尾部的箭头体）一律报错。
+ */
+function assertJsxCovered(sf: any, fileName: string): void {
   const missing: { line: number; column: number }[] = [];
   const visit = (node: any) => {
-    if (isJsxLike(node) && !insideJsx(node)) {
-      const start = node.getStart(sf);
-      const end = node.getEnd();
-      const covered = edits.some((e: any) => e.start <= start && end <= e.end);
-      if (!covered) {
-        const at = sf.getLineAndCharacterOfPosition(start);
-        missing.push({ line: at.line + 1, column: at.character + 1 });
-      }
+    if (isJsxLike(node) && !isEmittedJsx(node)) {
+      const at = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+      missing.push({ line: at.line + 1, column: at.character + 1 });
     }
     ts.forEachChild(node, visit);
   };
@@ -1542,7 +1557,135 @@ function assertJsxCovered(sf: any, edits: any[], fileName: string): void {
         missing.map((m) => `${fileName}:${m.line}`).join(", "),
       hint:
         "组件用 'return (<jsx/>)'；列表用 'arr.map(x => <jsx/>)'；" +
-        "条件用 '{cond ? <a/> : <b/>}' 或 '{cond && <a/>}'",
+        "条件用 '{cond ? <a/> : <b/>}' 或 '{cond && <a/>}'。" +
+        "其它表达式（'||' / '??' 短路、数组字面量、IIFE、try/catch、链式后置 .filter()、" +
+        "嵌套函数里返回的 JSX）若不在此列，请先赋值给变量再插值：" +
+        "const node = cond || <a/>; 然后 {node}；" +
+        "或把该分支抽成一个返回 JSX 的组件函数。",
     });
   }
+}
+
+/** 该 JSX 是否处于编译器会 emit 它的位置（见 assertJsxCovered 注释） */
+function isEmittedJsx(node: any): boolean {
+  // 允许把 JSX 包一层括号：(<jsx/>) 与 {cond ? (<a/>) : (<b/>)}
+  let expr = node;
+  while (
+    ts.isParenthesizedExpression(expr.parent) ||
+    (ts.isAsExpression(expr.parent) && expr.parent.expression === expr)
+  ) {
+    expr = expr.parent;
+  }
+  const holder = expr.parent;
+  if (!holder) return false;
+
+  // 直接子节点：<div><p/></div>
+  if (ts.isJsxElement(holder) || ts.isJsxFragment(holder)) return true;
+
+  // {expr} 子表达式：JSX 必须是该表达式本身（不含在更深的子表达式里）
+  if (ts.isJsxExpression(holder)) return holder.expression === expr;
+
+  // 三元分支
+  if (ts.isConditionalExpression(holder)) {
+    return holder.whenTrue === expr || holder.whenFalse === expr;
+  }
+
+  // && 右侧
+  if (
+    ts.isBinaryExpression(holder) &&
+    holder.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
+    holder.right === expr
+  ) {
+    return true;
+  }
+
+  // 箭头函数隐式返回体：() => <jsx/>
+  // 合法来源有两种：① 作为 .map(cb) 的回调（emitMapItemBody）；
+  // ② 作为 JSX 属性值（fallback={() => <jsx/>}，由 valueCode -> genFnWithJsxBody）。
+  if (ts.isArrowFunction(holder) && holder.body === expr) {
+    return isMapCallback(holder) || isTopLevelRenderFn(holder);
+  }
+
+  // return <jsx/>：要求该 return 直接位于「会被 emit 的函数体」，
+  // 且该函数是 map 回调或组件顶层。
+  if (ts.isReturnStatement(holder)) {
+    const fn = nearestFunction(holder);
+    if (!fn) return false;
+    // 必须直接是函数体语句，而不是嵌在 IIFE / try / if 块里
+    const inDirectBlock =
+      fn.body && ts.isBlock(fn.body) && fn.body.statements.indexOf(holder) >= 0;
+    if (!inDirectBlock) return false;
+    if (isMapCallback(fn)) return true;
+    return isTopLevelRenderFn(fn);
+  }
+
+  return false;
+}
+
+/**
+ * 该函数是否是「组件顶层渲染函数」——即它的 return / 隐式体会被 emitNode / emitComponent 消费。
+ * 判据：函数有名字（声明 / 命名函数表达式），或作为组件被导出 / 赋值 / 作为 JSX 属性值 /
+ * 作为工厂函数的返回值（`return () => <jsx/>`、`return function App() {...}`）。
+ * **排除**被立即调用的函数（IIFE）——`(() => { return <p/>; })()` 不会被 emit。
+ */
+function isTopLevelRenderFn(fn: any): boolean {
+  if (ts.isFunctionDeclaration(fn) && fn.name) return true;
+  const p = fn.parent;
+  if (!p) return false;
+  // 被立即调用：(() => …)() —— 父或（括号后的）祖父是 CallExpression
+  if (ts.isCallExpression(p)) return false;
+  if (ts.isParenthesizedExpression(p) && p.parent && ts.isCallExpression(p.parent)) {
+    return false;
+  }
+  // const C = () => <jsx/>;  export default () => <jsx/>;
+  if (ts.isVariableDeclaration(p) || ts.isExportAssignment(p)) return true;
+  // { fallback: () => <jsx/> } —— 对象属性
+  if (ts.isPropertyAssignment(p)) return true;
+  // fallback={(...) => <jsx/>} —— JSX 属性值（组件 props 里的渲染函数，
+  // 由 valueCode -> genFnWithJsxBody 处理）
+  if (ts.isJsxExpression(p) && p.expression === fn) {
+    const attr = p.parent;
+    if (attr && ts.isJsxAttribute(attr)) return true;
+  }
+  // return () => <jsx/>;  /  return function App() {...} —— 组件工厂的返回值，
+  // 由 emitStmt 的 genFragment 处理
+  if (ts.isReturnStatement(p) && p.expression === fn) return true;
+  return false;
+}
+
+/** 向上找最近的函数节点（箭头 / 函数声明 / 函数表达式） */
+function nearestFunction(node: any): any {
+  let cur = node.parent;
+  while (cur) {
+    if (
+      ts.isArrowFunction(cur) ||
+      ts.isFunctionDeclaration(cur) ||
+      ts.isFunctionExpression(cur)
+    ) {
+      return cur;
+    }
+    cur = cur.parent;
+  }
+  return null;
+}
+
+/**
+ * 该函数节点是否是某个 `.map(cb)` 的回调，**且该 `.map()` 会被编译器识别**。
+ * 后者要求整个调用不是更长链式表达式的一部分
+ * （`items().map(cb).filter(Boolean)` 里的 cb 不会被 emitMapItemBody 处理）。
+ */
+function isMapCallback(fn: any): boolean {
+  const p = fn.parent;
+  if (!p || !ts.isCallExpression(p)) return false;
+  if (p.arguments.indexOf(fn) !== 0) return false;
+  const callee = p.expression;
+  if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== "map") {
+    return false;
+  }
+  // 该 .map(...) 调用不能是更长的属性/调用链的一环
+  const outer = p.parent;
+  if (outer && ts.isPropertyAccessExpression(outer) && outer.expression === p) {
+    return false;
+  }
+  return true;
 }
