@@ -26,6 +26,32 @@
 
 传统 DX 指标（满意度、上手时间）**不**在这里。
 
+## 任务清单（13 个）
+
+每个任务打一条 `AGENTS.md` §3 反模式目录里的错误模式；「靶子」列写的是**故意引代理犯的错**。
+
+| 任务 | 靶子 | 坏例被谁拦 |
+| --- | --- | --- |
+| `01-counter` | 不调用 signal / 直接赋值 | 构建期 |
+| `02-keyed-list` | 不写 `key=` | 断言（DOM 节点身份） |
+| `03-server-boundary` | 把服务端逻辑留在客户端 | 构建期 |
+| `04-server-config` | 模块作用域读 env 再被 `server()` 引用 | 构建期 |
+| `05-immutable-update` | 就地改数据 `items().push(x)` | 构建期 |
+| `06-props-snapshot` | `const t = resolve(props.title)` 快照 getter | 构建期 |
+| `07-server-validation` | 给 `server()` 传函数 | 构建期 |
+| `08-signal-not-called` | 忘记调用 signal：`{count}` | 构建期 `PLAIN_E1102` |
+| `09-props-destructure` | 解构 props：`const { title } = props` | 构建期 `PLAIN_E1105` |
+| `10-effect-async` | `effect(async () => …)` | 构建期 `PLAIN_E1109` |
+| `11-inner-html` | `el.innerHTML = input()` | 构建期 `PLAIN_E1104` |
+| `12-react-habit` | 把派生值又存成独立 `signal` | 断言（语义错） |
+| `13-derived-not-snapshot` | 组件体里把派生值存成普通变量 | 断言（语义错） |
+
+> `12` / `13` 刻意留在断言层：它们的错法是「概念上像对的写法」，静态上没有可判的事实
+> （编译器无法区分一个普通变量是常量还是派生值）。这类**静默语义错**是最贵的一类失败，
+> 所以必须用行为断言兜住 —— 这与 `02-keyed-list` 测 key 的思路一致。
+>
+> 实测的坏例拦截率与逐任务记录见 [RESULTS.md](RESULTS.md)。
+
 ## 跑法
 
 ```bash

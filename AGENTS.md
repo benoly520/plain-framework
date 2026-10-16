@@ -31,17 +31,17 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | # | 反模式（别写） | 正确写法 | 自动拦截？ | 评测任务 |
 | --- | --- | --- | --- | --- |
 | 1 | `count = 1` | `count.set(1)` | ✅ `PLAIN_E1101`（可自动修） | — |
-| 2 | `{count}` / `checked={done}` | `{count()}` / `checked={done()}` | ✅ `PLAIN_E1102`（可自动修） | — |
+| 2 | `{count}` / `checked={done}` | `{count()}` / `checked={done()}` | ✅ `PLAIN_E1102`（可自动修） | 08 |
 | 3 | `useState` / `useEffect` / `useMemo` / `useCallback` / `useRef` | `signal` / `effect` / `computed` | ✅ `PLAIN_E1103` | — |
-| 4 | `el.innerHTML = html` / `insertAdjacentHTML` | `{expr}` 插值 / `createTextNode` | ✅ `PLAIN_E1104` | — |
-| 5 | `const { title } = props` | `resolve(props.title)`，或 `const title = () => resolve(props.title)` | ✅ `PLAIN_E1105` | — |
+| 4 | `el.innerHTML = html` / `insertAdjacentHTML` | `{expr}` 插值 / `createTextNode` | ✅ `PLAIN_E1104` | 11 |
+| 5 | `const { title } = props` | `resolve(props.title)`，或 `const title = () => resolve(props.title)` | ✅ `PLAIN_E1105` | 09 |
 | 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` | — |
 | 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ✅ `PLAIN_E1106` | 05 |
 | 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` | 04（间接） |
-| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`；`t = props.title` 同样算） | `resolve(props.title)`；要响应式就写成 thunk | ✅ `PLAIN_E1107`/`PLAIN_E1112` | 06 |
+| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`；`t = props.title` 同样算） | `resolve(props.title)`；要响应式就写成 thunk | ✅ `PLAIN_E1107`/`PLAIN_E1112` | 06、13 |
 | 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ✅ `PLAIN_E1007` | 07 |
-| 11 | `effect(async () => { await … })` | 依赖收集在第一个 `await` 之后失效：把 `await` 提到 `effect` 外，或用 `resource()` | ✅ `PLAIN_E1109` | — |
-| 12 | `effect(() => count.set(count() + 1))`（读了又写同一个 signal） | 派生值用 `computed(fn)`；`effect` 里只写「没读过」的 signal | ✅ `PLAIN_E1110` | — |
+| 11 | `effect(async () => { await … })` | 依赖收集在第一个 `await` 之后失效：把 `await` 提到 `effect` 外，或用 `resource()` | ✅ `PLAIN_E1109` | 10 |
+| 12 | `effect(() => count.set(count() + 1))`（读了又写同一个 signal） | 派生值用 `computed(fn)`；`effect` 里只写「没读过」的 signal | ✅ `PLAIN_E1110` | 12 |
 | 13 | `computed(() => { s.set(…) })` | `computed` 必须是纯函数，副作用放 `effect` | ✅ `PLAIN_E1111` | — |
 | 14 | `resolve(props.onClick)`（`on*` 事件 prop 不能 resolve） | `props.onClick(...)`：编译器不给 `on*` 包 getter，传进来的就是函数，`resolve` 会把它当场调用 | ✅ `PLAIN_E1108`（可自动修） | — |
 | 15 | JSX 属性展开 `{...expr}` | 展开成显式属性：展开只做半套（不进响应式 + 绕过 class / style / value），会静默跑错 | ✅ `PLAIN_E1008` | — |

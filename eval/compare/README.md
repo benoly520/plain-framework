@@ -165,6 +165,19 @@ Plain 卖的是「构建期把错误变便宜」。如果 React 侧只做 JSX �
 开启方式：默认开启（`makeReactApi` 内联调用）。任何 `error` 级诊断都算「被构建期拦下」，
 在结果表里以 `REACT_LINT/<规则名>` 呈现，与 Plain 的 `PLAIN_Exxxx` 并列统计。
 
+**闸门开关档位（`eslint.react.config.mjs` 里逐条写死，便于复核）**：
+
+| 规则 | 档位 | 为什么是这个档 |
+| --- | --- | --- |
+| `@eslint-react/immutability` | `error` | 独立实现、无需编译器，纯 JSX 下实测拦住就地改 —— 与 `PLAIN_E1106` 对等 |
+| `react-hooks/rules-of-hooks` 等 `recommended-latest` 里的 **确定错** 规则 | `error` | 与 `PLAIN_E1103` 对等：都是「用错框架 API」 |
+| `react-hooks/set-state-in-effect` | `warn` | 官方默认 `error` 会**误伤本仓 React 参考实现**里合理的「重置加载态」写法 —— 闸门只拦确定错的 |
+| `react-hooks/exhaustive-deps` | `warn` | React 独有概念（deps 数组），Plain 没有对应物；升成 error 会**额外加重 React 侧**，反而制造新的不对称 |
+| `react-hooks/immutability`（React Compiler 规则） | 保留默认 | 与 `@eslint-react/immutability` 并存；未接编译器时它对 mutating method 漏报，故不作主闸门 |
+
+> 只有 `severity === 2`（`error`）才算「被构建期拦下」，`warn` 只记录不判定 ——
+> 判定逻辑见 `harness.mjs` 的 `lintReact()`。改档位要同步改本表与 README 的公平性说明。
+
 ## 哪些**不可**比（必须承认）
 
 - **服务端边界类**（`eval/tasks/` 里的 `03` / `04` / `07`）在 React 侧没有等价物：
