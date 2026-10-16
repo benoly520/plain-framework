@@ -2,9 +2,12 @@
 #
 # 前置设置（一次性，在仓库 Settings → Pages 里做）：
 #   Build and deployment → Source 选 “GitHub Actions”。
+#   ⚠️ 必须选它。若留在 “Deploy from a branch”，Pages 会用 Jekyll 渲染仓库根，
+#   线上看到的是 README.md，本 workflow 的 artifact 永远不会被发布。
 # 之后本 workflow 会在每次 push 到 main 时构建并部署，产物落在
 #   https://<owner>.github.io/<repo>/
-# 项目站点在子路径下，所以构建时必须把 SITE_BASE 传成 /<repo>/。
+# 子路径由 configure-pages 的 base_path 自动给出（自定义域名时自动变成 "/"），
+# 不写死仓库名 —— 改仓库名 / 绑域名都不用动这里。
 name: Pages（官网）
 
 on:
@@ -47,22 +50,25 @@ jobs:
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
 
+      - name: 读取 Pages 配置
+        # 放在构建之前：Pages 没启用时几秒内就失败，不必等整轮构建跑完
+        id: pages
+        uses: actions/configure-pages@v5
+
       - name: 构建框架
         # 官网与 examples/ 一样直接消费仓库根的 dist/，不走 npm 发包
         run: pnpm run build
 
       - name: 构建官网
         env:
-          SITE_BASE: /${{ github.event.repository.name }}/
+          # base_path 形如 /plain-framework；绑了自定义域名则是空串，拼出来就是 "/"
+          SITE_BASE: ${{ steps.pages.outputs.base_path }}/
         run: pnpm run build:site
 
-      - name: 关掉 Jekyll
-        # Jekyll 会忽略下划线开头的文件，产物里放个 .nojekyll 免除这个坑
-        run: touch site/dist/.nojekyll
-
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v4
+      - name: 上传站点产物
+        # 这里不需要 .nojekyll：走 Actions 发布不会经过 Jekyll，
+        # 下划线开头的文件不会被丢（那是「Deploy from a branch」才有的坑）
+        uses: actions/upload-pages-artifact@v4
         with:
           path: site/dist
 
