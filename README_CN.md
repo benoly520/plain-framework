@@ -4,6 +4,8 @@
 > 为「AI 写、人来维护」而设计 —— 少推理、少概念、少意外。
 
 > 中文 ｜ [English](README.md)
+>
+> 官网：https://benoly520.github.io/plain-framework/ —— 由 Plain 自己构建（源码在 [`site/`](site/)）
 
 ```tsx
 import { signal, computed, mount, server } from "plain";
@@ -855,12 +857,16 @@ test/
   *.test.mjs               单元测试（node:test，由 pnpm test:unit 跑）
   browser.mjs              真实浏览器端到端（手动触发）
 .c8rc.json                 覆盖率门槛配置
-.github/workflows/ci.yml   构建 + 单测 + 覆盖率门禁
+.github/workflows/ci.yml   构建 + 单测 + 覆盖率门禁 + 官网构建
+.github/workflows/pages.yml 官网发布到 GitHub Pages
 AGENTS.md                  给 AI 代理的工作说明 + 反模式目录
 ROADMAP.md                 分阶段计划与验收标准
 CHANGELOG.md               更新日志
 CONTRIBUTING.md            贡献与提交约定（Conventional Commits）
 eval/                      AI 正确率评测：任务 + 验收断言 + 指标
+site/                      官网首页（GitHub Pages）：Vite + Plain 自举
+                           本地 pnpm run dev:site ｜ 构建 pnpm run build:site
+                           子路径部署：SITE_BASE=/plain-framework/ pnpm run build:site
 ```
 
 ---

@@ -1,0 +1,78 @@
+# 官网（site/）发布到 GitHub Pages。
+#
+# 前置设置（一次性，在仓库 Settings → Pages 里做）：
+#   Build and deployment → Source 选 “GitHub Actions”。
+# 之后本 workflow 会在每次 push 到 main 时构建并部署，产物落在
+#   https://<owner>.github.io/<repo>/
+# 项目站点在子路径下，所以构建时必须把 SITE_BASE 传成 /<repo>/。
+name: Pages（官网）
+
+on:
+  push:
+    branches: [main, master]
+    # 只有会影响官网的东西变了才重建：site/ 自己、框架源码（官网直接消费 dist/）、
+    # 依赖与锁文件、以及本文件
+    paths:
+      - "site/**"
+      - "src/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Pages 部署不并发：排队执行，且不打断正在进行的部署
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 构建官网
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建框架
+        # 官网与 examples/ 一样直接消费仓库根的 dist/，不走 npm 发包
+        run: pnpm run build
+
+      - name: 构建官网
+        env:
+          SITE_BASE: /${{ github.event.repository.name }}/
+        run: pnpm run build:site
+
+      - name: 关掉 Jekyll
+        # Jekyll 会忽略下划线开头的文件，产物里放个 .nojekyll 免除这个坑
+        run: touch site/dist/.nojekyll
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/dist
+
+  deploy:
+    name: 部署到 GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

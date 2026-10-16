@@ -53,6 +53,10 @@ jobs:
           node eval/run.mjs --reference
           node eval/compare/run.mjs --reference
 
+      - name: 官网构建（site/，别把首页改坏）
+        # 只构建，不发布；发布在 .github/workflows/pages.yml
+        run: pnpm run build:site
+
       - name: 上传覆盖率报告
         if: always()
         uses: actions/upload-artifact@v6

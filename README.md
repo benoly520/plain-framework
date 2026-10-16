@@ -4,6 +4,8 @@
 > Designed for "AI writes it, humans maintain it" — less inference, fewer concepts, fewer surprises.
 
 > [中文](README_CN.md) ｜ English
+>
+> Official site: https://benoly520.github.io/plain-framework/ — built with Plain itself ([`site/`](site/))
 
 ```tsx
 import { signal, computed, mount, server } from "plain";
@@ -853,12 +855,16 @@ test/
   *.test.mjs                unit tests (node:test, run by pnpm test:unit)
   browser.mjs               real browser end-to-end (manually triggered)
 .c8rc.json                  coverage threshold config
-.github/workflows/ci.yml    build + unit + coverage gate
+.github/workflows/ci.yml    build + unit + coverage gate + site build
+.github/workflows/pages.yml publish the official site to GitHub Pages
 AGENTS.md                   working instructions for AI agents + anti-pattern catalog
 ROADMAP.md                  staged plan and acceptance criteria
 CHANGELOG.md                changelog
 CONTRIBUTING.md             contribution and commit conventions (Conventional Commits)
 eval/                      AI correctness eval: tasks + acceptance assertions + metrics
+site/                      official site (GitHub Pages): Vite + Plain, self-hosted
+                           local: pnpm run dev:site ｜ build: pnpm run build:site
+                           sub-path deploy: SITE_BASE=/plain-framework/ pnpm run build:site
 ```
 
 ---

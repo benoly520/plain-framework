@@ -71,6 +71,10 @@
     "dev:example:ssr": "tsc && vite --config examples/ssr/vite.config.js",
     "start:example:ssr": "node examples/ssr/server.mjs",
     "typecheck:example": "tsc && tsc --noEmit -p examples/todo/tsconfig.json && tsc --noEmit -p examples/ssr/tsconfig.json && tsc --noEmit -p examples/data-table/tsconfig.json",
+    "dev:site": "tsc && vite --config site/vite.config.js",
+    "build:site": "tsc && vite build --config site/vite.config.js",
+    "preview:site": "vite preview --config site/vite.config.js",
+    "typecheck:site": "tsc && tsc --noEmit -p site/tsconfig.json",
     "check": "tsc && node dist/cli/index.js check src"
   },
   "dependencies": {
