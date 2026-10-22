@@ -1597,9 +1597,20 @@ function emitAttr(
   const expr = init.expression.getText();
   const op = resolveAttr(raw, tag);
   if (op.kind === "prop") {
-    // class 需要 stringify（null / undefined -> ""），其余按原值赋给 property
-    const value = op.prop === "className" ? `${S}(${expr})` : `(${expr})`;
-    out.push(`${E}(() => { ${el}.${op.prop} = ${value}; });`);
+    // class 需要 stringify（null / undefined -> ""），其余见下方守卫
+    if (op.prop === "className") {
+      out.push(`${E}(() => { ${el}.${op.prop} = ${S}(${expr}); });`);
+      return;
+    }
+    // 可选属性的 null 守卫：null / undefined 表示「不设置」，走 removeAttribute。
+    // 否则会被 WebIDL 强转出垃圾值——maxLength=undefined → maxlength="0"
+    // （输入框一个字符都打不进）、name=undefined → 字符串 "undefined"
+    // （实测均出自 uni-ui Input 的可选透传场景）。
+    out.push(
+      `${E}(() => { const __v = (${expr}); if (__v == null) ${el}.removeAttribute(${JSON.stringify(
+        canonicalAttrName(raw, tag)
+      )}); else ${el}.${op.prop} = __v; });`
+    );
     return;
   }
   if (op.name === "style") {
