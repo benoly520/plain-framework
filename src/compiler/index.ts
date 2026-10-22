@@ -11,7 +11,7 @@
 import ts from "typescript";
 import type { PlainErrorCode } from "../errors.js";
 // 属性「拼写 -> 落地方式」的唯一归一化表（静态 / 动态 / SVG 判定都走它）
-import { canonicalAttrName, resolveAttr } from "../attrs.js";
+import { canonicalAttrName, resolveAttr, REFLECTED_ATTRS } from "../attrs.js";
 
 export type { PlainErrorCode } from "../errors.js";
 
@@ -1600,6 +1600,12 @@ function emitAttr(
     // class 需要 stringify（null / undefined -> ""），其余见下方守卫
     if (op.prop === "className") {
       out.push(`${E}(() => { ${el}.${op.prop} = ${S}(${expr}); });`);
+      return;
+    }
+    // 布尔属性（checked / disabled / readonly …）：存在即生效，直接赋 property 即可。
+    // null / undefined 会被 WebIDL 强转成布尔（等同于「不勾选」），不需要 removeAttribute 守卫。
+    if (REFLECTED_ATTRS[canonicalAttrName(raw, tag)]?.bool) {
+      out.push(`${E}(() => { ${el}.${op.prop} = (${expr}); });`);
       return;
     }
     // 可选属性的 null 守卫：null / undefined 表示「不设置」，走 removeAttribute。
