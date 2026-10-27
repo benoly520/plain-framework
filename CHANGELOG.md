@@ -28,6 +28,14 @@
     冷门属性提 issue 往枚举表里补一个名字即可（**不是**把索引签名加回来）。
   - 测试：`test/types.test.mjs` 用真 `tsc` 检查（防的就是有人把 `[attr: string]: any` 加回来）。
 
+### 文档
+
+- **单文件样式：评估后不做，相关实现已回滚**：新增 [`docs/sfc-styles.md`](docs/sfc-styles.md) 留档评估结论
+  （**收益比低、优先级低**）与候选形态（文件末尾注释块、同级 `CounterStyle` 样式组件、`css` 标签模板、
+  组件内 `<style>`）的识别规则、硬约束和 PoC 实测。`src/sfc.ts`、`plain({ styleBlock })` 开关、
+  `PLAIN_E1012`、`test/sfc.test.mjs`、`examples/sfc/` 及 README / SPEC / AGENTS / patterns 的相关章节均已回滚；
+  需要风格一致的写法时仍用独立 `.css` / `.module.css`。
+
 ### 新增
 
 - **官方脚手架 `create-plain`**：`packages/create-plain` 提供 `create-plain <项目名>` 命令，
@@ -219,6 +227,8 @@
 
 ### 修复
 
+- **HMR 后的编译链断裂**：`transform` 用带 query 的 id 判扩展名（`?t=` 不算 `.tsx`），
+  导致热更后的那次请求被放给 esbuild，浏览器拿到未编译的 JSX。现在先剥 query 再判定。
 - **属性名归一化收敛到一处（`src/attrs.ts`）：静态与动态不再各写各的**。修掉两个静默失效：
   - `<label htmlFor="x">`（静态字面量）此前落到属性名 `htmlFor` —— 浏览器会把 HTML 属性名
     小写成 `htmlfor`，不是 `<label>` 认的 `for`，于是**静默失效**；而同一处写的

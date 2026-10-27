@@ -124,9 +124,11 @@ export default function plainPlugin(options: {
 
     async transform(this: any, code: string, id: string) {
       if (id.includes("node_modules")) return null;
-      if (!include.test(id)) return null;
-
+      // 先去掉 query（dev 的 `?t=` / `?v=` 不算文件扩展名）：
+      // 不然热更后的那次 transform 会被当成「非 Plain 模块」直接跳过，
+      // 浏览器拿到的是 esbuild 留下的 JSX —— 编译链在 HMR 之后就断了。
       const fileName = id.split("?")[0];
+      if (!include.test(fileName)) return null;
       // dev（watchMode）下也要可调用对象：真实 dev 会先跑 configureServer，
       // 但这里再兜一道，避免依赖调用顺序（HMR / 单测里 transform 可能先发生）。
       if ((this as any).meta && (this as any).meta.watchMode) needsCallable = true;
@@ -148,7 +150,11 @@ export default function plainPlugin(options: {
       // 1) 去 TS 类型，保留 JSX
       const stripped = await transformWithEsbuild(code, id, {
         jsx: "preserve",
-        loader: id.endsWith(".tsx") ? "tsx" : id.endsWith(".jsx") ? "jsx" : "ts",
+        loader: fileName.endsWith(".tsx")
+          ? "tsx"
+          : fileName.endsWith(".jsx")
+            ? "jsx"
+            : "ts",
         target: "es2022",
       });
 

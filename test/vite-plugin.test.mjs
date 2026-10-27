@@ -507,3 +507,14 @@ test("dev SSR：模板缺占位符同样报错（与生产同一条规则）", a
   assert.equal(res.statusCode, 500);
   assert.match(res.body, /plain-ssr/, "应点名缺的占位符：" + res.body);
 });
+
+test("transform：带 ?t= 的 HMR 请求仍然走 Plain 编译（query 不算扩展名）", async () => {
+  const root = tmpRoot();
+  const p = plugin();
+  p.configResolved({ root });
+  const code = `export function App() {\n  return <div>hi</div>;\n}\n`;
+  const out = await p.transform(code, path.join(root, "App.tsx") + "?t=123");
+  assert.ok(out, "不能因为 query 就把模块放行给 esbuild");
+  assert.ok(out.code.includes("__createEl"), out.code);
+  assert.ok(!out.code.includes("<div>"));
+});
