@@ -42,7 +42,7 @@ mount("#app", App());
 - [面向 AI 的设计](#面向-ai-的设计)
 - [边界与已知限制](#边界与已知限制)
 - [测试与质量](#测试与质量)
-- [常见场景配方 docs/patterns.md](docs/patterns.md)
+- [常见场景配方 docs/patterns.md](docs/patterns.md) ｜ [从其它框架迁移 docs/from-other-frameworks.md](docs/from-other-frameworks.md)
 - [路线图 ROADMAP.md](ROADMAP.md) ｜ [给 AI 代理的说明 AGENTS.md](AGENTS.md) ｜ [AI 正确率评测 eval/](eval/README.md) ｜ [安全说明 SECURITY.md](SECURITY.md)
 
 ---

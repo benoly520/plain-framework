@@ -736,7 +736,7 @@ The test environment needs a DOM first (recommend `jsdom`). `render()` throws a 
 
 ```bash
 pnpm run eval              # Plain's own quality metrics (7 tasks)
-pnpm run eval:compare      # Plain vs React symmetric comparison (3 cases, shared prompt and assertions)
+pnpm run eval:compare      # Plain vs React symmetric comparison (8 cases, shared prompt and assertions)
 
 node eval/run.mjs --prompt          # print task prompts, hand to an agent
 node eval/compare/run.mjs --prompt  # print comparison case prompts
