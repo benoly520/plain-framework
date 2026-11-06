@@ -219,6 +219,7 @@ npx plaindev lsp            # LSP stdio server：把契约检查接进编辑器�
 | `eval/` | AI 正确率评测：任务 + 验收断言 + 指标 |
 | `docs/patterns.md` | 常见场景（表单 / 异步提交 / 列表内表单 / 校验 / 命令式 DOM）的**唯一推荐写法** |
 | `docs/sfc-styles.md` | 单文件样式的候选形态评估（注释块 / 同级样式组件 / `css` 标签模板 / 组件内 `<style>`）——**收益比低、优先级低，均未实现，相关代码已回滚** |
+| `docs/internals.md` | **内核原理**：编译管线、产物对照、响应式与 DOM 层、`server()` 剥离、SSR / 注水 / HMR、不变量清单 —— **想深入理解核心只读这一篇** |
 | `docs/rfcs/` | 设计提案（如 `ref-escape-hatch.md`），评审后进 `SPEC.md` |
 
 ## 7. 改动约束

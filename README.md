@@ -42,6 +42,7 @@ mount("#app", App());
 - [Designed for AI](#designed-for-ai)
 - [Boundaries & Known Limitations](#boundaries--known-limitations)
 - [Testing & Quality](#testing--quality)
+- [Core internals: how it actually works](docs/internals.md) — compiler pipeline, generated code, runtime, SSR / hydration / HMR, invariants
 - [Examples](examples/todo/)
 - [Directory Structure](#directory-structure)
 - [License](#license)
