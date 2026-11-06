@@ -330,6 +330,7 @@ so the AI's common mistakes will **fail the build** rather than blow up at runti
 | `PLAIN_E1113` | `resource()` created at module scope (runs on import / SSR import fires a request) | ❌ move into component / `createScope`, error only |
 | `PLAIN_E1114` | reading a property directly off `useContext(Ctx)`'s return (it's a getter) | ❌ call first: `useContext(Ctx)()`, error only |
 | `PLAIN_E1115` | React attribute spelling on a built-in element (`className` / `htmlFor`) | ✅ rewrite to `class` / `for` (**warn only** — equivalent, never fails the build) |
+| `PLAIN_E1201` | top-level `computed` / `effect` callback referencing a `const` declared later in the module | ❌ move the declaration above the call (TDZ: throws `ReferenceError` at import time), error only |
 
 > Each code also has a **readable short name** (`PLAIN_E1107` = `no-props-snapshot`), full index in `src/errors.ts`;
 > the old `plain/no-props-snapshot` form is still accepted in suppression directives (backward compatible), but output is unified to the new code.

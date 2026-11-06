@@ -325,6 +325,7 @@ function Card(props) {
 | `PLAIN_E1113` | 模块作用域创建 `resource()`（import 时立即执行 / SSR 导入即发请求） | ❌ 挪进组件 / `createScope`，只报错 |
 | `PLAIN_E1114` | 对 `useContext(Ctx)` 的返回值直接取属性（它是 getter） | ❌ 改成先调用：`useContext(Ctx)()`，只报错 |
 | `PLAIN_E1115` | 内建元素上用 React 拼写的属性名（`className` / `htmlFor`） | ✅ 改写成 `class` / `for`（**只告警**——两者等价，不阻断构建） |
+| `PLAIN_E1201` | 顶层 `computed` / `effect` 回调引用了模块里后面才声明的 const | ❌ 把声明挪到调用之前（TDZ：import 时即抛 `ReferenceError`），只报错 |
 
 > 每个码还有一个**可读短名**（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`；
 > 旧写法 `plain/no-props-snapshot` 在抑制指令里仍被接受（向后兼容），但输出统一走新码。

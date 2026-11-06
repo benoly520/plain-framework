@@ -56,6 +56,7 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | 20 | 对 `useContext(Ctx)` 的返回值直接取属性（`t.name` / `useContext(Ctx).name`） | 先调用再取：`useContext(Ctx)().name` | ✅ `PLAIN_E1114` | — |
 | 21 | 在不支持的位置写 JSX：`{cond \|\| <a/>}`、`{cond ?? <a/>}`（含裸 `return cond \|\| <a/>`）、数组字面量 `{[<a/>]}`、IIFE、IIFE 内 `try/catch` 的 `return <a/>`、链式后置 `.map().filter()` | 先赋值给变量再插值，或抽成组件函数（详见第 3.1 节） | ✅ `PLAIN_E1001` | — |
 | 22 | 在**内建元素**上写 React 拼写的属性名（`className` / `htmlFor`） | 用原生 HTML 名 `class` / `for`（两者等价，编译器会归一；组件上的 prop 名不受影响） | ✅ `PLAIN_E1115`（可自动修，**只告警**） | — |
+| 23 | 模块顶层的 `computed` / `effect` 回调引用**后面才声明**的 const / let / class（`const a = computed(() => b())` 在 `const b` 之前） | 把被引用的声明挪到这个调用之前 —— computed 创建即求值（import 时就跑回调），后置声明还在 TDZ，运行时必抛 `Cannot access 'x' before initialization` | ✅ `PLAIN_E1201` | — |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
 > **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
@@ -126,7 +127,7 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 ## 4. 错误码
 
 **一套编号**：编译器、lint、构建期共用 `PLAIN_Exxxx`，数字自带分类 ——
-`E10xx` 编译器内部 · `E11xx` lint（可抑制）· `E2xxx` 构建期闸门。
+`E10xx` 编译器内部 · `E11xx` lint 可自动修 · `E12xx` lint 需手工修（均可抑制）· `E2xxx` 构建期闸门。
 
 | 码 | 含义 | 你该做什么 |
 | --- | --- | --- |
@@ -155,6 +156,7 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | `PLAIN_E1113` | 在模块作用域创建 `resource()` | 放进组件函数体，或 `createScope(() => …)` 里 |
 | `PLAIN_E1114` | 对 `useContext(Ctx)` 的返回值直接取属性 | 先调用再取：`useContext(Ctx)().name` |
 | `PLAIN_E1115` | 内建元素上写 React 拼写的属性名（`className` / `htmlFor`） | 用原生 HTML 名 `class` / `for`（**只告警**，两者等价，`check` 自动改写） |
+| `PLAIN_E1201` | 顶层 `computed` / `effect` 引用了后面才声明的 const | 把声明挪到调用之前（TDZ：import 时就会抛 ReferenceError） |
 | `PLAIN_E2001` | 契约检查未通过 | 跑 `npx plaindev check --fix <dir>` 自动修，再重新构建 |
 
 > `E11xx` 每条还带一个可读短名（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`。

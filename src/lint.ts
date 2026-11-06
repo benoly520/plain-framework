@@ -439,6 +439,8 @@ export function check(
   visit(sf);
   // 反模式 19 需要「是否在函数内」的上下文，单独走一遍（口径见函数注释）
   checkModuleScopeResource(sf, add);
+  // 反模式 23（eager 前向引用）：同样需要「模块顶层声明」的全局视野，单独走一遍
+  checkEagerForwardRef(sf, add);
   return issues.sort((a, b) => a.line - b.line);
 }
 
@@ -1072,6 +1074,167 @@ function isUseContextCall(n: ts.Node): boolean {
     ts.isIdentifier(n.expression) &&
     n.expression.text === "useContext"
   );
+}
+
+/**
+ * 反模式 23（eager 回调的前向引用）：模块顶层的 `computed(...)` / `effect(...)`
+ * 回调里引用了「文本位置在其后」声明的 const / let / class。
+ *
+ * 为什么是运行时必炸：computed(fn) = signal + effect，effect 创建时立即 run()
+ * （src/runtime/signal.ts）——顶层调用的求值时机就是模块 import 阶段，后置的
+ * 块级作用域声明还在暂时性死区，运行时抛
+ * `ReferenceError: Cannot access 'x' before initialization`。
+ *
+ * 为什么 tsc 查不到：TS2448 只覆盖「直接使用」，回调函数体内的引用被视为
+ * 延迟执行。而框架知道通用工具不知道的事——这个回调在创建那一刻同步执行。
+ *
+ * 判定口径（v1，欠报不误报，欠报的部分交给运行时报错兜底）：
+ *   - 只查**模块顶层**（无函数祖先）的调用：组件函数体内的 computed 在 render
+ *     时才执行，彼时模块早已求值完毕；
+ *   - 只报回调「立即执行路径」（非嵌套函数）里的直连标识符引用：eager 回调里
+ *     再包 thunk、thunk 里读后置常量的写法极罕见，误报对构建闸门的伤害大于漏报；
+ *   - 声明只认 const / let / class（var 无 TDZ、function 声明会提升，均排除）；
+ *   - 回调自有的局部声明（参数 / 变量 / catch / 嵌套声明）遮蔽同名模块声明，排除；
+ *   - 类型标注里的标识符不是运行时引用，排除；
+ *   - 属性访问的名字段（`obj.foo` 的 `foo`）、对象字面量显式键、JSX 属性名不是
+ *     引用，排除（简写 `{ foo }` 是引用，保留）。
+ * 跨模块 import 环 + eager computed 不在 v1 范围（需要模块图分析）。
+ * 提案与真实案例见 docs/rfcs/computed-eager-tdz.md。
+ */
+function checkEagerForwardRef(sf: ts.SourceFile, add: AddIssue): void {
+  // 模块级块级作用域声明：名字 -> 声明标识符的位置（TDZ 以声明名的位置为准）。
+  // 只看顶层语句本身、不向函数体内递归 —— 函数局部变量对模块顶层不可见，
+  // 收进来会把「eager 回调引用了别处函数的局部名」误判成前向引用。
+  const decls = new Map<string, number>();
+  for (const st of sf.statements) {
+    if (ts.isVariableStatement(st)) {
+      // var 没有 TDZ（提升 + 可重复声明），只有 const / let（块级作用域）才算
+      if (!(st.declarationList.flags & ts.NodeFlags.BlockScoped)) continue;
+      for (const d of st.declarationList.declarations) {
+        forEachBindingName(d.name, (name, pos) => {
+          if (!decls.has(name)) decls.set(name, pos);
+        });
+      }
+    } else if (ts.isClassDeclaration(st) && st.name) {
+      if (!decls.has(st.name.text)) decls.set(st.name.text, st.name.getStart(sf));
+    }
+  }
+
+  const walk = (node: ts.Node, inFunction: boolean) => {
+    if (
+      !inFunction &&
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      (node.expression.text === "computed" || node.expression.text === "effect")
+    ) {
+      const first = node.arguments[0];
+      if (
+        first &&
+        (ts.isArrowFunction(first) || ts.isFunctionExpression(first)) &&
+        first.body
+      ) {
+        const names = forwardRefNames(first, decls, node.getStart(sf));
+        if (names.length) {
+          const shown = names.map((n) => `"${n}"`).join("、");
+          add(
+            node,
+            "error",
+            "PLAIN_E1201",
+            `顶层 ${node.expression.text} 创建即求值，但引用了后面才声明的 ${shown}。` +
+              `把 ${shown} 的声明挪到这个调用之前（const 有暂时性死区，import 时就会抛 ` +
+              `ReferenceError: Cannot access '…' before initialization）`
+          );
+        }
+      }
+    }
+    const next = inFunction || ts.isFunctionLike(node);
+    ts.forEachChild(node, (c) => walk(c, next));
+  };
+  walk(sf, false);
+}
+
+/** 遍历绑定名的每个标识符（含解构模式），回调 (名字, 名字标识符的位置) */
+function forEachBindingName(
+  n: ts.BindingName,
+  fn: (name: string, pos: number) => void
+): void {
+  if (ts.isIdentifier(n)) {
+    fn(n.text, n.getStart());
+  } else if (ts.isObjectBindingPattern(n) || ts.isArrayBindingPattern(n)) {
+    for (const e of n.elements) {
+      if (ts.isBindingElement(e)) forEachBindingName(e.name, fn);
+    }
+  }
+}
+
+/** eager 回调里自有作用域声明的名字：这些名字遮蔽模块级同名声明，不算前向引用 */
+function collectEagerLocals(fn: ts.FunctionLikeDeclaration): Set<string> {
+  const names = new Set<string>();
+  for (const p of fn.parameters) {
+    forEachBindingName(p.name, (name) => names.add(name));
+  }
+  const walk = (n: ts.Node) => {
+    if (ts.isFunctionLike(n)) return; // 嵌套函数的作用域不在「立即执行路径」上
+    if (ts.isVariableDeclaration(n) || ts.isParameter(n)) {
+      forEachBindingName(n.name, (name) => names.add(name));
+    }
+    if (ts.isCatchClause(n) && n.variableDeclaration) {
+      forEachBindingName(n.variableDeclaration.name, (name) => names.add(name));
+    }
+    if (
+      (ts.isClassDeclaration(n) ||
+        ts.isFunctionDeclaration(n) ||
+        ts.isInterfaceDeclaration(n) ||
+        ts.isTypeAliasDeclaration(n) ||
+        ts.isEnumDeclaration(n)) &&
+      n.name
+    ) {
+      names.add(n.name.text);
+    }
+    ts.forEachChild(n, walk);
+  };
+  if (fn.body) walk(fn.body);
+  return names;
+}
+
+/** eager 回调「立即执行路径」引用的标识符名（跳过嵌套函数 / 类型标注 / 属性名） */
+function collectEagerRefs(body: ts.Node): Set<string> {
+  const refs = new Set<string>();
+  const walk = (n: ts.Node) => {
+    if (ts.isFunctionLike(n) || ts.isTypeNode(n)) return;
+    if (ts.isIdentifier(n)) {
+      const p = n.parent;
+      const isPropName =
+        // 属性访问的名字段不是值引用：obj.foo 的 foo（类型位置的限定名已被 isTypeNode 跳过）
+        (ts.isPropertyAccessExpression(p) && p.name === n) ||
+        // 对象字面量显式键不是引用：{ foo: 1 }（简写 { foo } 才是值引用，保留）
+        (ts.isPropertyAssignment(p) && p.name === n) ||
+        (ts.isMethodDeclaration(p) && p.name === n) ||
+        // JSX 属性名同理（JSX 属性的值走 JsxExpression，会正常收集）
+        (ts.isJsxAttribute(p) && p.name === n);
+      if (!isPropName) refs.add(n.text);
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(body);
+  return refs;
+}
+
+/** eager 回调里「引用了位置在其后声明的模块级名字」列表（排序后用于提示语） */
+function forwardRefNames(
+  fn: ts.FunctionLikeDeclaration,
+  decls: Map<string, number>,
+  eagerStart: number
+): string[] {
+  const locals = collectEagerLocals(fn);
+  const refs = collectEagerRefs(fn.body!);
+  const out: string[] = [];
+  for (const name of refs) {
+    if (locals.has(name)) continue; // 回调自有的同名声明遮蔽了模块级声明
+    const pos = decls.get(name);
+    if (pos != null && pos > eagerStart) out.push(name);
+  }
+  return out.sort();
 }
 
 /** 收集 `const x = useContext(Ctx)` 里的 x —— 它们是 getter，直接取属性要报 E1114 */

@@ -23,7 +23,7 @@ test("错误码唯一性：每个 code 只登记一次，编号前缀落在已�
   for (const c of codes) {
     assert.match(c, /^PLAIN_E\d{4}$/, `${c} 形如 PLAIN_Exxxx`);
     const band = c.slice(7, 9); // 去掉 "PLAIN_E"，取前两位
-    assert.ok(["10", "11", "20"].includes(band), `${c} 落在 10 / 11 / 20 区`);
+    assert.ok(["10", "11", "12", "20"].includes(band), `${c} 落在 10 / 11 / 12 / 20 区`);
   }
 });
 

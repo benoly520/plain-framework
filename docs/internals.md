@@ -349,6 +349,13 @@ computed(fn) = signal(undefined) + effect(() => out.set(fn()))
 没有依赖版本号、没有惰性求值、没有拓扑排序：上游一变就同步重算并写回。
 代价是「菱形依赖可能多算一次」，收益是**实现 20 行、行为可本地推理** —— 与「AI 可推理」的命题一致。
 
+**代价之二（此前未写明）：创建即求值让模块顶层的声明顺序成为硬约束。** 顶层
+`computed` 在 import 阶段就会执行回调，引用「后面才声明」的 const / let / class 会
+撞暂时性死区（TDZ），import 时即抛 `ReferenceError` —— 且 tsc 查不到（回调体内的
+引用被视为延迟执行）。框架用 lint 规则 `PLAIN_E1201`
+（`no-eager-computed-forward-ref`）在构建期拦下这一形态；缘起与方案取舍见
+[`docs/rfcs/computed-eager-tdz.md`](rfcs/computed-eager-tdz.md)。
+
 ### 4.3 批处理与死循环
 
 - `batch(fn)` 用 `batchDepth` 计数，归零时 `flush()`；flush 是循环取队列（settle 期间可能又入队）。

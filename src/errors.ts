@@ -43,6 +43,7 @@ export type PlainErrorCode =
   | "PLAIN_E1113"
   | "PLAIN_E1114"
   | "PLAIN_E1115"
+  | "PLAIN_E1201"
   | "PLAIN_E2001";
 
 /** lint 规则短名（无前缀）：一种反模式一个短名，与 `plain/<短名>` 一一对应 */
@@ -60,7 +61,8 @@ export type LintRuleName =
   | "no-computed-side-effect"
   | "no-module-scope-resource"
   | "no-context-getter-property"
-  | "react-attr-spelling";
+  | "react-attr-spelling"
+  | "no-eager-computed-forward-ref";
 
 export interface ErrorEntry {
   code: PlainErrorCode;
@@ -225,6 +227,15 @@ export const ERROR_CATALOG: Record<PlainErrorCode, ErrorEntry> = {
     rule: "react-attr-spelling",
     suppressible: true,
     summary: "React 拼写的属性名（`className` / `htmlFor`）—— 规范写法是 `class` / `for`",
+  },
+
+  // --- E12xx lint：需手工修（改法视上下文而定，不自动改） -------------------
+  PLAIN_E1201: {
+    code: "PLAIN_E1201",
+    rule: "no-eager-computed-forward-ref",
+    suppressible: true,
+    summary:
+      "顶层 `computed`/`effect` 引用了后面才声明的 const（创建即求值，import 时撞 TDZ）",
   },
 
   // --- E2xxx 构建期 ------------------------------------------------------

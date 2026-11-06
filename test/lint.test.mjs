@@ -784,3 +784,108 @@ test("抑制按「报错行」匹配（多行节点要把指令放在报出来�
     "挂在内部那一行不生效 —— 指令认的是 CLI 打出来的行号"
   );
 });
+// ---- 反模式 23：no-eager-computed-forward-ref（PLAIN_E1201）----
+// 顶层 computed/effect 创建即求值，回调引用「后面才声明」的 const 会在
+// import 阶段撞 TDZ。真实案例与提案见 docs/rfcs/computed-eager-tdz.md。
+
+test("顶层 computed 引用后置 const -> PLAIN_E1201（真实案例形态）", () => {
+  const src = [
+    "import { signal, computed } from 'plain';",
+    "const a = computed(() => b());",
+    "const b = signal(0);",
+  ].join("\n");
+  const issues = check(src, "a.tsx");
+  assert.deepEqual(codes(issues), ["PLAIN_E1201"]);
+  assert.equal(issues[0].line, 2);
+  assert.equal(issues[0].fix, undefined, "重排声明顺序无法安全自动修");
+  assert.ok(issues[0].message.includes('"b"'), "提示语要点出被前向引用的名字");
+});
+
+test("顶层 effect 引用后置 const 同样报 PLAIN_E1201", () => {
+  const src = [
+    "import { signal, effect } from 'plain';",
+    "effect(() => console.log(later));",
+    "const later = signal(0);",
+  ].join("\n");
+  assert.deepEqual(codes(check(src, "a.tsx")), ["PLAIN_E1201"]);
+});
+
+test("顶层 effect 引用后置的 class 声明 -> PLAIN_E1201", () => {
+  const src = [
+    "const make = effect(() => new Later());",
+    "class Later {}",
+  ].join("\n");
+  assert.deepEqual(codes(check(src, "a.ts")), ["PLAIN_E1201"]);
+});
+
+test("组件函数体内的 computed 引用后置 const 不报（render 时才执行）", () => {
+  const src = [
+    "import { computed } from 'plain';",
+    "export function App() { const a = computed(() => b()); return <p/>; }",
+    "const b = 1;",
+  ].join("\n");
+  assert.deepEqual(check(src, "a.tsx"), []);
+});
+
+test("引用先声明的 const / 顶层函数声明（提升）不报", () => {
+  const src = [
+    "import { signal, computed } from 'plain';",
+    "const b = signal(0);",
+    "const a = computed(() => b());",
+    "function helper() { return 1; }",
+    "const c = computed(() => helper());",
+  ].join("\n");
+  assert.deepEqual(check(src, "a.tsx"), []);
+});
+
+test("var 声明无 TDZ，不报", () => {
+  const src = [
+    "const a = computed(() => v);",
+    "var v = 1;",
+  ].join("\n");
+  assert.deepEqual(check(src, "a.ts"), []);
+});
+
+test("回调自有局部变量遮蔽同名模块声明，不报", () => {
+  const src = [
+    "const a = computed(() => { const b = 1; return b; });",
+    "const b = 2;",
+  ].join("\n");
+  assert.deepEqual(check(src, "a.tsx"), []);
+});
+
+test("嵌套函数体内的引用不报（v1 欠报口径，测试钉死）", () => {
+  const src = [
+    "const a = computed(() => () => b);",
+    "const b = 1;",
+  ].join("\n");
+  assert.deepEqual(check(src, "a.tsx"), []);
+});
+
+test("类型标注 / 属性名 / 对象键不是值引用，不报", () => {
+  const src = [
+    "const obj = { qux: 2 };",
+    "const a = computed((): Foo => ({ bar: 1, baz: obj.qux }));",
+    "type Foo = { bar: number; baz: number };",
+  ].join("\n");
+  // obj 在前（合法值引用）；返回类型标注里的 Foo 虽声明在后，但不是运行时引用
+  assert.deepEqual(check(src, "a.tsx"), []);
+});
+
+test("解构声明的名字也算模块级声明：后置解构被引用时报 PLAIN_E1201", () => {
+  const src = [
+    "const a = computed(() => x + y);",
+    "const { x, y } = parts;",
+  ].join("\n");
+  const issues = check(src, "a.tsx");
+  assert.deepEqual(codes(issues), ["PLAIN_E1201"]);
+  assert.ok(issues[0].message.includes('"x"') && issues[0].message.includes('"y"'));
+});
+
+test("PLAIN_E1201 可被行级抑制指令抑制", () => {
+  const src = [
+    "const a = computed(() => b()); // plain-ignore-line PLAIN_E1201",
+    "const b = 1;",
+  ].join("\n");
+  assert.deepEqual(check(src, "a.tsx"), []);
+});

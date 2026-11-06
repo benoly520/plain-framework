@@ -38,6 +38,21 @@
 
 ### 新增
 
+- **契约规则 `no-eager-computed-forward-ref`（`PLAIN_E1201`）**：模块顶层的
+  `computed(...)` / `effect(...)` 回调引用了**后面才声明**的 const / let / class。
+  `computed` 创建即求值（内部是 effect，创建时立即 `run()`），顶层调用的求值时机
+  就是模块 import 阶段 —— 后置的块级作用域声明还在暂时性死区，运行时必抛
+  `ReferenceError: Cannot access 'x' before initialization`，且页面白屏。
+  这类错误 tsc 查不到（回调体内的引用被视为延迟执行），只有框架知道
+  「回调在创建那一刻同步执行」这一领域知识，故做成框架专属静态检查。
+  判定口径（v1，欠报不误报）：只查模块顶层（无函数祖先）的调用；只报回调
+  「立即执行路径」（非嵌套函数）里的直连标识符引用；声明只认 const / let / class
+  （var 无 TDZ、function 声明会提升均排除）；回调自有局部声明遮蔽同名模块声明、
+  类型标注与属性名均排除。**不可自动修**（重排声明顺序无法安全改写），可被
+  `plain-ignore` 行级抑制；跨模块 import 环 + eager computed 留待二期（需模块图）。
+  提案与真实案例见 `docs/rfcs/computed-eager-tdz.md`。
+  验收：`test/lint.test.mjs` 十项（真实案例形态 / effect / class / 组件体内不报 /
+  先声明不报 / var 不报 / 局部遮蔽 / 嵌套函数欠报 / 类型与属性名不报 / 抑制指令）。
 - **官方脚手架 `create-plain`**：`packages/create-plain` 提供 `create-plain <项目名>` 命令，
   复制内置 `minimal` 模板并替换 `__PROJECT_NAME__` 占位符。**不联网、不自动安装依赖、不自动 git init**，
   安装与版本管理交给用户。根目录新增 `npm run create-plain` 便捷脚本。
