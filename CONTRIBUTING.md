@@ -70,3 +70,6 @@ feat(compiler): 支持嵌套 Fragment
    `test/run.mjs` 对此有断言，新增代码请保持通过。
 4. **跨端边界**：`server()` 的函数体会被物理搬到服务端，不要把闭包里的外部变量当作可用。
 5. 提交前请本地跑一遍 `pnpm test`；涉及浏览器行为时再跑 `pnpm run test:browser`。
+6. **`dist/` 不做压缩 / 混淆 / 预打包**：`build` 保持 `tsc`，压缩交给使用者的打包器。
+   别给 `build` 加 rollup / terser / esbuild 步骤 —— 理由、实测与发布瘦身做法见
+   [`docs/build-and-release.md`](docs/build-and-release.md)。

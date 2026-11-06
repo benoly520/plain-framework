@@ -673,6 +673,8 @@ Staged plan and acceptance criteria in [`ROADMAP.md`](ROADMAP.md). Current state
   The AI only needs to remember this one rule.
 - **`server()`'s closure won't follow it to the server** — deliberately makes cross-environment dependencies explicit.
 - **No `.value` / `.get()`** — `s()` is one read syntax, one fewer choice means one fewer class of errors.
+- **`dist/` ships unminified** — your bundler already minifies and tree-shakes it, so pre-minifying would only cost module boundaries and debuggability.
+  Rationale, measurements and the publishing/pruning options: [`docs/build-and-release.md`](docs/build-and-release.md).
 
 ---
 

@@ -269,3 +269,5 @@ dev 内存注册表（不依赖 `.plain/server.mjs`）、模板过 `transformInd
 - 为功能扩张而扩充对外 API 面（SPEC 原则 6「稳定小核心」）
 - 逻辑 / 视图 / 样式分离（与 locality 原则冲突，见 README「设计取舍」）
 - 刷 100% 行覆盖率（用变异测试衡量断言强度，而不是堆执行过的行）
+- 对发布出去的 `dist/` 做压缩 / 混淆 / 预打包（压缩是使用者打包器的职责，
+  理由与实测见 [`docs/build-and-release.md`](docs/build-and-release.md)）
