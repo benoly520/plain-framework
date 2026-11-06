@@ -68,6 +68,14 @@ __effect(() => { __t2.nodeValue = __stringify(count()); });
 __effect(() => { __t3.nodeValue = __stringify(double()); });
 ```
 
+Those two `__effect` calls are the whole story: **one interpolation = one subscription**.
+`{count()}` compiles to `__insert(parent, () => count())` (`__insert` is an `effect` internally),
+and an attribute expression compiles to `__effect(() => { el.xxx = expr })`. Static literals and
+event handlers produce no effect — the former is baked in once, the latter is a single
+`addEventListener`. So "what changes when this signal changes" is exactly "which braces read that
+signal": reading it outside the braces and interpolating the result (`const v = count(); <p>{v}</p>`)
+subscribes nothing.
+
 ---
 
 ## Core Rules (just 5)
@@ -136,12 +144,22 @@ The entire runtime API is just this. **Convention: the public API surface is fro
 | API | Description |
 | --- | --- |
 | `signal(init)` | the only state primitive. `s()` reads, `s.set(v)` writes, `s.peek()` reads without creating a dependency |
-| `computed(fn)` | derived value, same read syntax as `signal` |
+| `computed(fn)` | a cached derived value: recomputed when its deps change; repeated reads reuse the last result |
 | `effect(fn)` | side effect, returns `{ dispose() }`; reclaimed with the component / list row lifecycle |
 | `batch(fn)` | coalesce multiple writes into a single update round |
 | `createScope(fn)` | create a scope that can be reclaimed as a whole |
 | `onCleanup(fn)` | register an unmount callback |
 | `resolve(v)` | read a value: if it's a getter, call it; otherwise return as-is (use this uniformly inside components) |
+
+> Three primitives in one line: **`signal` is a value, `effect` is a side effect, `computed` is a
+> cached derived value.**
+
+`computed` is literally a `signal` plus an `effect`: it recomputes when a dependency changes and
+writes the result back, so `c()` only ever returns the last computed result — reading it three
+times still costs one computation. If a recomputation produces a value `Object.is`-equal to the
+previous one, downstream subscribers are not disturbed. It is **eager**: it evaluates at creation,
+and on every dependency change regardless of whether anyone reads it — so for a value that is read
+once and cheap to compute, a plain function is the better deal.
 
 ### DOM
 

@@ -20,6 +20,10 @@
 
 组件里取 props 一律 `resolve(props.x)` —— 动态属性在编译器里是 getter。
 
+视图里**每个动态 `{expr}` 编译成一个 `effect`**（`{cond ? …}` / `{arr.map(…)}` 特化为
+`when` / `each`，也各是一个 effect）。所以**读取必须写在花括号里**才算订阅：
+`const v = count(); <p>{v}</p>` 不会更新 —— 在花括号外读就是普通取值。
+
 跨层传值（主题 / 语言 / 当前用户）用 `createContext` / `<Ctx.Provider value={…}>` / `useContext`，
 **读法是调用** `useContext(Ctx)()`（与 `signal` 一致）。**请求级数据不要放模块作用域的 signal** ——
 SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 B 请求的响应；这类数据必须走 Context 或 props。

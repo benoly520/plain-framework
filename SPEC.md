@@ -89,14 +89,19 @@ function Counter() {
 | 原语 | 语义 | 读取 | 写入 |
 |---|---|---|---|
 | `signal(v)` | 可变状态 | `s()` | `s.set(x)` 或 `s(x)` |
-| `computed(fn)` | 派生值（自动追踪 `fn` 内读取的 signal） | `c()` | 只读 |
+| `computed(fn)` | 带缓存的派生值（自动追踪 `fn` 内读取的 signal） | `c()` | 只读 |
 | `effect(fn)` | 副作用，依赖变化自动重跑 | — | — |
+
+> 一句话：`signal` 是值，`effect` 是副作用，`computed` 是带缓存的派生值。`computed` 的实现
+> 就是一个 `signal` 加一个 `effect`：依赖变化时重算并写回，读 `c()` 只取上次算好的结果，
+> 所以读几次都不重复计算。它是 **eager** 的——创建即算、依赖一变就算，与有没有人读无关。
 
 **铁律**：
 1. 读取 signal 只发生在 `effect` / `computed` / 视图绑定内部才会建立依赖——不在这些上下文里读就是普通取值。
 2. **状态更新走 immutable**（生成新值/新数组），不用深代理。理由：对 AI 更可预测，消灭"原地改了但忘了触发"这一类最难查的 bug。
    - 就地改（`items().push(x)`）由契约 lint **构建期**拦截（`PLAIN_E1106`），不是靠文档提醒。
 3. 没有 `useMemo` / `useCallback` / `React.memo`——`computed` 与视图绑定天然细粒度，编译器负责只更新依赖的 DOM 节点。
+   - 但 `computed` 不是必需品：模板里调用普通函数同样会登记依赖。判断标准是「会被第二个读者读到」或「算起来贵」，两者都不成立时普通函数更划算（eager 的 `computed` 对只读一次的值纯亏）。
 4. `effect` 是**同步**的：`effect(async () => …)` 会在第一个 `await` 之后丢失依赖收集（`PLAIN_E1109`）。
    要取异步数据用 `resource()`，不要拿 `effect` 当 `useEffect` 使。
 
@@ -105,6 +110,12 @@ function Counter() {
 ## 4. 视图与控制流
 
 - 视图用 **TSX** 书写，插值 `{expr}` 即**细粒度绑定**（只有该文本/属性节点更新，不重渲染整棵子树）。
+  - 落地形态：**每个动态绑定就是一个 `effect`** —— 文本插值走 `insert(parent, () => expr)`
+    （`insert` 内部就是 `effect`），属性表达式走 `effect(() => { el.x = expr })`；静态字面量
+    文本 / 属性只生成一次 `createTextNode` / `setAttribute`，事件只 `addEventListener` 一次，
+    都不产生 effect。`when()` / `each()` 各自一个 effect 管分支与行。
+    所以「读哪个 signal」与「更新哪块 DOM」是同一件事：在花括号外先读值
+    （`const v = s(); <p>{v}</p>`）不会订阅，组件体里读一次也不随更新。
 - 控制流用**普通 JS 表达式**，不发明新的模板 DSL（避免"框架方言"增加 AI 的学习与出错面）。
   编译器把下列四种形状直接编译成对应的运行时原语，**其余表达式一律按「普通值插入」处理**：
 

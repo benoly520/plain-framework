@@ -67,6 +67,12 @@ __effect(() => { __t2.nodeValue = __stringify(count()); });
 __effect(() => { __t3.nodeValue = __stringify(double()); });
 ```
 
+上面两个 `__effect` 就是「**每个插值 = 一个订阅点**」：`{count()}` 编译成
+`__insert(parent, () => count())`（`__insert` 内部就是一个 `effect`），属性表达式编译成
+`__effect(() => { el.xxx = expr })`。静态字面量与事件不产生 effect —— 前者一次写死，
+后者只 `addEventListener` 一次。所以「什么变了会更新哪里」，就等于「这个 signal 写在哪个
+花括号里」；在花括号外先读出来再插值（`const v = count(); <p>{v}</p>`）不会订阅。
+
 ---
 
 ## 核心规则（只有 5 条）
@@ -136,12 +142,19 @@ export default defineConfig({
 | API | 说明 |
 | --- | --- |
 | `signal(init)` | 唯一状态原语。`s()` 读，`s.set(v)` 写，`s.peek()` 不建依赖地读 |
-| `computed(fn)` | 派生值，读法与 `signal` 一致 |
+| `computed(fn)` | 带缓存的派生值：依赖变化时重算，读几次都只取上次算好的结果 |
 | `effect(fn)` | 副作用，返回 `{ dispose() }`；在组件/列表内随其生命周期自动回收 |
 | `batch(fn)` | 合并多次写入，只触发一轮更新 |
 | `createScope(fn)` | 创建一个可整体回收的作用域 |
 | `onCleanup(fn)` | 注册卸载回调 |
 | `resolve(v)` | 取值：是 getter 就调用，否则原样返回（组件里统一用它） |
+
+> 三个原语一句话：**`signal` 是值，`effect` 是副作用，`computed` 是带缓存的派生值。**
+
+`computed` 的实现就是一个 `signal` 加一个 `effect`：依赖变化时重算并写回，读 `c()` 只取
+上次的结果，所以读几次都不重复计算；算出的结果与旧值 `Object.is` 相等时，下游不会被打扰。
+它是 **eager** 的——创建即算、依赖一变就算，与有没有人读无关，所以「只读一次、算得又便宜」
+的值直接写普通函数更划算。
 
 ### DOM
 
