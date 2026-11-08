@@ -139,6 +139,28 @@ test("普通表达式插值走 insert", () => {
   assert.ok(code.includes("__insert("));
 });
 
+test("显式 children prop：无论表达式形态都保持 thunk 语义", () => {
+  const dyn = compile(
+    jsx("function C(p){ return <b>{p.children()}</b>; }", "export function A(){ return <C children={v} />; }"),
+    "ch.jsx"
+  ).code;
+  assert.ok(dyn.includes("children: () => (v)"), dyn);
+  assert.ok(!dyn.includes("get children()"), dyn);
+
+  const lit = compile(
+    jsx("function C(p){ return <b>{p.children()}</b>; }", 'export function A(){ return <C children="hi" />; }'),
+    "ch.jsx"
+  ).code;
+  assert.ok(lit.includes('children: () => ("hi")'), lit);
+
+  const fn = compile(
+    jsx("function C(p){ return <b>{p.children()}</b>; }", "export function A(){ return <C children={() => <i>x</i>} />; }"),
+    "ch.jsx"
+  ).code;
+  assert.ok(fn.includes("children: () => {"), fn);
+  assert.ok(!fn.includes("get children()"), fn);
+});
+
 test("Fragment 子节点展开", () => {
   const { code } = compile("export function App(){ return <>{a}<b/></>; }", "f.jsx");
   assert.ok(code.includes('__createEl("b"'));

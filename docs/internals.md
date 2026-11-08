@@ -61,7 +61,7 @@
 | 限制 | 换来了什么 |
 | --- | --- |
 | 组件必须 `return (<jsx />)`（表达式整体被编译） | 产物完全可预测，编译期能对每处写法报行号 |
-| props 不能解构，必须 `resolve(props.x)` | 动态 prop 是 getter（见 §3.3），解构会**快照**住旧值 |
+| props 不能解构 / 不能存进变量，直接读 `props.x` | 动态 prop 是真 getter（见 §3.3），解构或存变量会**快照**住旧值 |
 | `server()` 闭包不过去 | 跨端依赖显式化，没有「本地能跑、上线就 500」 |
 | 非注水路径下 `syncRange` **不复用节点** | 实现简单可预测；代价是区间内的焦点 / 选区 / 不受控输入 / 局部滚动会丢 |
 | HMR 对受影响区间**整段重建** | 不整页刷新，但区间内的 DOM 状态同样会丢 |
@@ -252,7 +252,7 @@ __el2.addEventListener("click", save);
 ```
 ```js
 const __props3 = {
-  title: () => (t()),
+  get title() { return (t()); },
   onClick: (save),
   children: () => { const __cf = document.createDocumentFragment();
                     __cf.appendChild(document.createTextNode("hi")); return __cf; }
@@ -262,10 +262,11 @@ __place(__f1, Card(__props3));
 
 三条规则：
 
-- 动态 prop 包成 `() => expr`，组件里必须 `resolve(props.x)` 取值 —— 这样**快照住旧值在结构上不可能发生**。
-- `on*` prop **不包** getter（传进来就是函数，`resolve` 会把它当场调用 —— 见反模式 14）。
-- `children` 是 **thunk**（惰性子树），组件里写 `props.children()`。函数型 prop（如 `fallback={(e) => <p>{e}</p>}`）
-  也不包 getter，且函数体里的 JSX 会被编译。
+- 动态值 prop 编译成**真正的 getter**（`get x() { return expr }`），组件里直接读 `props.x` ——
+  读出来就是当前值，在 JSX / effect 里读会自动订阅。把值存进变量仍是快照（`E1107` / `E1112`）。
+- `on*` prop **原样**传函数；内联箭头 / 函数表达式也原样传（它们本身就是函数值）。
+- `children` 是 **thunk**（惰性子树），组件里写 `props.children()`；它不是 getter，因为每次读都会
+  重新构建一棵子树，语义上是「惰性渲染」，不是「实时值」。
 - `key` 不是 prop，由 `each` 消费；`ref` 只在**内建元素**上合法（`E1009`）。
 
 ### 3.4 条件与列表
@@ -388,9 +389,8 @@ each(parent, getter, (item) => {
 **行内每个绑定自动订阅「这一行」**。这直接根治了「勾选待办 UI 不更新」这类致命 bug，
 也让 AI 不必手写 key / memo / 依赖数组。
 
-### 4.6 `resolve` 与 `untracked`
+### 4.6 `untracked`
 
-- `resolve(v)`：`typeof v === "function" ? v() : v` —— props getter 的统一取值口。
 - `untracked(fn)`：执行但不建立依赖，**仅内部使用**（列表 key 计算：算 key 时读值不该引起重算）。
 
 ### 4.7 Context：复用 owner 链，天然请求隔离

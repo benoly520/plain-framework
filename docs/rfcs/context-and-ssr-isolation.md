@@ -191,6 +191,6 @@ export function useContext<T>(ctx: Context<T>): () => T;
 
 1. **`Function.name` 风险**：`useContext()` 返回的是函数，`theme.name` 在 TS 里是否可访问？若可，
    需在类型上加品牌、或加一条 lint 提示（实现时先用最小复现确认）。
-2. **`value` 与 `resolve` 的边界**：`Provider` 里 `value` 恒为 getter（编译器保证），
-   但手写 `new` 调用时可能是裸值 —— `resolve()` 两条都兼容，实现按 `resolve` 处理。
+2. **`value` 的读取**：`Provider` 的 `value` 由编译器编译成真 getter，直接读 `props.value`；
+   手写调用时就是裸值。不引入 `resolve`（已随 props 真 getter 删除）。
 3. **作用域链的查找成本**：链长 = Provider 嵌套深度，通常 < 5，线性查找足够；不做缓存。

@@ -1,10 +1,16 @@
-# RFC：props 真 getter 与 `resolve` 的退场（讨论稿）
+# RFC：props 真 getter 与 `resolve` 的退场（已实施）
 
-> **状态**：讨论中，未实现
+> **状态**：已实施（clean break），不再保留兼容层
+> **决议**：方案 C-clean —— 动态值 prop 编译成真 `get` accessor；`on*` / 内联函数保持函数值；
+> `children` 保持 lazy thunk；**删除运行时导出 `resolve`**；同一次发布同步 lint / 文档 / 示例 / eval。
+> 不提供编译器双模式、deprecation 或“新旧都行”的兼容层（依据 `AGENTS.md` §7.9）。
+> 变更明细见 [`CHANGELOG.md`](../../CHANGELOG.md)。
 > **缘起**：AI 在多个 Plain 项目中高频犯两类错误：signal 漏写 `s()`、props 漏写 `resolve(props.x)`。
-> signal 一侧已有自动修复；本 RFC 讨论 props 一侧的根因、可选方案与升级影响。
+> signal 一侧已有自动修复；本 RFC 记录 props 一侧的根因、方案对比、最终决议与升级影响。
 > **相关**：`AGENTS.md` §3 反模式目录 / §4 错误码、`src/compiler/index.ts`、`src/lint.ts`、
 > `src/runtime/signal.ts`、`docs/patterns.md`、`eval/tasks/`
+>
+> 下文 §1–§3 保留讨论过程；§4.2、§5、§6.2、§7 已按最终决议改写。
 
 ---
 
@@ -239,13 +245,16 @@ __effect(() => { el.textContent = __stringify((props.title)); });
 两者都在 effect 内读 getter，都会订阅。组件体里的读取仍然是快照，
 这一点和现在 `resolve(props.title)` 在组件体里一样，不是回归。
 
-### 4.2 `resolve` 保留，但降级为 MaybeGetter helper
+### 4.2 `resolve` 删除，clean break
 
-- `resolve(props.value)` 对非函数值仍然幂等，存量代码继续可用；
-- `resolve(props.children)` 在 children 保持 thunk 时仍然可用；
-- `Link` 的 `to` 这类 `MaybeGetter` prop 仍然需要 `resolve`
-  （[`src/runtime/router.ts`](../../src/runtime/router.ts#L105)）；
-- `resolve(props.onClick)` 仍然会当场调用，`E1108` 继续保留。
+最终决议不是“保留 resolve 作为 MaybeGetter helper”，而是**删除运行时导出 `resolve`**：
+
+- `props.x` 直接是值；再包一层 `resolve` 没有语义，只会让 AI 看到第二条“官方读法”；
+- `resolve(props.render)` 会把函数 prop 当场调用，保留它就是保留一个主动陷阱；
+- `Link.to` 收紧为 `string`，`Provider value` 直接读 `props.value` —— 不再有内部 MaybeGetter 读法；
+- `PLAIN_E1108` 随 `resolve` 一起删除；`props.onClick` 直接调用。
+
+迁移只走 codemod / 构建期报错，不做“旧写法也能用”的承诺。
 
 ### 4.3 函数型 prop 是唯一真正的语义地雷
 
@@ -299,30 +308,30 @@ getter 只保证“读一次拿到值”，不会让普通变量自动更新：
 
 ## 5. 升级影响
 
-### 5.1 存量写法兼容矩阵
+### 5.1 存量写法迁移矩阵（clean break）
 
-关键红利：`resolve(props.value)` 对非函数值仍然成立，所以按旧文档写的绝大多数代码不需要改。
+最终决议不保留 `resolve`，所以下表按「必须迁移」口径给出：
 
-| 存量写法 | 方案 C 后 | 是否要改 | 说明 |
+| 存量写法 | 方案 C-clean 后 | 是否要改 | 说明 |
 | --- | --- | --- | --- |
 | `{props.title}` / `title={props.title}` | 正确 | 不用改 | 原来被 `E1112` 拦，升级后直接工作 |
-| `resolve(props.title)` | 仍正确 | 不用改 | 值 prop 过 `resolve` 是幂等返回 |
-| `String(resolve(props.title))` | 仍正确 | 不用改 | 现有 examples 写法继续有效 |
-| `const t = resolve(props.title)` 写在 effect 里 | 仍正确 | 不用改 | getter 在 effect 内读会订阅；顺手修掉 lint 误报 |
+| `resolve(props.title)` | **运行时不再有 `resolve`** | 必须改 | codemod 去掉 `resolve(...)`，直接 `props.title` |
+| `String(resolve(props.title))` | 同上 | 必须改 | 改成 `String(props.title)` |
+| `const t = resolve(props.title)` 写在 effect 里 | 同上 | 必须改 | 改成 `const t = props.title`（effect 内会订阅） |
 | `const t = props.title` / `const {title}=props` | 仍是快照 | 必须改 | getter 不会让变量自动更新 |
-| `props.children()` | children 保持 thunk 则不变 | 看方案 | 翻转成 getter 则 `TypeError` |
-| `props.value()`（把值 prop 当函数调） | 翻转后报错 | 少量 | 原来 thunk 调用可用 |
+| `props.children()` | children 保持 thunk | 不用改 | 语义上是 lazy subtree，不是兼容 |
+| `props.value()`（把值 prop 当函数调） | 报错 | 必须改 | 现在读出来就是值 |
 | `props.onClick(...)` | 不变 | 不用改 | `on*` 仍是原始函数 |
-| `resolve(props.onClick)` | 仍会当场调用 | 建议改 | `E1108` 保留 |
-| `render={handler}` + `resolve(props.render)` | 会调用 handler | 必须审计 | 见 §4.3 |
-| 手动调用组件传 `{ title: () => "x" }` | 需要传值 | 测试/工具要改 | 编译产物传的是值 |
+| `resolve(props.onClick)` | `resolve` 不存在 | 必须改 | 直接 `props.onClick(...)` |
+| `render={handler}` + `resolve(props.render)` | `resolve` 不存在 | 必须改 | 直接 `props.render(x)` |
+| 手动调用组件传 `{ title: () => "x" }` | 需要传值 | 必须改 | 编译产物传的是值 |
 | `Object.keys(props)` / `{...props}` | 得到值而非函数 | 审计 | 原来枚举到 thunk |
-| SSR / hydrate / HMR | 同一套编译器 | 不用改 | 服务端和客户端都生成同样 getter，补测试即可 |
+| SSR / hydrate / HMR | 同一套编译器 | 不用改 | 服务端和客户端都生成同样 getter |
 | props 类型声明 | 终于说真话 | 不用改 | 不需要 `Props<P>` |
 
 ### 5.2 仓库内规模
 
-粗略统计：
+决策前的粗略统计（已完成迁移）：
 
 - `resolve(props.)` 约 70 处，分布在 24 个文件；其中文档（`AGENTS.md`、`README.md`、
   `docs/patterns.md`、`docs/from-other-frameworks.md` 等）占大头；
@@ -330,9 +339,10 @@ getter 只保证“读一次拿到值”，不会让普通变量自动更新：
 
 结论：
 
-- **业务代码机械迁移量不大**，因为 `resolve` 对值仍然有效；
+- **业务代码的机械迁移量不大**（主要是去掉 `resolve` 包裹），但因为是 clean break，
+  必须一次性跑完 codemod；
 - **真正的成本在文档/AI 上下文、lint 规则、eval 断言**；
-- 如果把 children 也翻转，成本会从“少量边缘修复”上升到“所有使用 children 的组件都要改”。
+- `children` 不翻转，所以运行时组件和 examples 不需要重写。
 
 ### 5.3 四块影响
 
@@ -366,10 +376,9 @@ getter 只保证“读一次拿到值”，不会让普通变量自动更新：
 ### 6.2 lint
 
 - 删除 `PLAIN_E1112` 的 JSX 分支（否则 `{props.title}` 会被误报）；
-- 保留变量声明 / 赋值 / 解构的“快照”检测；
-- 保留 `PLAIN_E1108`（`resolve(props.onClick)` 仍会调用）；
-- 修掉声明分支缺少 effect 上下文豁免的问题；
-- 可选：新增“对函数型 prop 使用 `resolve`”的告警/自动修；
+- 保留变量声明 / 赋值 / 解构的“快照”检测；声明形态只报组件渲染作用域，
+  effect / 事件回调里的读取不报（回调重跑会重新求值）；
+- 删除 `PLAIN_E1108`（`resolve` 已不存在）；
 - 更新错误文案与 `src/errors.ts` 中的说明。
 
 ### 6.3 文档与 AI 上下文
@@ -378,10 +387,8 @@ getter 只保证“读一次拿到值”，不会让普通变量自动更新：
   改成“props 是 live read；在 JSX/effect 里直接读，不要存变量；解构仍是快照”；
 - `README.md` / `README_CN.md` / `docs/patterns.md` / `docs/from-other-frameworks.md`：
   同步改写所有 `resolve(props.x)` 示例；
-- `resolve` 的定位改为“MaybeGetter / 兼容 helper”，明确它只用于可能为 thunk 的值
-  （如 `Link.to`）和 children；
-- `eval/tasks/06-props-snapshot` 的断言前提要改：它现在考“必须 resolve”，
-  升级后应改为考“不能快照”；
+- 删除 `resolve` 的公开叙事，不再把它定义为“MaybeGetter / 兼容 helper”；
+- `eval/tasks/06-props-snapshot` 的断言前提改为考“不能快照”；
 - examples 注释里“props 动态值统一用 resolve 取”要改。
 
 ### 6.4 测试与版本
@@ -396,19 +403,18 @@ getter 只保证“读一次拿到值”，不会让普通变量自动更新：
 
 ---
 
-## 7. 迁移步骤建议
+## 7. 迁移步骤
 
 1. 编译器与 lint 同版本发布；
-2. 提供 codemod（例如 `plaindev migrate props-getters`）：
+2. codemod（例如 `plaindev migrate props-getters`）：
    - `props.value()` → `props.value`（仅限确定是值 prop 的场景）；
-   - `resolve(props.fn)` → `props.fn`（仅限声明类型是函数签名的场景）；
-   - `resolve(props.value)` 可以保留不动（幂等），不必强制清理；
-   - 如果 children 翻转：`props.children()` → `props.children`，并检查“真值判断后再次读取”；
+   - `resolve(props.x)` → `props.x`（值 prop）；`resolve(props.fn)` → `props.fn`（函数 prop）；
+   - children 不翻转，`props.children()` 保持不变；
 3. 升级后先跑 `tsc --noEmit` / `plaindev check` / 测试；
 4. 重点排查：
    - 手动调用组件时传入 thunk props 的地方；
    - `Object.keys(props)`、`{...props}`、把 props 当普通对象传递的地方；
-   - 函数型 prop 上的 `resolve`；
+   - 残留的 `resolve` 导入（会直接报“模块没有导出 resolve”）；
 5. 更新项目内的 AI 上下文 / 模板 / 脚手架，避免新代码继续按旧叙事写。
 
 **如果 children 保持 thunk，运行时组件与 examples 不需要改动，迁移主要集中在编译器、

@@ -99,7 +99,7 @@ test("JSX 类型收紧：组件 props 仍然按组件自己的类型校验", () 
   const src = [
     `type CardProps = { title: string; count?: number };`, // 1
     `function Card(props: CardProps) {`, // 2
-    `  return <section>{props.title}</section>;`, // 3  props.title 合法（编译器传 getter，类型上做了 MaybeGetter 兼容？这里直接字符串）
+    `  return <section>{props.title}</section>;`, // 3  props.title 合法：类型就是运行时值（真 getter）
     `}`, // 4
     `export function A() {`, // 5
     `  return (`, // 6

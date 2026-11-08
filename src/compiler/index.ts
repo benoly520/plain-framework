@@ -1484,10 +1484,21 @@ function collectProps(attrs: any): string[] {
       if (!init) {
         parts.push(`${key}: true`);
       } else if (ts.isStringLiteral(init) || ts.isNumericLiteral(init)) {
-        parts.push(`${key}: ${JSON.stringify(init.text)}`);
+        parts.push(
+          key === "children"
+            ? `children: () => (${JSON.stringify(init.text)})`
+            : `${key}: ${JSON.stringify(init.text)}`
+        );
       } else if (ts.isJsxExpression(init) && init.expression) {
         const exprNode = init.expression;
-        if (/^on[A-Z]/.test(raw)) {
+        if (key === "children") {
+          // children 是 lazy subtree：无论表达式是什么，都保持 thunk 语义
+          parts.push(
+            ts.isArrowFunction(exprNode) || ts.isFunctionExpression(exprNode)
+              ? `children: ${valueCode(exprNode)}`
+              : `children: () => (${exprNode.getText()})`
+          );
+        } else if (/^on[A-Z]/.test(raw)) {
           parts.push(`${key}: (${valueCode(exprNode)})`);
         } else if (
           ts.isArrowFunction(exprNode) ||
