@@ -1,0 +1,73 @@
+{
+  "name": "@eslint-react/var",
+  "version": "5.27.0",
+  "description": "ESLint React's TSESTree AST utility module for static analysis of variables.",
+  "homepage": "https://github.com/Rel1cx/eslint-react",
+  "bugs": {
+    "url": "https://github.com/Rel1cx/eslint-react/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rel1cx/eslint-react.git",
+    "directory": "packages/var"
+  },
+  "license": "MIT",
+  "author": "Rel1cx",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@eslint-react/ast": "5.27.0",
+    "@eslint-react/eslint": "5.27.0",
+    "@typescript-eslint/scope-manager": "^8.71.2",
+    "@typescript-eslint/types": "^8.71.2",
+    "@typescript-eslint/utils": "^8.71.2",
+    "ts-pattern": "^5.9.2"
+  },
+  "devDependencies": {
+    "@local/configs": "0.0.0",
+    "@local/eff": "0.0.0",
+    "@local/testkit": "0.0.0",
+    "@typescript-eslint/typescript-estree": "^8.71.2",
+    "eslint": "^10.12.0",
+    "tsdown": "^0.23.1",
+    "typescript": "6.0.3",
+    "vitest": "^5.0.4"
+  },
+  "peerDependencies": {
+    "eslint": "*",
+    "typescript": "*"
+  },
+  "peerDependenciesMeta": {
+    "eslint": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "inlinedDependencies": {
+    "@local/eff": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "build:docs": "typedoc",
+    "lint:publish": "publint",
+    "lint:ts": "tsl"
+  }
+}
