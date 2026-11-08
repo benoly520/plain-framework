@@ -88,8 +88,9 @@ __effect(() => { __t3.nodeValue = __stringify(double()); });
 4. **副作用用 `effect(fn)`**，依赖自动收集；随组件/列表行一起被回收，需要额外清理时用 `onCleanup`。
 5. **要跑在服务端的代码，用 `server()` 包起来。** 客户端产物里只剩 RPC 桩。
 
-> 组件里拿到 `props.x` 一律用 `resolve(props.x)` 取值 —— 编译器把动态属性统一传成 getter，
-> 这样父组件状态一变，子组件自动更新，且只更新用到的那几行。
+> 组件里取 props **直接读** `props.x` —— 编译器把动态属性编译成真 getter，读出来就是当前值，
+> 父组件状态一变，用到它的那几行自动更新。函数型 prop（`onClick` / `render`）读出来就是函数；
+> `children` 是 lazy subtree，保持显式调用 `props.children()`。
 
 ---
 
@@ -148,7 +149,6 @@ export default defineConfig({
 | `batch(fn)` | 合并多次写入，只触发一轮更新 |
 | `createScope(fn)` | 创建一个可整体回收的作用域 |
 | `onCleanup(fn)` | 注册卸载回调 |
-| `resolve(v)` | 取值：是 getter 就调用，否则原样返回（组件里统一用它） |
 
 > 三个原语一句话：**`signal` 是值，`effect` 是副作用，`computed` 是带缓存的派生值。**
 
@@ -235,8 +235,8 @@ function Card(props) {
 // 4. 与运算
 {user() && <span>{user().name}</span>}
 
-// 5. 内联函数（编译成真正的函数，不是字符串）
-<StatCard label="用户" value={() => stats().users} />
+// 5. 动态值直接传（编译器生成 getter，读出来就是当前值）；内联函数也是真函数
+<StatCard label="用户" value={stats().users} />
 
 // 6. 事件
 <button onClick={(e) => submit(e)}>提交</button>
@@ -317,8 +317,7 @@ function Card(props) {
 | `PLAIN_E1104` | `el.innerHTML = …` | ❌ 安全红线，只报错 |
 | `PLAIN_E1105` | `const { title } = props` / `function Card({ title })` | ❌ 两种改法语义不同，只报错 |
 | `PLAIN_E1106` | `items().push(x)` / `todos()[0].done = true` / `const a = items(); a.push(x)` | ❌ 只报错 |
-| `PLAIN_E1107` / `PLAIN_E1112` | `const t = props.title` / `{props.title}` / `let t; t = props.title` | ❌ 内联 resolve 与 thunk 语义不同，只报错 |
-| `PLAIN_E1108` | `resolve(props.onClick)` | ✅ 去掉 resolve → `props.onClick` |
+| `PLAIN_E1107` / `PLAIN_E1112` | `const t = props.title` / `let t; t = props.title` | ❌ 存进变量只是快照，改成直接读或 thunk |
 | `PLAIN_E1109` | `effect(async () => { await … })` | ❌ 依赖收集在 await 后失效，只报错 |
 | `PLAIN_E1110` | `effect(() => count.set(count() + 1))` | ❌ 自触发会栈溢出，只报错（钳位写法不报） |
 | `PLAIN_E1111` | `computed(() => { s.set(…) })` | ❌ 派生值必须纯，只报错 |

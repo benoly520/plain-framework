@@ -2,7 +2,7 @@
 
 import type { Router, Route, RouteProps, Renderable, Owner } from "../types.js";
 import { signal, computed, withOwner } from "./signal.js";
-import { resolve, nodesOf } from "./dom.js";
+import { nodesOf } from "./dom.js";
 import { flushRefs } from "./ref.js";
 import { getSSRStore } from "./ssr-context.js";
 
@@ -99,10 +99,10 @@ export function createRouter(options: {
   }
 
   function Link(props: {
-    to: string | (() => string);
+    to: string;
     children?: () => Renderable;
   }): Node {
-    const to = () => String(resolve(props.to));
+    const to = () => String(props.to);
     const el = document.createElement("a");
     el.setAttribute("href", to());
     el.addEventListener("click", (e) => {

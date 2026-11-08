@@ -15,7 +15,7 @@ globalThis.Element = dom.window.Element;
 globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.Event = dom.window.Event;
 
-const { signal, computed, effect, createScope, onCleanup, getOwner, rowProxy, resolve } =
+const { signal, computed, effect, createScope, onCleanup, getOwner, rowProxy } =
   await import("../dist/runtime/signal.js");
 const { mount, createSlot, place, stringifySafe, nodesOf } = await import(
   "../dist/runtime/dom.js"
@@ -99,11 +99,6 @@ test("rowProxy：读 / 写 / in / keys / 描述符 / toPrimitive / 空行", () =
   assert.deepEqual(Object.keys(empty), []);
   assert.equal(Object.getOwnPropertyDescriptor(empty, "x"), undefined);
   empty.x = 1; // 空行写入不应抛错
-});
-
-test("resolve 同时接受 getter 与字面值", () => {
-  assert.equal(resolve(() => 7), 7);
-  assert.equal(resolve("v"), "v");
 });
 
 // ---------------------------------------------------------------------------

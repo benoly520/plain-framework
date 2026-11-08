@@ -156,7 +156,7 @@ test("keyed：重复 key 不崩溃", async () => {
 test("keyed：组件元素带 key 也能复用，且 key 不作为 prop 传给组件", async () => {
   const { mod, code } = await compileModule(
     `
-    import { signal, effect, resolve } from "plain";
+    import { signal, effect } from "plain";
     export const items = signal([{ id: 1, text: "a" }, { id: 2, text: "b" }]);
     export const seenKeys = [];
     export function Row(props) {
@@ -164,7 +164,7 @@ test("keyed：组件元素带 key 也能复用，且 key 不作为 prop 传给�
       const el = document.createElement("li");
       const t = document.createTextNode("");
       el.appendChild(t);
-      effect(() => { t.nodeValue = String(resolve(props.text)); });
+      effect(() => { t.nodeValue = String(props.text); });
       return el;
     }
     export function App() {

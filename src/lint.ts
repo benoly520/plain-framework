@@ -288,20 +288,21 @@ export function check(
       );
     }
 
-    // 反模式 9：把 props 的 getter 存进变量 / 忘了 resolve
-    //    const t = props.title            —— 拿到函数本身
-    //    const t = resolve(props.title)   —— 初次对、之后不更新（快照）
-    //    let t; t = props.title           —— 赋值形态同理（见下面第二条）
-    //    {props.title} / title={props.title} —— JSX 里忘了 resolve
-    //    正确：在会重跑的上下文里 resolve，或写成 thunk。
-    //    on* 事件 prop 编译器不包 getter（存进变量、透传都合法），一律不报。
+    // 反模式 9：把 props 的取值快照进变量
+    //    const t = props.title           —— 只是「此刻的值」，signal 变化后不会更新
+    //    let t; t = props.title          —— 赋值形态同理（见下面第二条）
+    //    正确：在 JSX / effect 里直接读 props.title，或写成 thunk：const t = () => props.title
+    //    on* 事件 prop 传进来就是函数，存进变量、透传都合法，一律不报。
+    //    只报「变量活在组件渲染作用域里」的形态：事件回调 / effect / map 回调里的读取
+    //    会随各自的重跑重新求值，按快照报就是误报。
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
       node.initializer &&
       isPropsSnapshotExpr(node.initializer) &&
       !isThunk(node.initializer) &&
-      !isEventPropsAccess(node.initializer)
+      !isEventPropsAccess(node.initializer) &&
+      isDirectlyInComponentBody(node)
     ) {
       add(
         node,
@@ -331,26 +332,6 @@ export function check(
       );
     }
 
-    // 反模式 9（JSX 形态）：JSX 里忘了 resolve
-    if (
-      ts.isJsxExpression(node) &&
-      node.expression &&
-      isPropsChain(node.expression) &&
-      !(
-        node.parent &&
-        ts.isJsxAttribute(node.parent) &&
-        isEventAttrName(jsxAttrName(node.parent))
-      )
-    ) {
-      const access = propsAccessText(node.expression);
-      add(
-        node,
-        "error",
-        "PLAIN_E1112",
-        `JSX 里的动态 props 要用 resolve："{resolve(${access})}"（直接写 {${access}} 拿到的是 getter 本身）`
-      );
-    }
-
     // 反模式 20：对 useContext(Ctx) 的返回值直接取属性 —— 它是 getter，要先调用。
     //    const t = useContext(Ctx); t.name     -> 取到函数自身的成员（name / length …）
     //    useContext(Ctx).name                  -> 同上
@@ -372,25 +353,6 @@ export function check(
             `改成 ${target.getText(sf)}()${suffix}`
         );
       }
-    }
-
-    // 反模式 14：resolve on* 事件 prop —— 编译器不给 on[A-Z] 的 prop 包 getter，
-    //    传进来的就是函数本身，而 resolve(fn) 会把函数「当场调用」。
-    //    正确写法是直接 props.onXxx(...)。（no-props-snapshot 反而会漏放这一种，
-    //    因为它把 on* prop 一律当「合法的透传」豁免了。）
-    if (ts.isCallExpression(node) && isResolveCall(node) && isEventPropsAccess(node)) {
-      const arg = node.arguments[0];
-      add(
-        node,
-        "error",
-        "PLAIN_E1108",
-        `不要 resolve on* 事件 prop（"${node.getText(sf)}"）：` +
-          `编译器不给 on[A-Z] 的 prop 包 getter，传进来的就是函数本身，` +
-          `resolve(...) 会把它当场调用。直接写 ${arg.getText(sf)}(...)`,
-        node.arguments.length === 1
-          ? { start: node.getStart(sf), end: node.getEnd(), text: arg.getText(sf) }
-          : undefined
-      );
     }
 
     // 反模式 11：effect(async () => …) —— await 之后依赖收集失效，静默不更新
@@ -544,40 +506,21 @@ function isPropsChain(n: ts.Node): boolean {
   return !!root && isComponentPropsParam(root);
 }
 
-function isResolveCall(n: ts.Node): boolean {
-  const e = unwrapExpr(n);
-  return (
-    ts.isCallExpression(e) &&
-    ts.isIdentifier(e.expression) &&
-    e.expression.text === "resolve" &&
-    e.arguments.length >= 1
-  );
-}
-
-/** const t = props.title  或  const t = resolve(props.title) */
+/** const t = props.title —— 把「此刻的值」存进变量（之后不再更新） */
 function isPropsSnapshotExpr(n: ts.Node): boolean {
-  if (isPropsChain(n)) return true;
-  const e = unwrapExpr(n);
-  if (isResolveCall(e) && ts.isCallExpression(e)) {
-    return isPropsChain(e.arguments[0]);
-  }
-  return false;
+  return isPropsChain(n);
 }
 
 function propsAccessText(n: ts.Node): string {
-  const e = unwrapExpr(n);
-  if (isResolveCall(e) && ts.isCallExpression(e)) {
-    return unwrapExpr(e.arguments[0]).getText();
-  }
-  return e.getText();
+  return unwrapExpr(n).getText();
 }
 
 /** 把 props 取值快照进变量时的统一提示（声明形态 / 赋值形态共用） */
 function snapshotMessage(name: string, access: string): string {
   return (
     `不要把 props 取值快照进变量（"${name} = ${access}"）：` +
-    `动态属性是 getter，这样会丢掉响应性。` +
-    `在 JSX / effect 里写 resolve(${access})，或写成 thunk：const ${name} = () => resolve(${access})`
+    `props 是实时值，存进变量只是此刻的值，signal 变化后不会更新。` +
+    `在 JSX / effect 里直接读 ${access}，或写成 thunk：const ${name} = () => ${access}`
   );
 }
 
@@ -598,19 +541,17 @@ function propsHeadPropName(n: ts.Node): string | null {
 }
 
 /**
- * 取值是否来自「编译器不包 getter」的 on* 事件 prop（props.onClick / resolve(props.onClick)）。
- * 这类 prop 存的本来就是函数，快照不会丢响应性 —— 按反模式 9 报就是误报。
+ * 取值是否来自 on* 事件 prop（props.onClick）。
+ * 这类 prop 存的就是函数，快照不会丢响应性 —— 按反模式 9 报就是误报。
  */
 function isEventPropsAccess(n: ts.Node): boolean {
-  const e = unwrapExpr(n);
-  const target = isResolveCall(e) && ts.isCallExpression(e) ? e.arguments[0] : e;
-  const name = propsHeadPropName(target);
+  const name = propsHeadPropName(n);
   return !!name && isEventAttrName(name);
 }
 
 /**
  * 是否直接写在组件函数体里（中间不隔着 effect / 事件回调等会重跑的上下文）。
- * 只有这种位置的赋值才是「快照」；写在回调里的赋值会随依赖重跑，属正确用法。
+ * 只有这种位置的取值才是「快照」；写在回调里的读取会随回调重跑，属正确用法。
  */
 function isDirectlyInComponentBody(node: ts.Node): boolean {
   let cur: ts.Node | undefined = node.parent;
@@ -907,7 +848,7 @@ function returnsJsx(fn: any): boolean {
   return false;
 }
 
-/** props 本身，或从 props 出发的属性读取（resolve(...) 包住的是正确写法，不算） */
+/** props 本身，或从 props 出发的属性读取 */
 function isPropsValueExpr(n: ts.Node): boolean {
   const e = unwrapExpr(n);
   if (ts.isIdentifier(e)) return isComponentPropsParam(e);
@@ -935,21 +876,18 @@ function isComponentPropsBinding(
 function propsDestructureMessage(
   node: ts.VariableDeclaration | ts.ParameterDeclaration
 ): string {
-  const head = "不要解构 props：动态属性是 getter，解构会拿到函数本身并丢失响应性。";
+  const head = "不要解构 props：解构拿到的是此刻的值，signal 变化后不会更新。";
   if (ts.isParameter(node)) {
-    return (
-      head +
-      `改成 function Card(props)，再在会重跑的上下文里写 resolve(props.x)`
-    );
+    return head + `改成 function Card(props)，再在 JSX / effect 里直接读 props.x`;
   }
   const init = unwrapExpr(node.initializer!);
   if (isPropsChain(init)) {
-    return head + `先 resolve(${init.getText()})，再取它的属性`;
+    return head + `不要在组件体里先取 ${init.getText()}，直接在 JSX / effect 里读它的属性`;
   }
   const p = init.getText();
   return (
     head +
-    `用 resolve(${p}.x) 取值，或写成 thunk：const x = () => resolve(${p}.x)`
+    `直接在 JSX / effect 里读 ${p}.x，或写成 thunk：const x = () => ${p}.x`
   );
 }
 

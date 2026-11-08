@@ -35,7 +35,6 @@ export type PlainErrorCode =
   | "PLAIN_E1105"
   | "PLAIN_E1106"
   | "PLAIN_E1107"
-  | "PLAIN_E1108"
   | "PLAIN_E1109"
   | "PLAIN_E1110"
   | "PLAIN_E1111"
@@ -55,7 +54,6 @@ export type LintRuleName =
   | "no-props-destructure"
   | "no-signal-mutate"
   | "no-props-snapshot"
-  | "no-resolve-event-prop"
   | "no-async-effect"
   | "no-effect-loop"
   | "no-computed-side-effect"
@@ -178,13 +176,7 @@ export const ERROR_CATALOG: Record<PlainErrorCode, ErrorEntry> = {
     code: "PLAIN_E1107",
     rule: "no-props-snapshot",
     suppressible: true,
-    summary: "把 props getter 存进变量 / 忘了 `resolve`",
-  },
-  PLAIN_E1108: {
-    code: "PLAIN_E1108",
-    rule: "no-resolve-event-prop",
-    suppressible: true,
-    summary: "`resolve(props.onClick)` —— `on*` 事件 prop 不能 resolve",
+    summary: "把 props 取值存进变量，只拿到此刻的值",
   },
   PLAIN_E1109: {
     code: "PLAIN_E1109",
@@ -208,7 +200,7 @@ export const ERROR_CATALOG: Record<PlainErrorCode, ErrorEntry> = {
     code: "PLAIN_E1112",
     rule: "no-props-snapshot",
     suppressible: true,
-    summary: "把 props getter 存进变量（赋值形态 / JSX 形态）",
+    summary: "把 props 取值快照进变量（声明形态 / 赋值形态）",
   },
   PLAIN_E1113: {
     code: "PLAIN_E1113",

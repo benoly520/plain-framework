@@ -90,8 +90,9 @@ subscribes nothing.
 4. **Side effects use `effect(fn)`**, dependencies are collected automatically; they are reclaimed together with the component / list row, and `onCleanup` is available for extra cleanup.
 5. **Code that must run on the server is wrapped in `server()`.** The client output keeps only an RPC stub.
 
-> Inside a component, always read props with `resolve(props.x)` — the compiler passes dynamic attributes as getters,
-> so when the parent's state changes, the child updates automatically, and only the lines that actually use it are updated.
+> Inside a component, read props **directly** with `props.x` — the compiler turns dynamic attributes into real getters,
+> so a read returns the current value and the lines that use it update automatically when the parent's state changes.
+> Function-valued props (`onClick` / `render`) read as functions; `children` is a lazy subtree, so call `props.children()` explicitly.
 
 ---
 
@@ -150,7 +151,6 @@ The entire runtime API is just this. **Convention: the public API surface is fro
 | `batch(fn)` | coalesce multiple writes into a single update round |
 | `createScope(fn)` | create a scope that can be reclaimed as a whole |
 | `onCleanup(fn)` | register an unmount callback |
-| `resolve(v)` | read a value: if it's a getter, call it; otherwise return as-is (use this uniformly inside components) |
 
 > Three primitives in one line: **`signal` is a value, `effect` is a side effect, `computed` is a
 > cached derived value.**
@@ -240,8 +240,8 @@ function Card(props) {
 // 4. Logical AND
 {user() && <span>{user().name}</span>}
 
-// 5. Inline functions (compiled to real functions, not strings)
-<StatCard label="users" value={() => stats().users} />
+// 5. Pass dynamic values directly (the compiler generates a getter; a read is the current value); inline functions are real functions
+<StatCard label="users" value={stats().users} />
 
 // 6. Events
 <button onClick={(e) => submit(e)}>submit</button>
@@ -322,8 +322,7 @@ so the AI's common mistakes will **fail the build** rather than blow up at runti
 | `PLAIN_E1104` | `el.innerHTML = …` | ❌ security red line, error only |
 | `PLAIN_E1105` | `const { title } = props` / `function Card({ title })` | ❌ two fixes have different semantics, error only |
 | `PLAIN_E1106` | `items().push(x)` / `todos()[0].done = true` / `const a = items(); a.push(x)` | ❌ error only |
-| `PLAIN_E1107` / `PLAIN_E1112` | `const t = props.title` / `{props.title}` / `let t; t = props.title` | ❌ inline resolve vs thunk differ semantically, error only |
-| `PLAIN_E1108` | `resolve(props.onClick)` | ✅ remove resolve → `props.onClick` |
+| `PLAIN_E1107` / `PLAIN_E1112` | `const t = props.title` / `let t; t = props.title` | ❌ storing it is a snapshot; read it directly or use a thunk |
 | `PLAIN_E1109` | `effect(async () => { await … })` | ❌ dependency collection breaks after await, error only |
 | `PLAIN_E1110` | `effect(() => count.set(count() + 1))` | ❌ self-trigger stack-overflows, error only (clamped form doesn't error) |
 | `PLAIN_E1111` | `computed(() => { s.set(…) })` | ❌ derived values must be pure, error only |

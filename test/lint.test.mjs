@@ -2,8 +2,8 @@
 //
 // 覆盖点：signal-assign / signal-not-called（插值与属性两个分支）/ react-habit /
 //        no-inner-html（三种写法）/ no-props-destructure / no-props-snapshot
-//        （声明 / 赋值 / JSX 三种形态，含 on* 不误报）/ no-signal-mutate /
-//        no-resolve-event-prop / resource 解构识别 / 不误伤 / formatIssues / 多修复
+//        （声明 / 赋值两种形态，含 on* 不误报与回调内读取不误报）/ no-signal-mutate /
+//        resource 解构识别 / 不误伤 / formatIssues / 多修复
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { check, autofix, formatIssues, suppressionCount } from "../dist/lint.js";
@@ -228,7 +228,7 @@ test("[回归] 属性场景只报一次，且 autofix 不会重复插入调用",
   assert.ok(!fixed.includes("done()()"), "区间重叠曾把源码切成 done()()");
 });
 
-test("解构 props -> PLAIN_E1105（动态属性是 getter，会丢响应性）", () => {
+test("解构 props -> PLAIN_E1105（解构拿到的是此刻的值，不会更新）", () => {
   const src = [
     "export function Card(props) {",
     "  const { title } = props;",
@@ -239,7 +239,7 @@ test("解构 props -> PLAIN_E1105（动态属性是 getter，会丢响应性）"
   assert.deepEqual(codes(issues), ["PLAIN_E1105"]);
   assert.equal(issues[0].line, 2);
   assert.equal(issues[0].fix, undefined, "两种改法语义不同，不自动改");
-  assert.match(issues[0].message, /resolve\(props\.x\)/);
+  assert.match(issues[0].message, /props\.x/);
 });
 
 test("解构 props 的另外两种口径：参数解构 / props 链解构", () => {
@@ -263,7 +263,7 @@ test("解构 props 的另外两种口径：参数解构 / props 链解构", () =
   ].join("\n");
   const chainIssues = check(chain, "Card.tsx");
   assert.deepEqual(codes(chainIssues), ["PLAIN_E1105"]);
-  assert.match(chainIssues[0].message, /resolve\(props\.data\)/);
+  assert.match(chainIssues[0].message, /props\.data/);
 });
 
 test("先存后改也拦：const arr = items(); arr.push(x)", () => {
@@ -299,7 +299,7 @@ test("先存后改也拦：const arr = items(); arr.push(x)", () => {
   }
 });
 
-test("不误伤：非组件函数的参数解构 / resolve 之后再解构", () => {
+test("不误伤：非组件函数的参数解构 / map 回调解构", () => {
   const cases = [
     [
       "export function util({ a }) { return a; }",
@@ -308,10 +308,6 @@ test("不误伤：非组件函数的参数解构 / resolve 之后再解构", () 
     [
       "export function App(){ return <ul>{rows.map(({ id }) => <li>{id}</li>)}</ul>; }",
       "map 回调的参数解构是合法写法",
-    ],
-    [
-      "export function Card(props) { const { title } = resolve(props.data); return <h2>{title}</h2>; }",
-      "先 resolve 再解构是正确写法",
     ],
   ];
   for (const [src, why] of cases) {
@@ -441,7 +437,7 @@ test("深层路径就地改也拦：todos()[0].done = true / user().profile.name
   }
 });
 
-test("把 getter 存进变量 / JSX 忘了 resolve -> PLAIN_E1112", () => {
+test("把 props 取值存进变量 -> PLAIN_E1112；JSX 里直接读是正确写法", () => {
   const store = [
     "export function Card(props) {",
     "  const t = props.title;",
@@ -452,49 +448,58 @@ test("把 getter 存进变量 / JSX 忘了 resolve -> PLAIN_E1112", () => {
   assert.deepEqual(codes(storeIssues), ["PLAIN_E1112"]);
   assert.equal(storeIssues[0].line, 2);
   assert.equal(storeIssues[0].fix, undefined);
-
-  const resolveOnce = [
-    "export function Card(props) {",
-    "  const t = resolve(props.title);",
-    "  return <h2>{t}</h2>;",
-    "}",
-  ].join("\n");
-  assert.deepEqual(codes(check(resolveOnce, "Card.tsx")), ["PLAIN_E1112"]);
+  assert.match(storeIssues[0].message, /props 是实时值/);
 
   const jsx = [
     "export function Card(props) {",
     "  return <h2>{props.title}</h2>;",
     "}",
   ].join("\n");
-  const jsxIssues = check(jsx, "Card.tsx");
-  assert.deepEqual(codes(jsxIssues), ["PLAIN_E1112"]);
-  assert.match(jsxIssues[0].message, /resolve\(props\.title\)/);
+  assert.deepEqual(check(jsx, "Card.tsx"), [], "JSX 里直接读 props 是正确写法");
 
   const attr = [
     "export function Card(props) {",
     "  return <input value={props.title} />;",
     "}",
   ].join("\n");
-  assert.deepEqual(codes(check(attr, "Card.tsx")), ["PLAIN_E1112"]);
+  assert.deepEqual(check(attr, "Card.tsx"), [], "属性里直接读 props 也是正确写法");
+
+  const inEffect = [
+    "import { effect } from 'plain';",
+    "export function Card(props) {",
+    "  let t = '';",
+    "  effect(() => { const v = props.title; t = String(v); });",
+    "  return <h2>{t}</h2>;",
+    "}",
+  ].join("\n");
+  assert.deepEqual(
+    check(inEffect, "Card.tsx"),
+    [],
+    "effect 回调会随依赖重跑，在里面读 props 是正确用法"
+  );
 });
 
-test("不误伤：thunk / 内联 resolve / 事件透传 / 非组件", () => {
+test("不误伤：thunk / JSX 直接读 / 事件透传 / 非组件", () => {
   const cases = [
     [
-      "export function Card(props) { const t = () => resolve(props.title); return <h2>{t()}</h2>; }",
-      "官方 thunk 写法",
+      "export function Card(props) { const t = () => props.title; return <h2>{t()}</h2>; }",
+      "thunk 写法",
     ],
     [
-      "export function Card(props) { return <h2>{resolve(props.title)}</h2>; }",
-      "JSX 里内联 resolve",
+      "export function Card(props) { return <h2>{props.title}</h2>; }",
+      "JSX 里直接读 props",
     ],
     [
       "export function Card(props) { return <button onClick={props.onClick}>x</button>; }",
-      "on* 事件 prop 不是 getter，透传合法",
+      "on* 事件 prop 是函数，透传合法",
     ],
     [
       "export function util(props) { const t = props.title; return t; }",
       "不返回 JSX，不是组件",
+    ],
+    [
+      "export function Card(props) { const save = () => { const t = props.title; localStorage.setItem('t', t); }; return <button onClick={save}>x</button>; }",
+      "事件回调里读取会随每次点击重新求值",
     ],
   ];
   for (const [src, why] of cases) {
@@ -502,11 +507,11 @@ test("不误伤：thunk / 内联 resolve / 事件透传 / 非组件", () => {
   }
 });
 
-test("[回归] 不误报：把 on* 事件 prop 存进变量（编译器不给 on* 包 getter）", () => {
+test("[回归] 不误报：把 on* 事件 prop 存进变量（它本来就是函数）", () => {
   const cases = [
     [
       "export function Card(props) { const cb = props.onClick; return <button onClick={cb}>x</button>; }",
-      "on* prop 存的本来就是函数，快照不丢响应性",
+      "on* prop 存的就是函数，快照不丢响应性",
     ],
     [
       'export function Card(props) { const cb = props["onClick"]; return <button onClick={cb}>x</button>; }',
@@ -515,38 +520,6 @@ test("[回归] 不误报：把 on* 事件 prop 存进变量（编译器不给 on
   ];
   for (const [src, why] of cases) {
     assert.deepEqual(check(src, "a.tsx"), [], why);
-  }
-});
-
-test("resolve on* 事件 prop -> PLAIN_E1108（会把处理器当场调用）", () => {
-  // 编译器对 on[A-Z] 的 prop 不包 getter，传进来的就是函数本身；
-  // resolve(fn) = fn()，于是 resolve(props.onClick) 会当场调用处理器。
-  const src = [
-    "export function Card(props) {",
-    "  const cb = resolve(props.onClick);",
-    "  return <button onClick={cb}>x</button>;",
-    "}",
-  ].join("\n");
-  const issues = check(src, "Card.tsx");
-  assert.deepEqual(codes(issues), ["PLAIN_E1108"]);
-  assert.match(issues[0].message, /当场调用/);
-  assert.ok(issues[0].fix, "去掉 resolve 是唯一正确改法，可自动修");
-  assert.ok(autofix(src, issues).includes("const cb = props.onClick;"));
-
-  // 下标形态的 on* 同样拦
-  assert.deepEqual(
-    codes(check('export function Card(props) { return <b onClick={resolve(props["onClick"])}>x</b>; }', "a.tsx")),
-    ["PLAIN_E1108"]
-  );
-
-  // 不误报：直接透传 / 直接调用 / 普通动态 props 的 resolve 都是对的
-  const ok = [
-    "export function Card(props) { return <button onClick={props.onClick}>x</button>; }",
-    "export function Card(props) { return <button onClick={() => props.onClick(1)}>x</button>; }",
-    "export function Card(props) { return <h2>{resolve(props.title)}</h2>; }",
-  ];
-  for (const s of ok) {
-    assert.deepEqual(check(s, "a.tsx"), [], s);
   }
 });
 

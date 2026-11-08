@@ -18,7 +18,9 @@
 4. 副作用用 `effect(fn)`，依赖自动收集，随组件 / 列表行一起回收。
 5. 要跑在服务端的代码用 `server(fn)` 包起来（客户端产物里只剩 RPC 桩）。
 
-组件里取 props 一律 `resolve(props.x)` —— 动态属性在编译器里是 getter。
+组件里取 props **直接读** `props.x`（动态属性在编译器里是真 getter，读出来就是当前值）——
+**没有 `resolve`**。函数型 prop（`onClick` / `render` / 内联箭头）读出来就是函数，按函数用。
+`children` 是 lazy subtree，保持显式调用 `props.children()`。
 
 视图里**每个动态 `{expr}` 编译成一个 `effect`**（`{cond ? …}` / `{arr.map(…)}` 特化为
 `when` / `each`，也各是一个 effect）。所以**读取必须写在花括号里**才算订阅：
@@ -38,16 +40,16 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | 2 | `{count}` / `checked={done}` | `{count()}` / `checked={done()}` | ✅ `PLAIN_E1102`（可自动修） | 08 |
 | 3 | `useState` / `useEffect` / `useMemo` / `useCallback` / `useRef` | `signal` / `effect` / `computed` | ✅ `PLAIN_E1103` | — |
 | 4 | `el.innerHTML = html` / `insertAdjacentHTML` | `{expr}` 插值 / `createTextNode` | ✅ `PLAIN_E1104` | 11 |
-| 5 | `const { title } = props` | `resolve(props.title)`，或 `const title = () => resolve(props.title)` | ✅ `PLAIN_E1105` | 09 |
+| 5 | `const { title } = props` | 直接在 JSX / effect 里读 `props.title`，或 `const title = () => props.title` | ✅ `PLAIN_E1105` | 09 |
 | 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` | — |
 | 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ✅ `PLAIN_E1106` | 05 |
 | 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` | 04（间接） |
-| 9 | 把 getter 存进变量：`const t = props.title`（或忘了 `resolve`；`t = props.title` 同样算） | `resolve(props.title)`；要响应式就写成 thunk | ✅ `PLAIN_E1107`/`PLAIN_E1112` | 06、13 |
+| 9 | 把 props 取值快照进变量：`const t = props.title`（`t = props.title` 同样算） | 在 JSX / effect 里直接读 `props.title`；要响应式就写成 thunk：`const t = () => props.title` | ✅ `PLAIN_E1107`/`PLAIN_E1112` | 06、13 |
 | 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ✅ `PLAIN_E1007` | 07 |
 | 11 | `effect(async () => { await … })` | 依赖收集在第一个 `await` 之后失效：把 `await` 提到 `effect` 外，或用 `resource()` | ✅ `PLAIN_E1109` | 10 |
 | 12 | `effect(() => count.set(count() + 1))`（读了又写同一个 signal） | 派生值用 `computed(fn)`；`effect` 里只写「没读过」的 signal | ✅ `PLAIN_E1110` | 12 |
 | 13 | `computed(() => { s.set(…) })` | `computed` 必须是纯函数，副作用放 `effect` | ✅ `PLAIN_E1111` | — |
-| 14 | `resolve(props.onClick)`（`on*` 事件 prop 不能 resolve） | `props.onClick(...)`：编译器不给 `on*` 包 getter，传进来的就是函数，`resolve` 会把它当场调用 | ✅ `PLAIN_E1108`（可自动修） | — |
+| 14 | 把函数型 prop 当值插值（`{props.render}` / `String(props.format)`） | 按函数用：`{props.render(x)}` / `{props.format(v)}`；只有 `props.children` 是显式 thunk | ❌ | — |
 | 15 | JSX 属性展开 `{...expr}` | 展开成显式属性：展开只做半套（不进响应式 + 绕过 class / style / value），会静默跑错 | ✅ `PLAIN_E1008` | — |
 | 16 | 在**组件**上写 `ref` | 把 `ref` 放到组件内部的元素上 | ✅ `PLAIN_E1009` | — |
 | 17 | `ref` 的值不是函数（`ref` / `ref="x"` / 返回 JSX） | `ref={(el) => { … }}` | ✅ `PLAIN_E1010` | — |
@@ -146,10 +148,9 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | `PLAIN_E1102` | JSX 里把 signal 当值用 | 补上调用 `()`（可自动修） |
 | `PLAIN_E1103` | React 肌肉记忆（`useState` 等） | 换 `signal` / `effect` / `computed` |
 | `PLAIN_E1104` | `innerHTML` / `outerHTML` | 用 `{expr}` 插值 / `createTextNode`（安全红线） |
-| `PLAIN_E1105` | 解构 props | `resolve(props.title)`，或写成 thunk |
+| `PLAIN_E1105` | 解构 props（拿到的是此刻的值） | 直接读 `props.x`，或写成 thunk |
 | `PLAIN_E1106` | 就地对 signal 值做修改 | 生成新值再 `.set` |
-| `PLAIN_E1107` / `PLAIN_E1112` | props getter 被存进变量 / 忘了 `resolve` | 内联 `resolve` 或 thunk（两码同一条规则的不同形态） |
-| `PLAIN_E1108` | `resolve(props.onClick)` | 去掉 `resolve` → `props.onClick`（可自动修） |
+| `PLAIN_E1107` / `PLAIN_E1112` | props 取值被存进变量（快照） | 在 JSX / effect 里直接读，或写成 thunk（两码同一条规则的不同形态） |
 | `PLAIN_E1109` | `effect(async () => …)` | 把 `await` 提到 `effect` 外，或用 `resource()` |
 | `PLAIN_E1110` | `effect` 自触发 | 派生值用 `computed`；`effect` 里只写没读过的 signal |
 | `PLAIN_E1111` | `computed` 里写 signal | `computed` 必须纯，副作用放 `effect` |

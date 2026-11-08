@@ -10,7 +10,7 @@
 // 下一个请求拿到的是全新作用域，不可能读到上一个请求的 Provide 值。
 
 import type { Context } from "../types.js";
-import { getOwner, getOwnerChain, withOwner, resolve } from "./signal.js";
+import { getOwner, getOwnerChain, withOwner } from "./signal.js";
 
 /** Context 对象上承载「作用域查找键」的私有字段（不进公开类型） */
 interface ContextInternal<T> extends Context<T> {
@@ -32,7 +32,7 @@ export function createContext<T>(defaultValue: T): Context<T> {
       const scope = new Set<() => void>();
       // 值以 getter 形式随作用域走：读它时才求值，于是 value 里读到的 signal 变化
       // 能被消费者订阅（消费者在 effect / JSX 里调用 getter）。
-      (scope as any)[key] = () => resolve(props.value);
+      (scope as any)[key] = () => props.value;
       // 作用域挂在父 owner 上：父卸载 / 行回收 / 分支切换 -> 子树 effect 一并回收，不悬挂。
       if (parent && typeof parent.add === "function") {
         parent.add(() => {

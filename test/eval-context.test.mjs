@@ -27,7 +27,8 @@ test("eval --prompt --context：三档规则上下文都从 AGENTS.md 现读现�
   const minimal = run(["--prompt", "--context", "minimal"]);
   assert.match(minimal, /Plain 规则上下文（--context minimal）/);
   assert.match(minimal, /## 2\. 只有 5 条规则/);
-  assert.match(minimal, /resolve\(props\.x\)/);
+  assert.match(minimal, /props\.x/);
+  assert.match(minimal, /没有 `resolve`/);
   assert.ok(!minimal.includes("反模式目录"), "minimal 不该带反模式目录");
 
   const full = run(["--prompt", "--context", "full"]);

@@ -9,7 +9,7 @@
 //   · 视口内只渲染「看得到」的 ~20 行，上下用占位 div 撑出真实滚动高度
 //   · 滚动时只更新占位高度与少量可见行，DOM 节点数恒定
 
-import { signal, computed, mount, resolve } from "plain";
+import { signal, computed, mount } from "plain";
 
 type Row = {
   id: number;
@@ -107,7 +107,7 @@ function setSort(key: keyof Row) {
 // 组件
 // ---------------------------------------------------------------------------
 function HeaderCell(props: { col: (typeof COLUMNS)[number] }) {
-  const c = () => resolve(props.col);
+  const c = () => props.col;
   const sorted = () => sortKey() === c().key;
   return (
     <button class="h" onClick={() => setSort(c().key)}>
@@ -118,7 +118,7 @@ function HeaderCell(props: { col: (typeof COLUMNS)[number] }) {
 }
 
 function BodyRow(props: { row: Row }) {
-  const r = () => resolve(props.row);
+  const r = () => props.row;
   return (
     <div class="cols body-row">
       <span>{r().id}</span>

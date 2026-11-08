@@ -1493,10 +1493,12 @@ function collectProps(attrs: any): string[] {
           ts.isArrowFunction(exprNode) ||
           ts.isFunctionExpression(exprNode)
         ) {
-          // 函数本身就是要传的值（如 fallback={(e) => ...}），不再包一层 getter
+          // 函数本身就是要传的值（如 fallback={(e) => ...}）：读出来是函数，不是 thunk
           parts.push(`${key}: ${valueCode(exprNode)}`);
         } else {
-          parts.push(`${key}: () => (${exprNode.getText()})`);
+          // 动态值 prop -> 真正的 getter：读 props.x 拿到的就是当前值，
+          // 在 JSX / effect 里读会自动订阅（与 signal 的读法一致，但不需要调用）。
+          parts.push(`get ${key}() { return (${exprNode.getText()}); }`);
         }
       }
     }

@@ -1,8 +1,8 @@
 // Plain 参考实现（自检 harness：node eval/compare/run.mjs --reference）
-import { signal, resolve } from "plain";
+import { signal } from "plain";
 
 export function Card(props) {
-  return <h2>{resolve(props.title)}</h2>;
+  return <h2>{props.title}</h2>;
 }
 
 export function App() {

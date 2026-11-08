@@ -1,10 +1,9 @@
 // 验收断言（AI 看不到这个文件）
 //
 // 靶子：props 取值方式。
-//   1) `const t = props.title`  —— 拿到的是 getter 函数本身，会渲染出函数源码；
-//   2) `const t = resolve(props.title)` —— 初次渲染看起来完全正确，**但之后不再更新**（静默失败）；
-//   3) `<h2>{props.title}</h2>` —— 忘了 resolve，同样渲染出函数源码。
-// 只有「在会重跑的上下文里取值」（如直接在 JSX 里 `resolve(props.title)`）才能同时通过两条断言。
+//   1) `const t = props.title` —— 只是把此刻的值存进变量，之后不再更新；
+//   2) `<h2>{props.title}</h2>` —— 正确：props 是实时值，在 JSX / effect 里直接读。
+// 只有「在会重跑的上下文里取值」（如直接在 JSX 里 `props.title`）才能同时通过两条断言。
 import assert from "node:assert/strict";
 
 export default async function check({ mod, mount }) {

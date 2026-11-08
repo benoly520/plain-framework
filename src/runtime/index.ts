@@ -10,7 +10,6 @@ export {
   onCleanup,
   withOwner,
   getOwner,
-  resolve,
   stringify,
   getCurrentEffect,
   rowProxy,

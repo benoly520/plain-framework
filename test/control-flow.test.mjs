@@ -147,10 +147,10 @@ test("列表回调：就地定义的小渲染函数（函数声明 / 箭头）�
 
 test("列表回调：就地定义的组件函数（首字母大写）被当组件调用", async () => {
   const { box } = await render(
-    `${ROWS.replace('import { signal } from "plain";', 'import { signal, resolve } from "plain";')}
+    `${ROWS}
     export function C() {
       return <ul>{rows().map((x) => {
-        const Row = (p) => <li>{resolve(p.v)}</li>;
+        const Row = (p) => <li>{p.v}</li>;
         return <Row v={x.tag} />;
       })}</ul>;
     }`,

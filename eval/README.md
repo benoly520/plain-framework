@@ -37,7 +37,7 @@
 | `03-server-boundary` | 把服务端逻辑留在客户端 | 构建期 |
 | `04-server-config` | 模块作用域读 env 再被 `server()` 引用 | 构建期 |
 | `05-immutable-update` | 就地改数据 `items().push(x)` | 构建期 |
-| `06-props-snapshot` | `const t = resolve(props.title)` 快照 getter | 构建期 |
+| `06-props-snapshot` | `const t = props.title` 快照 props 取值 | 构建期 |
 | `07-server-validation` | 给 `server()` 传函数 | 构建期 |
 | `08-signal-not-called` | 忘记调用 signal：`{count}` | 构建期 `PLAIN_E1102` |
 | `09-props-destructure` | 解构 props：`const { title } = props` | 构建期 `PLAIN_E1105` |

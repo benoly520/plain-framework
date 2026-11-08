@@ -321,20 +321,22 @@ test("each 内部可嵌套 when 且互不污染", async () => {
 test("组件 props 为 getter，边改边更新；children 正常透传", async () => {
   const { mod } = await compileModule(
     `
-    import { signal, effect, resolve } from "plain";
+    import { signal, effect } from "plain";
     export const name = signal("世界");
     export function Card(props) {
       const el = document.createElement("div");
       el.className = "card";
+      el.dataset.kinds = [typeof props.children, typeof props.onSave, typeof props.render].join(",");
+      el.dataset.rendered = props.render("v");
       const t = document.createTextNode("");
       el.appendChild(t);
-      effect(() => { t.nodeValue = String(resolve(props.title)); });
+      effect(() => { t.nodeValue = String(props.title); });
       const kids = props.children ? props.children() : null;
       if (kids) el.appendChild(kids);
       return el;
     }
     export function App() {
-      return <Card title={"你好，" + name()}>
+      return <Card title={"你好，" + name()} onSave={() => {}} render={(v) => v + "!"}>
         <span>inner</span>
       </Card>;
     }
@@ -344,6 +346,12 @@ test("组件 props 为 getter，边改边更新；children 正常透传", async 
   const box = container("comp1");
   box.appendChild(mod.App());
   eq(box.querySelector(".card").textContent, "你好，世界inner");
+  eq(
+    box.querySelector(".card").dataset.kinds,
+    "function,function,function",
+    "children / on* / 内联函数 prop 都应读成函数"
+  );
+  eq(box.querySelector(".card").dataset.rendered, "v!", "函数型 prop 可直接调用");
   mod.name.set("Plain");
   eq(box.querySelector(".card").textContent, "你好，Plaininner", "props 更新应生效");
 });
@@ -587,7 +595,7 @@ test("文本插值自动转义风险由 DOM API 承担（不拼 HTML 字符串�
 test("SSR：同一份组件在 Node 里渲染出 HTML 字符串", async () => {
   const { mod } = await compileModule(
     `
-    import { signal, effect, resolve } from "plain";
+    import { signal, effect } from "plain";
     export const items = signal(["a", "b"]);
     export const name = signal("Plain");
     export function Card(props) {
@@ -595,7 +603,7 @@ test("SSR：同一份组件在 Node 里渲染出 HTML 字符串", async () => {
       el.className = "card";
       const t = document.createTextNode("");
       el.appendChild(t);
-      effect(() => { t.nodeValue = String(resolve(props.title)); });
+      effect(() => { t.nodeValue = String(props.title); });
       return el;
     }
     export function App() {

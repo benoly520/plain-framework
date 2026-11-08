@@ -7,6 +7,24 @@
 
 ### 变更（破坏性）
 
+- **props 改为真 getter：删除 `resolve`，props 直接读 `props.x`**。编译器把动态、非 `on*`、
+  非内联函数的属性从 `x: () => expr` 改为 `get x() { return expr }`，组件里读到的就是当前值
+  （JSX / effect 里读会自动订阅）。`on*` 与内联函数仍是原始函数；`children` 保持 lazy subtree，
+  继续显式调用 `props.children()`。
+  - **移除运行时导出 `resolve`**：`resolve(props.x)` 不再存在；`props.x` 直接是值。
+    这是 clean break —— 不提供编译器双模式、deprecation 或“新旧都行”的兼容层；
+    旧项目请用 codemod 一次性迁移。
+  - **函数型 prop 不再有 `resolve` 三义性**：`props.render` / `props.format` 读出来就是函数，
+    按函数用；`resolve(props.render)` 这类写法会消失（此前会把函数当场调用）。
+  - **lint 同步**：删除 JSX 形态的 `PLAIN_E1112`（`{props.title}` 现在是正确写法）与
+    `PLAIN_E1108`（`resolve` 已不存在）；`PLAIN_E1105` / `PLAIN_E1107` / `PLAIN_E1112`
+    继续拦「解构 / 把 props 取值存进变量」——它们仍是快照。声明形态只报组件渲染作用域，
+    effect / 事件回调里的读取不报（回调重跑会重新求值）。
+  - **类型终于说真话**：`props: { title: string }` 与运行时一致，不再需要 `string | (() => string)`。
+  - **`Link` 的 `to` 收紧为 `string`**：动态值由编译器 getter 处理，不再接受手写 thunk。
+  - 测试：编译器 getter 产物、SSR / hydrate、父 signal 更新穿透、函数型 prop、`children`、
+    lint 误报回归；示例 / 文档 / eval 同步改为直接读 props。
+
 - **`plaindev schema` 的 props 从「推断」变「声明」**：`props` 的事实来源改为**组件自己声明的类型**
   （`props: CardProps`）—— `optional` 来自 `?`、`type` 来自注解，跨文件调用也会漏的旧问题消失。
   新增 `propsSource`（`declared` / `declared-unresolved` / `inferred`）如实标注来源：

@@ -40,13 +40,13 @@
 
 ```tsx
 export function Counter(props: { label: string; start: number }) {
-  const count = signal(resolve(props.start));
+  const count = signal(props.start);
   return (
     <div class="counter">
       <button class="counter-btn" onClick={() => count.set(count() - 1)}>−</button>
       <span class="counter-value">{count()}</span>
       <button class="counter-btn" onClick={() => count.set(count() + 1)}>+</button>
-      <span class="counter-label">{resolve(props.label)}</span>
+      <span class="counter-label">{props.label}</span>
     </div>
   );
 }

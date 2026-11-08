@@ -226,14 +226,6 @@ export function getOwnerChain(): readonly any[] {
 }
 
 /**
- * resolve(v) —— 编译器对动态 props 一律传 getter；组件里统一用 resolve 取值。
- * （on* 开头的事件类 prop 编译器不包 getter，直接使用。）
- */
-export function resolve<T>(v: T | (() => T)): T {
-  return typeof v === "function" ? (v as () => T)() : v;
-}
-
-/**
  * rowProxy(getRow) —— 列表行代理。
  * 任何属性读取都会先读该行的 signal，从而让行内绑定自动订阅 —— 这是
  * “勾选待办 UI 不更新” 这个致命 bug 的根治手段，也让 AI 不必手写 key / memo。

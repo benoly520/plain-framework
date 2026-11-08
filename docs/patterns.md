@@ -113,7 +113,7 @@ function onSubmit(e: SubmitEvent) {
 <form onSubmit={onSubmit}>…</form>
 ```
 
-处理函数写在组件外，只要能拿到需要的 signal 即可；需要 `resolve(props.x)` 的才必须写在组件内（见 3.1）。
+处理函数写在组件外，只要能拿到需要的 signal 即可；需要读 `props` 的才必须写在组件内（见 3.1）。
 
 ### 1.5 数字 / 格式化输入
 
@@ -226,7 +226,7 @@ function TodoRow(props: { item: Todo; onSave: (id: number, text: string) => void
   const draft = signal("");
 
   function startEdit() {
-    draft.set(resolve(props.item).text); // 用当前文本预填草稿
+    draft.set(props.item.text); // 用当前文本预填草稿
     editing.set(true);
   }
 
@@ -237,7 +237,7 @@ function TodoRow(props: { item: Todo; onSave: (id: number, text: string) => void
           <input value={draft()} onInput={(e) => draft.set(e.target.value)} />
           <button
             onClick={() => {
-              props.onSave(resolve(props.item).id, draft());
+              props.onSave(props.item.id, draft());
               editing.set(false);
             }}
           >
@@ -246,7 +246,7 @@ function TodoRow(props: { item: Todo; onSave: (id: number, text: string) => void
           <button onClick={() => editing.set(false)}>取消</button>
         </span>
       ) : (
-        <span onDblClick={startEdit}>{resolve(props.item).text}</span>
+        <span onDblClick={startEdit}>{props.item.text}</span>
       )}
     </li>
   );
@@ -265,8 +265,8 @@ function TodoRow(props: { item: Todo; onSave: (id: number, text: string) => void
 
 要点：
 - 局部状态放**行组件**里，不要把所有行的 `editing` 挤进一个父级 signal（那样重排时会串行）；
-- **动态值 props 用 `resolve(props.x)`** —— 它们在编译器里是 getter，直接当值用会渲染出函数源码或停更（见 `AGENTS.md` 第 3 节第 5、9 条）；
-- **`on` + 大写开头的 prop 直接调用，绝不 `resolve`**：编译器对 `/^on[A-Z]/` 的 prop（如 `onSave`）原样把函数传进来，`resolve(props.onSave)` 会**当场把它调用掉**（等价于 `props.onSave()`）。所以是 `props.onSave(id, text)`，不是 `resolve(props.onSave)(id, text)`。
+- **动态值 props 直接读 `props.x`** —— 编译器把它们编译成真 getter，读出来就是当前值；直接当值用即可（见 `AGENTS.md` 第 3 节第 5、9 条）；
+- **函数型 prop 按函数用**：`on*` / `render` / 内联箭头读出来就是函数，`props.onSave(id, text)`、`props.render(x)`；只有 `props.children` 是显式 thunk，要调用 `props.children()`。
 
 ### 3.2 统一编辑态（少数场景）
 
@@ -374,12 +374,12 @@ const user = resource(() => getUser(props.params.id));
 | 输入框 | `<input value={name} />`（漏调用） | `value={name()}` |
 | 输入框回写 | `name = e.target.value` | `name.set(e.target.value)` |
 | 多字段对象 | `form().email = v` | `form.set({ ...form(), email: v })` |
-| props | `const t = props.title` | `resolve(props.title)` |
+| props | `const t = props.title` | 直接读 `props.title`，或 `const t = () => props.title` |
 | 派生错误 | 在 `effect` 里同步一个 error signal | `computed(...)` |
 | 提交 | 忘了 `e.preventDefault()` | 处理函数第一行就挡掉 |
 | 校验 | 把校验函数当参数传给 `server()` | 校验写在 `server()` 函数体内 |
 | 列表行 | 不写 `key` 却依赖行内局部状态 | `<Row key={item.id} … />` |
-| 事件 prop | `resolve(props.onClick)`（会把处理器当场调用） | `props.onClick(...)` —— `on*` prop 不是 getter |
+| 函数型 prop | 把 `{props.render}` 当值插值（渲染出函数源码） | 按函数用：`{props.render(x)}`；`props.children()` 是显式 thunk |
 | 透传一组属性 | `<Card {...rest} />` | 逐个显式列出（`PLAIN_E1008`） |
 
 ---
@@ -426,7 +426,7 @@ Plain 组件是纯函数，函数体默认拿不到自己创建的节点。需�
 }} />
 
 <div ref={(el) => {
-  const editor = monaco.editor.create(el, { value: resolve(props.value) });
+  const editor = monaco.editor.create(el, { value: props.value });
   return () => editor.dispose();   // 元素回收时销毁实例
 }} />
 ```

@@ -455,10 +455,10 @@ test("注水：首帧就用服务端的值（0 告警、不闪 loading），随�
 test("同一个调用点的多个实例：按创建序配对（列表场景）", async () => {
   const { mod, handlers } = await loadModule(
     `
-    import { resource, server, resolve } from "plain";
+    import { resource, server } from "plain";
     const getRow = server(async (id) => "srv-" + id);
     function Row(props) {
-      const r = resource(() => getRow(resolve(props.id)));
+      const r = resource(() => getRow(props.id));
       return <li>{r.data() ?? "…"}</li>;
     }
     export function App() {

@@ -66,10 +66,10 @@ Plain 的定位是「编译到 DOM + 唯一状态原语 + 显式服务端边界�
 **React 迁移最易踩**
 
 - 肌肉记忆写 `useState` / `useEffect` / `useMemo` / `useCallback` / `useRef` → `PLAIN_E1103`（react-habit）。
-- 解构 props / 把 `props.x` 存进变量 → `PLAIN_E1105` / `PLAIN_E1107` / `PLAIN_E1112`；动态值用 `resolve(props.x)`。
-- `resolve(props.onClick)` —— 事件 prop 不是 getter → `PLAIN_E1108`。
+- 解构 props / 把 `props.x` 存进变量 → `PLAIN_E1105` / `PLAIN_E1107` / `PLAIN_E1112`；动态值直接读 `props.x`。
+- 函数型 prop 按函数用：`props.onClick(...)` / `props.render(x)`；`props.children()` 是显式 thunk。
 - `className` / `htmlFor` → `PLAIN_E1115`（warn，可自动修）。
-- 以为组件会「重渲染」：Plain 组件函数只执行一次，之后由细粒度 signal 直接更新 DOM；所以组件体里读到的是 props getter，要 `resolve`。
+- 以为组件会「重渲染」：Plain 组件函数只执行一次，之后由细粒度 signal 直接更新 DOM；组件体里读 `props.x` 会订阅，读出来就是当前值。
 
 > 一句话：React 的心智模型（状态 → 视图）几乎能平移，但 Plain 删掉了「hooks + 依赖数组 + 重渲染」整条链路，
 > 换成「signal + 自动追踪 + 编译期直出 DOM」。所以最容易犯的错，是继续用 hooks 那套 API（`PLAIN_E1103` 专门拦它）。
@@ -146,13 +146,13 @@ Plain 的定位是「编译到 DOM + 唯一状态原语 + 显式服务端边界�
 | `untrack(() => x())` | `x.peek()` | 不建立依赖地读一次 |
 | `onMount` / `onCleanup` | `ref` 回调 / `onCleanup` | |
 | `<Show>` / `<For>` | `{cond ? …}` / `.map` | |
-| `props.x`（getter 自动追踪） | `resolve(props.x)` | **最大差异**：Plain 要求动态值显式 `resolve`，直接当值用会抓快照（`PLAIN_E1107` / `PLAIN_E1112`） |
+| `props.x`（getter 自动追踪） | `props.x` | 和 Solid 一致：读出来就是当前值；**不要**解构或存进变量（`PLAIN_E1105` / `PLAIN_E1107` / `PLAIN_E1112`） |
 
 **Solid 迁移最易踩**
 
 - 解构 `createSignal` 的返回值。
-- 以为 `props.x` 直接用就行 —— Plain 要 `resolve(props.x)`。
-- `resolve(props.onClick)` —— 事件 prop 不是 getter，会被 `PLAIN_E1108` 拦。
+- 把 `props.x` 存进变量或解构 —— 会抓快照；直接读 `props.x` 即可。
+- 把函数型 prop 当值插值（`{props.render}`）；按函数用：`props.render(x)`。
 
 ---
 
@@ -164,22 +164,22 @@ Plain 的定位是「编译到 DOM + 唯一状态原语 + 显式服务端边界�
 | `c.update(fn)` | `c.set((prev) => fn(prev))` | Plain 的 `set` 直接接受函数 |
 | `computed(() => …)` | `computed(() => …)` | |
 | `effect(() => …)` | `effect(() => …)` | |
-| `@Input()` / `input()` | props | 动态值要 `resolve(props.x)` |
-| `@Output()` / `output()` / `EventEmitter` | `on*` prop 回调：`props.onSave(…)` | 不要 `resolve` 事件 prop（`PLAIN_E1108`） |
+| `@Input()` / `input()` | props | 动态值直接读 `props.x` |
+| `@Output()` / `output()` / `EventEmitter` | `on*` prop 回调：`props.onSave(…)` | 函数型 prop 直接调用 |
 | `model()` / `[(ngModel)]` | `value={s()}` + `onInput` | 没有双向绑定 |
 | `inject(Service)` / `providers` | `useContext(Ctx)` / `<Ctx.Provider value>`，或模块级单例 | 请求级数据走 Context |
 | `*ngIf` / `*ngFor` | `{cond ? …}` / `.map` | |
 | `[prop]="expr"` / `(click)="fn()"` | `prop={expr}` / `onClick` | |
 | `ngOnInit` | 组件体直接写（DOM 前）/ `ref` 回调（DOM 后） | |
 | `ngOnDestroy` | `onCleanup` / `return () => {…}` | |
-| `ngOnChanges` | 不需要 | props 是 getter，读 `resolve(props.x)` 自动跟随 |
+| `ngOnChanges` | 不需要 | props 是 getter，读 `props.x` 自动跟随 |
 | `ChangeDetectionStrategy` / zone.js | 不需要 | 细粒度 signal 直接更新 DOM |
 
 **Angular 迁移最易踩**
 
 - 模板语法整段照搬（`*ngIf` / `[(ngModel)]` / `[prop]`）。
 - 在 `ngOnInit` 里等 DOM —— Plain 要用 `ref` 回调（那时元素才连入文档）。
-- 事件 prop 用 `resolve`（`PLAIN_E1108`）。
+- 把 `props.x` 存进变量或解构 —— 会抓快照。
 
 ---
 
@@ -190,9 +190,8 @@ Plain 的定位是「编译到 DOM + 唯一状态原语 + 显式服务端边界�
 | 直接给状态赋值（`x.value = 1` / `count = 1`） | `PLAIN_E1101`（signal-assign） | `x.set(1)` |
 | JSX 里漏调用（`{count}`） | `PLAIN_E1102`（signal-not-called，**可自动修**） | `{count()}` |
 | 就地改对象/数组（Vue reactive / React 直接改 state 的习惯） | `PLAIN_E1106`（no-signal-mutate） | `s.set({ ...s(), … })` / `s.set([...])` |
-| 解构 props（Vue `toRefs`、Solid / React 解构 props） | `PLAIN_E1105`（no-props-destructure） | `resolve(props.x)` |
-| 把 props 存进变量（抓快照） | `PLAIN_E1107` / `PLAIN_E1112`（no-props-snapshot） | 用的时候 `resolve(props.x)` |
-| `resolve` 事件 prop | `PLAIN_E1108`（no-resolve-event-prop） | `props.onClick(…)` |
+| 解构 props（Vue `toRefs`、Solid / React 解构 props） | `PLAIN_E1105`（no-props-destructure） | 直接读 `props.x`，或写成 thunk |
+| 把 props 存进变量（抓快照） | `PLAIN_E1107` / `PLAIN_E1112`（no-props-snapshot） | 用的时候直接读 `props.x` |
 | `useEffect` / `effect` 读写同一 signal | `PLAIN_E1110`（no-effect-loop） | 用 `computed` 派生，别在 effect 里回写 |
 | `computed` 里写 signal | `PLAIN_E1111`（no-computed-side-effect） | 派生保持纯函数 |
 | 模块作用域建 `resource`（在模块顶层 watch / 取数） | `PLAIN_E1113`（no-module-scope-resource） | 放进组件或 `createScope` |

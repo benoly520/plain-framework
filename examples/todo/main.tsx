@@ -13,7 +13,6 @@ import {
   signal,
   computed,
   effect,
-  resolve,
   mount,
   createRouter,
   resource,
@@ -23,7 +22,7 @@ import {
 } from "plain";
 
 type Todo = { id: number; text: string; done: boolean };
-type CardProps = { title: string | (() => string); children?: any };
+type CardProps = { title: string; children?: any };
 type StatCardProps = { label: string; value: unknown };
 type RouteProps = import("plain").RouteProps;
 
@@ -91,7 +90,7 @@ function Card(props: CardProps) {
   const headText = document.createTextNode("");
   head.appendChild(headText);
   effect(() => {
-    headText.nodeValue = String(resolve(props.title));
+    headText.nodeValue = String(props.title);
   });
 
   const body = document.createElement("div");
@@ -117,10 +116,10 @@ function StatCard(props: StatCardProps) {
   el.appendChild(label);
   el.appendChild(value);
   effect(() => {
-    lt.nodeValue = String(resolve(props.label));
+    lt.nodeValue = String(props.label);
   });
   effect(() => {
-    vt.nodeValue = String(resolve(props.value));
+    vt.nodeValue = String(props.value);
   });
   return el;
 }
@@ -229,7 +228,7 @@ function Home() {
 // 页面 2：详情（路由参数 + props 传值）
 // ---------------------------------------------------------------------------
 function TodoView(props: { todo: Todo }) {
-  const t = () => resolve(props.todo);
+  const t = () => props.todo;
   return (
     <div>
       <p class="big">{t().text}</p>

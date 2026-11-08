@@ -201,7 +201,7 @@ Plain 卖的是「构建期把错误变便宜」。如果 React 侧只做 JSX �
 | 用例 | Plain 的错法 | React 的错法 | 共同的失败断言 |
 | --- | --- | --- | --- |
 | `02-list-update` | `items().push(text)`（signal 按引用比较，不触发更新） | `items.push(text)` 后不 `setState`（不重渲染） | `添加后应立刻变成 3 项` |
-| `03-props-update` | `const t = resolve(props.title)`（取值快照） | `const [t] = useState(title)`（派生 state 快照） | `父状态变化后子组件的 <h2> 必须跟着更新` |
+| `03-props-update` | `const t = props.title`（取值快照） | `const [t] = useState(title)`（派生 state 快照） | `父状态变化后子组件的 <h2> 必须跟着更新` |
 
 这两组是**同一个概念错误的两种方言** —— 也正是这套对比想测的东西。
 

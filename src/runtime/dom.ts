@@ -20,14 +20,11 @@ import {
   rowProxy,
   withOwner,
   stringify,
-  resolve,
   untracked,
 } from "./signal.js";
 import { getHydrationCtx, claimPair, suspendHydrate } from "./hydration-context.js";
 import { hmrRegister } from "./hmr.js";
 import { flushRefs } from "./ref.js";
-
-export { resolve } from "./signal.js";
 
 export function stringifySafe(v: unknown): string {
   return stringify(v);

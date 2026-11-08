@@ -76,15 +76,23 @@ test("arr.map 支持 index 参数，编译成 each", () => {
   assert.ok(code.includes("(t, i) =>"));
 });
 
-test("组件：props 收集 + children 包成 thunk + place 挂载", () => {
+test("组件：props 收集（动态值 -> 真 getter；函数 prop 原样）+ children thunk", () => {
   const { code } = compile(
     jsx(
       "function Card(props){ return <section>{props.children()}</section>; }",
-      "export function App(){ return <Card label=\"x\"><span>hi</span></Card>; }"
+      'export function App(){ return <Card label="x" count={n()} onClick={fn} render={(v)=>v}><span>hi</span></Card>; }'
     ),
     "k.jsx"
   );
+  // 动态值 prop 编译成真正的 getter：读 props.count 直接是当前值，不需要调用。
+  assert.ok(code.includes("get count() { return (n()); }"), code);
+  // 静态值仍是数据属性；on* 与内联函数是原始函数值。
+  assert.ok(code.includes('label: "x"'), code);
+  assert.ok(code.includes("onClick: (fn)"), code);
+  assert.ok(code.includes("render: (v)=>v"), code);
+  // children 仍是 lazy subtree（显式 thunk），不走 getter。
   assert.ok(code.includes("children: () => {"));
+  assert.ok(!code.includes("get children()"), code);
   assert.ok(code.includes('__place('));
   assert.match(code, /Card\(__props\d+\)/);
 });
