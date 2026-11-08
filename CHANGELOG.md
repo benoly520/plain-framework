@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 工具
+
+- **新增 0.3 → 0.4 迁移 codemod**：`scripts/migrate-0.3-to-0.4.mjs`（TypeScript AST，幂等）。
+  自动删除 `resolve`、收缩 `MaybeGetter` / `Renderable | (() => Renderable)`、改写原生元素与
+  已知值 prop 的零参箭头属性、清理失效的 `PLAIN_E1108` 抑制；函数型 prop 判断、组件体快照与
+  手写 props 不自动改，会输出「需人工确认」清单。用法见
+  [迁移指南](docs/migrate-0.3-to-0.4.md#自动迁移codemod)；新增回归测试 `test/migrate-0.4.test.mjs`。
+
 ## [0.4.0] - 2026-11-08
 
 > 破坏性变更的逐条改法见 [0.3 → 0.4 迁移指南](docs/migrate-0.3-to-0.4.md)。

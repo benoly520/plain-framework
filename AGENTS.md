@@ -205,6 +205,7 @@ npx plaindev agent-context  # 打印本文件里「给 AI 的部分」
                             # --write 落盘 AGENTS.md / copilot / cursor（已存在的文件不覆盖）
 npx plaindev mcp            # 把 check / schema 暴露成 MCP 工具，AI IDE 可直接调
 npx plaindev lsp            # LSP stdio server：把契约检查接进编辑器，写代码时就报
+pnpm run migrate:0.4 -- --dry-run <dir>  # 0.3 → 0.4 codemod（先预览，确认后去掉 --dry-run）
 ```
 
 ## 6. 仓库地图
@@ -221,6 +222,7 @@ npx plaindev lsp            # LSP stdio server：把契约检查接进编辑器�
 | `src/errors.ts` | **错误码唯一来源**：`ERROR_CATALOG` 登记码 / 短名 / 可否抑制 / 说明；映射查询与抑制匹配 |
 | `src/testing/` | `plain/testing` 官方测试工具包（`render` / `fireEvent` / `flush`），独立子路径、非冻结 API |
 | `src/cli/` | `plaindev` |
+| `scripts/` | 一次性迁移 / codemod（如 `migrate-0.3-to-0.4.mjs`），不是运行时 API |
 | `test/` | 测试（跑的是 `dist/`，不是 `src/`） |
 | `eval/` | AI 正确率评测：任务 + 验收断言 + 指标 |
 | `docs/patterns.md` | 常见场景（表单 / 异步提交 / 列表内表单 / 校验 / 命令式 DOM）的**唯一推荐写法** |
@@ -258,6 +260,7 @@ npx plaindev lsp            # LSP stdio server：把契约检查接进编辑器�
    - **输入归一化**（如 §7.8 的 `className` → `class`）不是双轨：它把多种拼写收敛到唯一实现，
      且清单必须显式登记、不可顺手扩张。
    - **迁移工具**（codemod / 构建期报错）不是兼容：它把代码收敛到唯一写法，不新增运行时分叉。
+     现有的 0.3 → 0.4 codemod 见 `scripts/migrate-0.3-to-0.4.mjs`（用法在迁移指南）。
 
 ## 8. 帮这个框架变好（重要）
 

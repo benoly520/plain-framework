@@ -44,7 +44,7 @@ mount("#app", App());
 - [测试与质量](#测试与质量)
 - [内核原理 docs/internals.md](docs/internals.md) —— 编译管线 / 产物对照 / 响应式与 DOM 层 / SSR 注水 / HMR / 不变量清单（**想深入理解核心只读这一篇**）
 - [常见场景配方 docs/patterns.md](docs/patterns.md) ｜ [从其它框架迁移 docs/from-other-frameworks.md](docs/from-other-frameworks.md)
-- [0.3 → 0.4 迁移指南 docs/migrate-0.3-to-0.4.md](docs/migrate-0.3-to-0.4.md) —— `resolve` 删除 / `MaybeGetter` 移除 / 函数型 prop 审计
+- [0.3 → 0.4 迁移指南 docs/migrate-0.3-to-0.4.md](docs/migrate-0.3-to-0.4.md) —— 内置 codemod / `resolve` 删除 / `MaybeGetter` 移除 / 函数型 prop 审计
 - [路线图 ROADMAP.md](ROADMAP.md) ｜ [给 AI 代理的说明 AGENTS.md](AGENTS.md) ｜ [AI 正确率评测 eval/](eval/README.md) ｜ [安全说明 SECURITY.md](SECURITY.md)
 
 ---

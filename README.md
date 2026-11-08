@@ -43,7 +43,7 @@ mount("#app", App());
 - [Boundaries & Known Limitations](#boundaries--known-limitations)
 - [Testing & Quality](#testing--quality)
 - [Core internals: how it actually works](docs/internals.md) — compiler pipeline, generated code, runtime, SSR / hydration / HMR, invariants
-- [0.3 → 0.4 migration guide](docs/migrate-0.3-to-0.4.md) — `resolve` removal / `MaybeGetter` removal / function-prop audit
+- [0.3 → 0.4 migration guide](docs/migrate-0.3-to-0.4.md) — bundled codemod / `resolve` removal / `MaybeGetter` removal / function-prop audit
 - [Examples](examples/todo/)
 - [Directory Structure](#directory-structure)
 - [License](#license)

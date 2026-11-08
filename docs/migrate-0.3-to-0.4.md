@@ -35,11 +35,55 @@ const t = () => resolve(props.title) // 旧 thunk 写法
 
 ---
 
+## 自动迁移（codemod）
+
+仓库内提供了基于 TypeScript AST 的迁移脚本（`scripts/migrate-0.3-to-0.4.mjs`）。
+先跑它做机械改写，再按第 2 步人工审计：
+
+```bash
+# 1) 先预览，不写盘
+node node_modules/plain/scripts/migrate-0.3-to-0.4.mjs --dry-run src
+
+# 2) 确认无误后执行
+node node_modules/plain/scripts/migrate-0.3-to-0.4.mjs src
+```
+
+在 plain 仓库内开发时用 `pnpm run migrate:0.4 -- --dry-run <dir>`。
+
+自动完成的部分：
+
+- 删除从 `plain` 导入的 `resolve`，调用点改成直接读 `props.x`；
+  `resolve(props.children)` 改成 `props.children?.()`；
+- `MaybeGetter<T>` → `T`（`children` 特例为 `() => T`）；
+- `Renderable | (() => Renderable)` → `Renderable`（`children` 特例为 `() => Renderable`）；
+- 原生元素上的零参箭头属性 → 直接表达式；
+- 组件上的零参箭头属性：只改 `--value-props` 名单内的名字，其余列进「需人工确认」；
+- 清理失效的 `PLAIN_E1108` / `plain/no-resolve-event-prop` 抑制指令。
+
+不会自动改、仍需人工处理的部分：
+
+- 组件体里的快照（第 1.4 步）；
+- 函数型 prop 的 `props.fn()` 判断（第 2 步）；
+- 手工构造 props 的测试 / 工具代码（`Card({ title: () => "x" })`）；
+- `Link` 的 `to`（项目自定义了同名 prop 时，加入 `--value-props`）；
+- 注释 / 文档里的旧叙事（脚本会列出行号，按项目实际情况改）。
+
+| 选项 | 说明 |
+| --- | --- |
+| `--dry-run` | 只预览，不写盘 |
+| `--value-props a,b` | 追加组件值 prop 名单（默认已含 `open` / `value` / `page` / `data` / `target` / `to` 等） |
+| `--code-samples` | 同时改写字符串 / 模板字符串里的代码示例 |
+| `--quiet` | 只打印汇总 |
+
+脚本是幂等的，可以重复跑；遇到语法解析失败的文件会跳过并提示。
+
+---
+
 ## 第 0 步：准备
 
 1. 升依赖：`plain` / `plaindev` 都升到 `0.4.0`（两边必须同版本，编译器与 lint 是一套约定）。
 2. 开分支，先跑一遍现有测试 / 构建，记下基线。
-3. 全量搜索待改点：
+3. 先跑 codemod（见上节），再用下面的命令复核残留：
 
 ```bash
 # 1) resolve 的所有调用点（只改从 plain 导入的那个 resolve，别误伤同名的本地函数）
@@ -211,7 +255,7 @@ rg -n 'props\.[A-Za-z_$][\w$]*\s*\(' --glob '*.{ts,tsx}'
 ## 第 5 步：lint 与抑制指令
 
 1. **删除旧抑制**：`PLAIN_E1108` 和「JSX 里忘了 resolve」的 `PLAIN_E1112` 已不存在。
-   残留的 `// plain-ignore-line PLAIN_E1108` 不会再报错，但已经没有任何作用，建议清掉：
+   codemod 会自动清理 `PLAIN_E1108`；`PLAIN_E1112` 的旧抑制建议重跑 `check` 后按需删除：
 
    ```bash
    rg -n 'PLAIN_E1108|plain/no-resolve-event-prop' --glob '*.{ts,tsx}'
@@ -234,6 +278,7 @@ rg -n 'props\.[A-Za-z_$][\w$]*\s*\(' --glob '*.{ts,tsx}'
 
 ## 第 6 步：验证清单
 
+- [ ] codemod 输出的「需人工确认」项已逐条处理
 - [ ] `npx tsc --noEmit` 通过（尤其是函数型 prop 的调用参数）
 - [ ] `plaindev check src` 无新增错误
 - [ ] 生产构建通过（`plaindev build` / 项目自己的构建命令）

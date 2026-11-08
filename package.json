@@ -47,6 +47,7 @@
   },
   "files": [
     "dist",
+    "scripts",
     "README.md",
     "CHANGELOG.md",
     "AGENTS.md",
@@ -72,6 +73,7 @@
     "start:example:ssr": "node examples/ssr/server.mjs",
     "typecheck:example": "tsc && tsc --noEmit -p examples/todo/tsconfig.json && tsc --noEmit -p examples/ssr/tsconfig.json && tsc --noEmit -p examples/data-table/tsconfig.json",
     "dev:site": "tsc && vite --config site/vite.config.js",
+    "migrate:0.4": "node scripts/migrate-0.3-to-0.4.mjs",
     "build:site": "tsc && vite build --config site/vite.config.js",
     "preview:site": "vite preview --config site/vite.config.js",
     "typecheck:site": "tsc && tsc --noEmit -p site/tsconfig.json",
