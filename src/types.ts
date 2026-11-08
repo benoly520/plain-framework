@@ -119,8 +119,6 @@ declare global {
       key?: string | number;
     }
 
-    type MaybeGetter<T> = T | (() => T);
-
     /** bivariance hack：更窄的事件类型也能赋给基类型（同 React 的 EventHandler） */
     type EventHandler<E extends Event = Event> = {
       bivarianceHack(e: E): void;
@@ -136,135 +134,139 @@ declare global {
      * **边界（诚实说明）**：这是一套**共用**属性，不按元素区分 ——
      * 能拦住「拼写错 / 类型错」，但**不拦「属性放错元素」**（如 `<div colSpan={2}>` 不报）。
      * 未知标签（自定义元素）走 `IntrinsicElements` 的兜底，保持宽松。
+     *
+     * **属性值一律是普通值**：不接受 getter / 函数。编译器对内建属性原样取值，
+     * `title={() => x}` 会把函数本身写进 DOM（渲染成函数源码），因此类型层不提供
+     * `T | (() => T)` 这种口子 —— 动态值请直接写表达式：`title={fn()}`。
      */
     interface CommonAttributes {
       // ---- 身份 / 样式 / 通用 ----
       key?: string | number;
-      id?: MaybeGetter<string>;
-      class?: MaybeGetter<string>;
-      className?: MaybeGetter<string>;
-      style?: MaybeGetter<string | Record<string, string | number>>;
-      title?: MaybeGetter<string>;
-      hidden?: MaybeGetter<boolean>;
+      id?: string;
+      class?: string;
+      className?: string;
+      style?: string | Record<string, string | number>;
+      title?: string;
+      hidden?: boolean;
       /** 命令式 DOM 逃逸口：元素连入文档后调用一次，可返回清理函数 */
       ref?: Ref;
       children?: any;
 
       // ---- HTML 全局属性 ----
-      accessKey?: MaybeGetter<string>;
-      autoCapitalize?: MaybeGetter<string>;
-      autoFocus?: MaybeGetter<boolean>;
-      contentEditable?: MaybeGetter<boolean>;
-      dir?: MaybeGetter<"ltr" | "rtl" | "auto">;
-      draggable?: MaybeGetter<boolean>;
-      enterKeyHint?: MaybeGetter<string>;
-      inert?: MaybeGetter<boolean>;
-      inputMode?: MaybeGetter<string>;
+      accessKey?: string;
+      autoCapitalize?: string;
+      autoFocus?: boolean;
+      contentEditable?: boolean;
+      dir?: "ltr" | "rtl" | "auto";
+      draggable?: boolean;
+      enterKeyHint?: string;
+      inert?: boolean;
+      inputMode?: string;
       is?: string;
-      lang?: MaybeGetter<string>;
+      lang?: string;
       nonce?: string;
       part?: string;
-      role?: MaybeGetter<string>;
+      role?: string;
       slot?: string;
-      spellcheck?: MaybeGetter<boolean>;
-      tabIndex?: MaybeGetter<number>;
+      spellcheck?: boolean;
+      tabIndex?: number;
       /** 编译器 PROP_ALIAS 也认小写 HTML 写法 */
-      tabindex?: MaybeGetter<number>;
-      translate?: MaybeGetter<"yes" | "no">;
+      tabindex?: number;
+      translate?: "yes" | "no";
 
       // ---- 常用元素属性（跨元素共用一套；见上方边界说明）----
-      accept?: MaybeGetter<string>;
-      acceptCharset?: MaybeGetter<string>;
-      action?: MaybeGetter<string>;
-      allow?: MaybeGetter<string>;
-      allowFullScreen?: MaybeGetter<boolean>;
-      alt?: MaybeGetter<string>;
-      as?: MaybeGetter<string>;
-      async?: MaybeGetter<boolean>;
-      autoComplete?: MaybeGetter<string>;
+      accept?: string;
+      acceptCharset?: string;
+      action?: string;
+      allow?: string;
+      allowFullScreen?: boolean;
+      alt?: string;
+      as?: string;
+      async?: boolean;
+      autoComplete?: string;
       /** 编译器 PROP_ALIAS 接受小写 */
-      autocomplete?: MaybeGetter<string>;
-      autoplay?: MaybeGetter<boolean>;
-      capture?: MaybeGetter<string | boolean>;
-      checked?: MaybeGetter<boolean>;
-      cite?: MaybeGetter<string>;
-      cols?: MaybeGetter<number>;
-      colSpan?: MaybeGetter<number>;
-      controls?: MaybeGetter<boolean>;
-      crossOrigin?: MaybeGetter<string>;
-      dateTime?: MaybeGetter<string>;
-      decoding?: MaybeGetter<string>;
-      default?: MaybeGetter<boolean>;
-      defer?: MaybeGetter<boolean>;
-      disabled?: MaybeGetter<boolean>;
-      download?: MaybeGetter<string | boolean>;
-      enctype?: MaybeGetter<string>;
-      for?: MaybeGetter<string>;
-      htmlFor?: MaybeGetter<string>;
-      form?: MaybeGetter<string>;
-      formAction?: MaybeGetter<string>;
-      formMethod?: MaybeGetter<string>;
-      formNoValidate?: MaybeGetter<boolean>;
-      formTarget?: MaybeGetter<string>;
-      headers?: MaybeGetter<string>;
-      height?: MaybeGetter<string | number>;
-      href?: MaybeGetter<string>;
-      hrefLang?: MaybeGetter<string>;
-      integrity?: MaybeGetter<string>;
-      kind?: MaybeGetter<string>;
-      label?: MaybeGetter<string>;
-      list?: MaybeGetter<string>;
-      loading?: MaybeGetter<"lazy" | "eager">;
-      loop?: MaybeGetter<boolean>;
-      max?: MaybeGetter<string | number>;
-      maxLength?: MaybeGetter<number>;
-      method?: MaybeGetter<string>;
-      min?: MaybeGetter<string | number>;
-      minLength?: MaybeGetter<number>;
-      multiple?: MaybeGetter<boolean>;
-      muted?: MaybeGetter<boolean>;
-      name?: MaybeGetter<string>;
-      noModule?: MaybeGetter<boolean>;
-      noValidate?: MaybeGetter<boolean>;
-      open?: MaybeGetter<boolean>;
-      optimum?: MaybeGetter<number>;
-      pattern?: MaybeGetter<string>;
-      ping?: MaybeGetter<string>;
-      placeholder?: MaybeGetter<string>;
-      playsInline?: MaybeGetter<boolean>;
-      poster?: MaybeGetter<string>;
-      preload?: MaybeGetter<"none" | "metadata" | "auto">;
-      readOnly?: MaybeGetter<boolean>;
+      autocomplete?: string;
+      autoplay?: boolean;
+      capture?: string | boolean;
+      checked?: boolean;
+      cite?: string;
+      cols?: number;
+      colSpan?: number;
+      controls?: boolean;
+      crossOrigin?: string;
+      dateTime?: string;
+      decoding?: string;
+      default?: boolean;
+      defer?: boolean;
+      disabled?: boolean;
+      download?: string | boolean;
+      enctype?: string;
+      for?: string;
+      htmlFor?: string;
+      form?: string;
+      formAction?: string;
+      formMethod?: string;
+      formNoValidate?: boolean;
+      formTarget?: string;
+      headers?: string;
+      height?: string | number;
+      href?: string;
+      hrefLang?: string;
+      integrity?: string;
+      kind?: string;
+      label?: string;
+      list?: string;
+      loading?: "lazy" | "eager";
+      loop?: boolean;
+      max?: string | number;
+      maxLength?: number;
+      method?: string;
+      min?: string | number;
+      minLength?: number;
+      multiple?: boolean;
+      muted?: boolean;
+      name?: string;
+      noModule?: boolean;
+      noValidate?: boolean;
+      open?: boolean;
+      optimum?: number;
+      pattern?: string;
+      ping?: string;
+      placeholder?: string;
+      playsInline?: boolean;
+      poster?: string;
+      preload?: "none" | "metadata" | "auto";
+      readOnly?: boolean;
       /** 编译器 PROP_ALIAS 接受小写 */
-      readonly?: MaybeGetter<boolean>;
-      referrerPolicy?: MaybeGetter<string>;
-      rel?: MaybeGetter<string>;
-      required?: MaybeGetter<boolean>;
-      reversed?: MaybeGetter<boolean>;
-      rows?: MaybeGetter<number>;
-      rowSpan?: MaybeGetter<number>;
-      sandbox?: MaybeGetter<string>;
-      scope?: MaybeGetter<string>;
-      selected?: MaybeGetter<boolean>;
-      size?: MaybeGetter<number>;
-      sizes?: MaybeGetter<string>;
-      span?: MaybeGetter<number>;
-      src?: MaybeGetter<string>;
-      srcDoc?: MaybeGetter<string>;
-      srcLang?: MaybeGetter<string>;
-      srcSet?: MaybeGetter<string>;
-      start?: MaybeGetter<number>;
-      step?: MaybeGetter<string | number>;
-      target?: MaybeGetter<string>;
-      type?: MaybeGetter<string>;
-      useMap?: MaybeGetter<string>;
-      value?: MaybeGetter<string | number>;
-      width?: MaybeGetter<string | number>;
-      wrap?: MaybeGetter<string>;
+      readonly?: boolean;
+      referrerPolicy?: string;
+      rel?: string;
+      required?: boolean;
+      reversed?: boolean;
+      rows?: number;
+      rowSpan?: number;
+      sandbox?: string;
+      scope?: string;
+      selected?: boolean;
+      size?: number;
+      sizes?: string;
+      span?: number;
+      src?: string;
+      srcDoc?: string;
+      srcLang?: string;
+      srcSet?: string;
+      start?: number;
+      step?: string | number;
+      target?: string;
+      type?: string;
+      useMap?: string;
+      value?: string | number;
+      width?: string | number;
+      wrap?: string;
 
       // ---- data-* / aria-*（模板字面量索引签名：只放行这两种前缀）----
-      [key: `data-${string}`]: MaybeGetter<string | number | boolean> | undefined;
-      [key: `aria-${string}`]: MaybeGetter<string | number | boolean> | undefined;
+      [key: `data-${string}`]: string | number | boolean | undefined;
+      [key: `aria-${string}`]: string | number | boolean | undefined;
 
       // ---- 事件（枚举而非 on* 兜底：否则 onClikc 之类的拼写错就拦不住了）----
       onClick?: EventHandler<MouseEvent>;
