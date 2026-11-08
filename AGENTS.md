@@ -22,6 +22,9 @@
 **没有 `resolve`**。函数型 prop（`onClick` / `render` / 内联箭头）读出来就是函数，按函数用。
 `children` 是 lazy subtree，保持显式调用 `props.children()`。
 
+原生元素属性也**一律是普通值**：`<div title={expr}>`。编译器对内建属性原样取值，
+`title={() => x}` 会把函数本身写进 DOM，因此类型上也不接受 getter / 函数。
+
 视图里**每个动态 `{expr}` 编译成一个 `effect`**（`{cond ? …}` / `{arr.map(…)}` 特化为
 `when` / `each`，也各是一个 effect）。所以**读取必须写在花括号里**才算订阅：
 `const v = count(); <p>{v}</p>` 不会更新 —— 在花括号外读就是普通取值。
@@ -44,7 +47,7 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` | — |
 | 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ✅ `PLAIN_E1106` | 05 |
 | 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` | 04（间接） |
-| 9 | 把 props 取值快照进变量：`const t = props.title`（`t = props.title` 同样算） | 在 JSX / effect 里直接读 `props.title`；要响应式就写成 thunk：`const t = () => props.title` | ✅ `PLAIN_E1107`/`PLAIN_E1112` | 06、13 |
+| 9 | 把 props 取值快照进变量：`const t = props.title`（`t = props.title`、以及把整个 `props` 传给 helper 再存返回值同样算） | 在 JSX / effect 里直接读 `props.title`；要响应式就写成 thunk：`const t = () => props.title`。helper 只收值：`label(props.title)` | ✅ `PLAIN_E1107`/`PLAIN_E1112`（helper 间接取值 lint 看不穿，靠约定） | 06、13 |
 | 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ✅ `PLAIN_E1007` | 07 |
 | 11 | `effect(async () => { await … })` | 依赖收集在第一个 `await` 之后失效：把 `await` 提到 `effect` 外，或用 `resource()` | ✅ `PLAIN_E1109` | 10 |
 | 12 | `effect(() => count.set(count() + 1))`（读了又写同一个 signal） | 派生值用 `computed(fn)`；`effect` 里只写「没读过」的 signal | ✅ `PLAIN_E1110` | 12 |

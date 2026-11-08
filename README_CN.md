@@ -91,6 +91,9 @@ __effect(() => { __t3.nodeValue = __stringify(double()); });
 > 组件里取 props **直接读** `props.x` —— 编译器把动态属性编译成真 getter，读出来就是当前值，
 > 父组件状态一变，用到它的那几行自动更新。函数型 prop（`onClick` / `render`）读出来就是函数；
 > `children` 是 lazy subtree，保持显式调用 `props.children()`。
+>
+> 原生元素属性同样**一律是普通值**：`<div title={fn()}>`。编译器原样取值，不要传 getter / 函数
+> （`title={() => x}` 会把函数本身写进 DOM）；类型层也不接受这种写法。
 
 ---
 

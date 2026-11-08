@@ -93,6 +93,9 @@ subscribes nothing.
 > Inside a component, read props **directly** with `props.x` — the compiler turns dynamic attributes into real getters,
 > so a read returns the current value and the lines that use it update automatically when the parent's state changes.
 > Function-valued props (`onClick` / `render`) read as functions; `children` is a lazy subtree, so call `props.children()` explicitly.
+>
+> Built-in element attributes are **plain values too**: `<div title={fn()}>`. The compiler takes the expression as-is,
+> so never pass a getter / function (`title={() => x}` writes the function itself into the DOM); the types reject it as well.
 
 ---
 

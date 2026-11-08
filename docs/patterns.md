@@ -266,6 +266,7 @@ function TodoRow(props: { item: Todo; onSave: (id: number, text: string) => void
 要点：
 - 局部状态放**行组件**里，不要把所有行的 `editing` 挤进一个父级 signal（那样重排时会串行）；
 - **动态值 props 直接读 `props.x`** —— 编译器把它们编译成真 getter，读出来就是当前值；直接当值用即可（见 `AGENTS.md` 第 3 节第 5、9 条）；
+- **helper 只收值，不收整个 `props` 对象**：`label(props.title)` 会随读取自动订阅；`const t = label(props)` 把读取藏在调用里，lint 看不出来，但 `t` 是快照；
 - **函数型 prop 按函数用**：`on*` / `render` / 内联箭头读出来就是函数，`props.onSave(id, text)`、`props.render(x)`；只有 `props.children` 是显式 thunk，要调用 `props.children()`。
 
 ### 3.2 统一编辑态（少数场景）
