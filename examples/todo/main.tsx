@@ -31,7 +31,7 @@ type RouteProps = import("plain").RouteProps;
 // 客户端产物里只有 rpc("xxx", args) 桩，函数体一行都不留下
 // ---------------------------------------------------------------------------
 const fetchStats = server(async () => {
-  return { users: 1024, online: 37, version: "0.3.0" };
+  return { users: 1024, online: 37, version: "0.4.0" };
 });
 
 const checkKeyword = server(async (word: string) => {

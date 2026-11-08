@@ -37,7 +37,7 @@ npm run dev
 
 ## 本地开发（框架尚未发布到 npm）
 
-脚手架生成的 `package.json` 把 `plain` 写成 `"^0.3.0"`，默认假设框架已发布到 npm。
+脚手架生成的 `package.json` 把 `plain` 写成 `"^0.4.0"`，默认假设框架已发布到 npm。
 在**本地尚未发布**的情况下，直接 `npm install` / `pnpm install` 会找不到包。按下面三步即可指向本地源码：
 
 1. 生成项目（任选一种，都不联网）：

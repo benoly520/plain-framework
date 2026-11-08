@@ -1,6 +1,6 @@
 {
   "name": "plain",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Plain —— 面向 AI 的编译型前端框架。TSX 视图 + signals 响应式 + 编译期物理剥离的 server() 边界。",
   "keywords": [

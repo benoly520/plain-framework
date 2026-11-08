@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-08
+
 ### 变更（破坏性）
 
 - **props 改为真 getter：删除 `resolve`，props 直接读 `props.x`**。编译器把动态、非 `on*`、
@@ -16,10 +18,14 @@
     旧项目请用 codemod 一次性迁移。
   - **函数型 prop 不再有 `resolve` 三义性**：`props.render` / `props.format` 读出来就是函数，
     按函数用；`resolve(props.render)` 这类写法会消失（此前会把函数当场调用）。
+  - **移除类型 `MaybeGetter<T>`**：内建元素属性一律是普通值（110 处 `T | (() => T)` 全部还原为 `T`）。
+    编译器对内建属性原样取值，`title={() => x}` 会把函数本身写进 DOM —— 旧类型让这种写法在
+    `tsc` 下静默通过，属于类型与运行时的分叉；现在类型直接拒绝。
   - **lint 同步**：删除 JSX 形态的 `PLAIN_E1112`（`{props.title}` 现在是正确写法）与
     `PLAIN_E1108`（`resolve` 已不存在）；`PLAIN_E1105` / `PLAIN_E1107` / `PLAIN_E1112`
     继续拦「解构 / 把 props 取值存进变量」——它们仍是快照。声明形态只报组件渲染作用域，
-    effect / 事件回调里的读取不报（回调重跑会重新求值）。
+    effect / 事件回调里的读取不报（回调重跑会重新求值）；`helper(props)` 间接取值是静态盲区，
+    文档约定 helper 只收值。
   - **类型终于说真话**：`props: { title: string }` 与运行时一致，不再需要 `string | (() => string)`。
   - **`Link` 的 `to` 收紧为 `string`**：动态值由编译器 getter 处理，不再接受手写 thunk。
   - 测试：编译器 getter 产物、SSR / hydrate、父 signal 更新穿透、函数型 prop、`children`、
