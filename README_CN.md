@@ -329,6 +329,8 @@ function Card(props) {
 | `PLAIN_E1114` | 对 `useContext(Ctx)` 的返回值直接取属性（它是 getter） | ❌ 改成先调用：`useContext(Ctx)()`，只报错 |
 | `PLAIN_E1115` | 内建元素上用 React 拼写的属性名（`className` / `htmlFor`） | ✅ 改写成 `class` / `for`（**只告警**——两者等价，不阻断构建） |
 | `PLAIN_E1201` | 顶层 `computed` / `effect` 回调引用了模块里后面才声明的 const | ❌ 把声明挪到调用之前（TDZ：import 时即抛 `ReferenceError`），只报错 |
+| `PLAIN_E1202` | 组件体里把 props / signal 的复合读取存进变量（`const full = props.a + props.b`） | ❌ 读取放进 JSX / effect，派生值用 `computed`，或写成 thunk（组件只执行一次） |
+| `PLAIN_E1203` | 把函数型 prop 当值插值（`{props.children}` / `{props.render}`） | ❌ 按函数调用：`{props.children()}` / `{props.render(x)}` |
 
 > 每个码还有一个**可读短名**（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`；
 > 旧写法 `plain/no-props-snapshot` 在抑制指令里仍被接受（向后兼容），但输出统一走新码。

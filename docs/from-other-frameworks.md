@@ -66,10 +66,10 @@ Plain 的定位是「编译到 DOM + 唯一状态原语 + 显式服务端边界�
 **React 迁移最易踩**
 
 - 肌肉记忆写 `useState` / `useEffect` / `useMemo` / `useCallback` / `useRef` → `PLAIN_E1103`（react-habit）。
-- 解构 props / 把 `props.x` 存进变量 → `PLAIN_E1105` / `PLAIN_E1107` / `PLAIN_E1112`；动态值直接读 `props.x`。
-- 函数型 prop 按函数用：`props.onClick(...)` / `props.render(x)`；`props.children()` 是显式 thunk。
+- 解构 props / 把 `props.x` 或复合表达式存进变量 → `PLAIN_E1105` / `PLAIN_E1112` / `PLAIN_E1202`；动态值直接读 `props.x`。
+- 函数型 prop 按函数用：`props.onClick(...)` / `props.render(x)`；`props.children()` 是显式 thunk（`PLAIN_E1203`）。
 - `className` / `htmlFor` → `PLAIN_E1115`（warn，可自动修）。
-- 以为组件会「重渲染」：Plain 组件函数只执行一次，之后由细粒度 signal 直接更新 DOM；组件体里读 `props.x` 会订阅，读出来就是当前值。
+- 以为组件会「重渲染」：Plain 组件函数只执行一次，之后由细粒度 signal 直接更新 DOM；**只有 JSX `{expr}` / `effect` / `computed` 里的读才订阅**，组件体里的读是一次性取值（快照）。
 
 > 一句话：React 的心智模型（状态 → 视图）几乎能平移，但 Plain 删掉了「hooks + 依赖数组 + 重渲染」整条链路，
 > 换成「signal + 自动追踪 + 编译期直出 DOM」。所以最容易犯的错，是继续用 hooks 那套 API（`PLAIN_E1103` 专门拦它）。

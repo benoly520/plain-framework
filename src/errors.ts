@@ -43,6 +43,8 @@ export type PlainErrorCode =
   | "PLAIN_E1114"
   | "PLAIN_E1115"
   | "PLAIN_E1201"
+  | "PLAIN_E1202"
+  | "PLAIN_E1203"
   | "PLAIN_E2001";
 
 /** lint 规则短名（无前缀）：一种反模式一个短名，与 `plain/<短名>` 一一对应 */
@@ -60,7 +62,9 @@ export type LintRuleName =
   | "no-module-scope-resource"
   | "no-context-getter-property"
   | "react-attr-spelling"
-  | "no-eager-computed-forward-ref";
+  | "no-eager-computed-forward-ref"
+  | "no-derived-snapshot"
+  | "no-function-value-interpolation";
 
 export interface ErrorEntry {
   code: PlainErrorCode;
@@ -228,6 +232,20 @@ export const ERROR_CATALOG: Record<PlainErrorCode, ErrorEntry> = {
     suppressible: true,
     summary:
       "顶层 `computed`/`effect` 引用了后面才声明的 const（创建即求值，import 时撞 TDZ）",
+  },
+  PLAIN_E1202: {
+    code: "PLAIN_E1202",
+    rule: "no-derived-snapshot",
+    suppressible: true,
+    summary:
+      "组件体里把 props / signal 的复合读取存进变量（组件只执行一次，得到的是快照）",
+  },
+  PLAIN_E1203: {
+    code: "PLAIN_E1203",
+    rule: "no-function-value-interpolation",
+    suppressible: true,
+    summary:
+      "JSX 里把函数型 prop 当值插值（`{props.children}` / `{props.render}` 会渲染函数源码）",
   },
 
   // --- E2xxx 构建期 ------------------------------------------------------

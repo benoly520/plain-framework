@@ -47,12 +47,12 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | 6 | `<li key={x.id}>` 与 `(x, i) =>` 的 index 同时用 | 二者选一：要 key 就删掉 index 参数；要 index 就删掉 key | ✅ `PLAIN_E1005` | — |
 | 7 | 就地改数据：`items().push(x)` | 生成新值：`items.set([...items(), x])` | ✅ `PLAIN_E1106` | 05 |
 | 8 | `server()` 函数里引用**本文件的**模块变量 / import / 外层参数 | 在函数体内自己获取（`process.env.DB_URL`、`await import("./db.js")`），或作为参数传进来 | ✅ `PLAIN_E1006` | 04（间接） |
-| 9 | 把 props 取值快照进变量：`const t = props.title`（`t = props.title`、以及把整个 `props` 传给 helper 再存返回值同样算） | 在 JSX / effect 里直接读 `props.title`；要响应式就写成 thunk：`const t = () => props.title`。helper 只收值：`label(props.title)` | ✅ `PLAIN_E1107`/`PLAIN_E1112`（helper 间接取值 lint 看不穿，靠约定） | 06、13 |
+| 9 | 把 props 取值快照进变量：`const t = props.title`（`t = props.title`、以及把整个 `props` 传给 helper 再存返回值同样算） | 在 JSX / effect 里直接读 `props.title`；要响应式就写成 thunk：`const t = () => props.title`。helper 只收值：`label(props.title)` | ✅ `PLAIN_E1112`（直接链）/ `PLAIN_E1202`（复合表达式；helper 间接取值 lint 看不穿，靠约定） | 06、13 |
 | 10 | 给 `server()` 传函数 / 类实例 / Stream | 只传 JSON 可序列化的参数 | ✅ `PLAIN_E1007` | 07 |
 | 11 | `effect(async () => { await … })` | 依赖收集在第一个 `await` 之后失效：把 `await` 提到 `effect` 外，或用 `resource()` | ✅ `PLAIN_E1109` | 10 |
 | 12 | `effect(() => count.set(count() + 1))`（读了又写同一个 signal） | 派生值用 `computed(fn)`；`effect` 里只写「没读过」的 signal | ✅ `PLAIN_E1110` | 12 |
 | 13 | `computed(() => { s.set(…) })` | `computed` 必须是纯函数，副作用放 `effect` | ✅ `PLAIN_E1111` | — |
-| 14 | 把函数型 prop 当值插值（`{props.render}` / `String(props.format)`） | 按函数用：`{props.render(x)}` / `{props.format(v)}`；只有 `props.children` 是显式 thunk | ❌ | — |
+| 14 | 把函数型 prop 当值插值（`{props.render}` / `String(props.format)`） | 按函数用：`{props.render(x)}` / `{props.format(v)}`；只有 `props.children` 是显式 thunk | ✅ `PLAIN_E1203`（直接 `{props.x}` 链；`String(...)` 等间接形态不猜） | — |
 | 15 | JSX 属性展开 `{...expr}` | 展开成显式属性：展开只做半套（不进响应式 + 绕过 class / style / value），会静默跑错 | ✅ `PLAIN_E1008` | — |
 | 16 | 在**组件**上写 `ref` | 把 `ref` 放到组件内部的元素上 | ✅ `PLAIN_E1009` | — |
 | 17 | `ref` 的值不是函数（`ref` / `ref="x"` / 返回 JSX） | `ref={(el) => { … }}` | ✅ `PLAIN_E1010` | — |
@@ -62,6 +62,8 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | 21 | 在不支持的位置写 JSX：`{cond \|\| <a/>}`、`{cond ?? <a/>}`（含裸 `return cond \|\| <a/>`）、数组字面量 `{[<a/>]}`、IIFE、IIFE 内 `try/catch` 的 `return <a/>`、链式后置 `.map().filter()` | 先赋值给变量再插值，或抽成组件函数（详见第 3.1 节） | ✅ `PLAIN_E1001` | — |
 | 22 | 在**内建元素**上写 React 拼写的属性名（`className` / `htmlFor`） | 用原生 HTML 名 `class` / `for`（两者等价，编译器会归一；组件上的 prop 名不受影响） | ✅ `PLAIN_E1115`（可自动修，**只告警**） | — |
 | 23 | 模块顶层的 `computed` / `effect` 回调引用**后面才声明**的 const / let / class（`const a = computed(() => b())` 在 `const b` 之前） | 把被引用的声明挪到这个调用之前 —— computed 创建即求值（import 时就跑回调），后置声明还在 TDZ，运行时必抛 `Cannot access 'x' before initialization` | ✅ `PLAIN_E1201` | — |
+| 24 | 组件体里「先算再插值」：`const full = props.a + props.b`、`` const label = `${props.a}` ``、`const rows = items().map(...)` | 把读取放进 JSX；派生值用 `computed(() => …)`；要传出去写成 thunk。组件体只执行一次，复合读取同样是快照 | ✅ `PLAIN_E1202`（signal 种子 / `computed()` / thunk 放行） | — |
+| 25 | 把函数型 prop 当值插值：`{props.children}` / `{props.render}` / `{props.onSave}` | 调用：`{props.children()}` / `{props.render(x)}`；属性位置的透传（`children={props.children}`）不报 | ✅ `PLAIN_E1203`（只查直接 props 链） | — |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
 > **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
@@ -161,6 +163,8 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | `PLAIN_E1114` | 对 `useContext(Ctx)` 的返回值直接取属性 | 先调用再取：`useContext(Ctx)().name` |
 | `PLAIN_E1115` | 内建元素上写 React 拼写的属性名（`className` / `htmlFor`） | 用原生 HTML 名 `class` / `for`（**只告警**，两者等价，`check` 自动改写） |
 | `PLAIN_E1201` | 顶层 `computed` / `effect` 引用了后面才声明的 const | 把声明挪到调用之前（TDZ：import 时就会抛 ReferenceError） |
+| `PLAIN_E1202` | 组件体里把 props / signal 的复合读取存进变量 | 读取放进 JSX / effect，派生值用 `computed`，或写成 thunk |
+| `PLAIN_E1203` | 把函数型 prop 当值插值（`{props.children}` / `{props.render}`） | 按函数调用：`{props.children()}` / `{props.render(x)}` |
 | `PLAIN_E2001` | 契约检查未通过 | 跑 `npx plaindev check --fix <dir>` 自动修，再重新构建 |
 
 > `E11xx` 每条还带一个可读短名（`PLAIN_E1107` = `no-props-snapshot`），完整目录见 `src/errors.ts`。

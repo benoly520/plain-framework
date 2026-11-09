@@ -437,6 +437,122 @@ test("深层路径就地改也拦：todos()[0].done = true / user().profile.name
   }
 });
 
+test("组件体里先算再插值 -> PLAIN_E1202（复合 props / signal 读取）", () => {
+  const cases = [
+    [
+      "复合 props",
+      "export function C(props) { const t = props.a + props.b; return <p>{t}</p>; }",
+    ],
+    [
+      "模板串",
+      "export function C(props) { const t = `${props.a}${props.b}`; return <p>{t}</p>; }",
+    ],
+    [
+      "signal map",
+      [
+        "import { signal } from 'plain';",
+        "const items = signal([]);",
+        "export function C() {",
+        "  const rows = items().map((x) => <li>{x}</li>);",
+        "  return <ul>{rows}</ul>;",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "helper 收值后存变量",
+      "function label(x) { return x; } export function C(props) { const t = label(props.title); return <p>{t}</p>; }",
+    ],
+    [
+      "赋值形态",
+      "export function C(props) { let t = ''; t = props.a + props.b; return <p>{t}</p>; }",
+    ],
+  ];
+  for (const [name, src] of cases) {
+    const issues = check(src, "C.tsx");
+    assert.deepEqual(codes(issues), ["PLAIN_E1202"], name);
+    assert.equal(issues[0].level, "error");
+    assert.equal(issues[0].fix, undefined, "改法取决于意图，不自动修");
+  }
+});
+
+test("PLAIN_E1202 不误伤：thunk / computed / signal 种子 / effect 内 / 非组件", () => {
+  const ok = [
+    [
+      "thunk",
+      "export function C(props) { const t = () => props.a + props.b; return <p>{t()}</p>; }",
+    ],
+    [
+      "computed",
+      [
+        "import { signal, computed } from 'plain';",
+        "const items = signal([]);",
+        "export function C(props) {",
+        "  const n = computed(() => items().length + props.base);",
+        "  return <p>{n()}</p>;",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "signal 种子",
+      "import { signal } from 'plain'; export function C(props) { const s = signal(props.value); return <p>{s()}</p>; }",
+    ],
+    [
+      "effect 内读取",
+      [
+        "import { effect } from 'plain';",
+        "export function C(props) {",
+        "  let t = '';",
+        "  effect(() => { t = props.a + props.b; });",
+        "  return <p>{t}</p>;",
+        "}",
+      ].join("\n"),
+    ],
+    [
+      "非组件",
+      "export function util(props) { const t = props.a + props.b; return t; }",
+    ],
+    [
+      "事件回调内读取",
+      "export function C(props) { return <button onClick={() => console.log(props.a + props.b)}>x</button>; }",
+    ],
+  ];
+  for (const [name, src] of ok) {
+    assert.deepEqual(check(src, "C.tsx"), [], name);
+  }
+});
+
+test("函数型 prop 当值插值 -> PLAIN_E1203", () => {
+  const cases = [
+    ["children", "export function C(props) { return <p>{props.children}</p>; }"],
+    ["render", "export function C(props) { return <p>{props.render}</p>; }"],
+    ["renderX", "export function C(props) { return <p>{props.renderItem}</p>; }"],
+    ["on*", "export function C(props) { return <p>{props.onSave}</p>; }"],
+    ["xFn", "export function C(props) { return <p>{props.formatFn}</p>; }"],
+  ];
+  for (const [name, src] of cases) {
+    const issues = check(src, "C.tsx");
+    assert.deepEqual(codes(issues), ["PLAIN_E1203"], name);
+    assert.equal(issues[0].level, "error");
+  }
+  const msg = check(cases[0][1], "C.tsx")[0].message;
+  assert.match(msg, /lazy subtree/);
+});
+
+test("PLAIN_E1203 不误伤：已调用 / 属性透传 / 控制流 / 普通值 prop", () => {
+  const ok = [
+    ["children 调用", "export function C(props) { return <p>{props.children()}</p>; }"],
+    ["render 调用", "export function C(props) { return <p>{props.render(1)}</p>; }"],
+    ["children 透传", "export function C(props) { return <Child children={props.children} />; }"],
+    ["on* 透传", "export function C(props) { return <button onClick={props.onSave}>x</button>; }"],
+    ["&& 控制流", "export function C(props) { return <p>{props.children && <b>x</b>}</p>; }"],
+    ["普通值 prop", "export function C(props) { return <p>{props.title}</p>; }"],
+    ["三元", "export function C(props) { return <p>{props.render ? <b/> : <i/>}</p>; }"],
+  ];
+  for (const [name, src] of ok) {
+    assert.deepEqual(check(src, "C.tsx"), [], name);
+  }
+});
+
 test("把 props 取值存进变量 -> PLAIN_E1112；JSX 里直接读是正确写法", () => {
   const store = [
     "export function Card(props) {",

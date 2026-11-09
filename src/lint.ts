@@ -332,6 +332,78 @@ export function check(
       );
     }
 
+    // 反模式 24：组件体里「先算再插值」—— 复合读取同样是快照
+    //    const full = props.first + props.last
+    //    const label = `${props.name}（${props.id}）`
+    //    const rows = items().map(...)
+    //    组件体只执行一次，这些值不会随依赖更新；直接链（const t = props.x）由 E1112 负责，
+    //    这里只补「初始化器不是单纯 props 链、但内部读了 props / signal」的形态。
+    //    signal()/computed()/resource() 的初始化是创建响应式值，不是快照，放行。
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      isDirectlyInComponentBody(node) &&
+      !isThunk(node.initializer) &&
+      !isReactiveConstructor(node.initializer) &&
+      !isPropsChain(node.initializer) &&
+      !isEventPropsAccess(node.initializer) &&
+      (containsPropsRead(node.initializer) ||
+        containsAnySignalRead(node.initializer, signals, aliases))
+    ) {
+      add(
+        node,
+        "error",
+        "PLAIN_E1202",
+        derivedSnapshotMessage(node.name.text, node.initializer.getText(sf))
+      );
+    }
+
+    // 反模式 24（赋值形态）：let t; t = props.a + props.b / t = items().map(...)
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.left) &&
+      !signals.has(node.left.text) &&
+      isDirectlyInComponentBody(node) &&
+      !isThunk(node.right) &&
+      !isReactiveConstructor(node.right) &&
+      !isPropsChain(node.right) &&
+      !isEventPropsAccess(node.right) &&
+      (containsPropsRead(node.right) ||
+        containsAnySignalRead(node.right, signals, aliases))
+    ) {
+      add(
+        node,
+        "error",
+        "PLAIN_E1202",
+        derivedSnapshotMessage(node.left.text, node.right.getText(sf))
+      );
+    }
+
+    // 反模式 25：把函数型 prop 当值插值：{props.children} / {props.render} / {props.onSave}
+    //    这些 prop 读出来就是函数，直接插值会渲染函数源码。
+    //    只查「子节点位置的直接 props 链」：属性位置（value={props.children}）属于透传，
+    //    {props.render(x)} / {props.children()} 已经调用，{cond && ...} 是控制流，都不报。
+    if (
+      ts.isJsxExpression(node) &&
+      node.expression &&
+      !(node.parent && ts.isJsxAttribute(node.parent))
+    ) {
+      const expr = unwrapExpr(node.expression);
+      if (isPropsChain(expr)) {
+        const name = propsHeadPropName(expr);
+        if (name && looksLikeFunctionPropName(name)) {
+          add(
+            node,
+            "error",
+            "PLAIN_E1203",
+            functionValueMessage(expr.getText(sf), name)
+          );
+        }
+      }
+    }
+
     // 反模式 20：对 useContext(Ctx) 的返回值直接取属性 —— 它是 getter，要先调用。
     //    const t = useContext(Ctx); t.name     -> 取到函数自身的成员（name / length …）
     //    useContext(Ctx).name                  -> 同上
@@ -560,6 +632,89 @@ function isDirectlyInComponentBody(node: ts.Node): boolean {
     cur = cur.parent;
   }
   return false;
+}
+
+/**
+ * 表达式里是否含有 props 读取（`props.x` / `props.x.y`）。
+ * 不进入嵌套函数：`const f = () => props.x` 是 thunk，读取发生在调用时，不是快照。
+ */
+function containsPropsRead(n: ts.Node): boolean {
+  let hit = false;
+  const walk = (node: ts.Node) => {
+    if (hit || ts.isFunctionLike(node)) return;
+    if (isPropsChain(node)) {
+      hit = true;
+      return;
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(n);
+  return hit;
+}
+
+/**
+ * 表达式里是否含有 signal 读取（`items()`，含 `const arr = items()` 的别名）。
+ * 同样不进入嵌套函数 —— 回调里的读取随回调重跑，不是快照。
+ */
+function containsAnySignalRead(
+  n: ts.Node,
+  signals: Set<string>,
+  aliases: Map<ts.Node, Map<string, string>>
+): boolean {
+  let hit = false;
+  const walk = (node: ts.Node) => {
+    if (hit || ts.isFunctionLike(node)) return;
+    if (
+      signalReadCallName(node, signals) ||
+      (ts.isIdentifier(node) && aliasSignalName(node, aliases))
+    ) {
+      hit = true;
+      return;
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(n);
+  return hit;
+}
+
+/** `signal(...)` / `computed(...)` / `resource(...)`：创建响应式值，不是快照 */
+function isReactiveConstructor(n: ts.Node): boolean {
+  const e = unwrapExpr(n);
+  return (
+    ts.isCallExpression(e) &&
+    ts.isIdentifier(e.expression) &&
+    ["signal", "computed", "resource"].includes(e.expression.text)
+  );
+}
+
+/**
+ * 名字看起来是函数型 prop：`children` 永远是 lazy thunk；`on*` 按编译器的
+ * 事件约定就是函数；`render` / `renderX` / `xFn` 是常见函数 prop 命名。
+ */
+function looksLikeFunctionPropName(name: string): boolean {
+  return (
+    name === "children" ||
+    isEventAttrName(name) ||
+    /^render([A-Z]|$)/.test(name) ||
+    /Fn$/.test(name)
+  );
+}
+
+function derivedSnapshotMessage(name: string, expr: string): string {
+  return (
+    `不要把 props / signal 的复合读取存进变量（"${name} = ${expr}"）：` +
+    `组件体只执行一次，这里得到的是挂载时的快照，依赖变化后不会更新。` +
+    `把读取放进 JSX / effect，派生值用 computed(() => …)，或写成 thunk：` +
+    `const ${name} = () => (${expr})`
+  );
+}
+
+function functionValueMessage(expr: string, name: string): string {
+  const fix =
+    name === "children"
+      ? `children 是 lazy subtree，写成 {${expr}()}`
+      : `按函数调用：{${expr}(…)}`;
+  return `不要把函数型 prop 当值插值（"${expr}" 会渲染函数源码）：${fix}`;
 }
 
 const MUTATING_METHODS = new Set([

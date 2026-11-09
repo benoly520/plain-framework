@@ -375,12 +375,13 @@ const user = resource(() => getUser(props.params.id));
 | 输入框 | `<input value={name} />`（漏调用） | `value={name()}` |
 | 输入框回写 | `name = e.target.value` | `name.set(e.target.value)` |
 | 多字段对象 | `form().email = v` | `form.set({ ...form(), email: v })` |
-| props | `const t = props.title` | 直接读 `props.title`，或 `const t = () => props.title` |
+| props | `const t = props.title` | 直接读 `props.title`，或 `const t = () => props.title`（`PLAIN_E1112`） |
+| props 派生值 | `const full = props.a + props.b`、`const rows = items().map(...)` | 读进 JSX；派生值用 `computed(() => …)`；组件体只执行一次（`PLAIN_E1202`） |
 | 派生错误 | 在 `effect` 里同步一个 error signal | `computed(...)` |
 | 提交 | 忘了 `e.preventDefault()` | 处理函数第一行就挡掉 |
 | 校验 | 把校验函数当参数传给 `server()` | 校验写在 `server()` 函数体内 |
 | 列表行 | 不写 `key` 却依赖行内局部状态 | `<Row key={item.id} … />` |
-| 函数型 prop | 把 `{props.render}` 当值插值（渲染出函数源码） | 按函数用：`{props.render(x)}`；`props.children()` 是显式 thunk |
+| 函数型 prop | 把 `{props.render}` / `{props.children}` 当值插值（渲染出函数源码） | 按函数用：`{props.render(x)}` / `{props.children()}`（`PLAIN_E1203`） |
 | 透传一组属性 | `<Card {...rest} />` | 逐个显式列出（`PLAIN_E1008`） |
 
 ---
