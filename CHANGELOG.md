@@ -5,13 +5,29 @@
 
 ## [Unreleased]
 
-### 工具
+## [0.5.0] - 2026-11-09
 
+### 工具（仅 lint，无运行时变更）
+
+- **新增 `PLAIN_E1202`（no-derived-snapshot）**：组件体里把 props / signal 的复合读取存进变量
+  （`const full = props.a + props.b`、`` const label = `${props.a}` ``、`const rows = items().map(...)`）。
+  组件只执行一次，这些值不会随依赖更新。`signal(...)` 种子、`computed(...)`、`resource(...)`、
+  thunk 与 `effect` 内的读取放行；不提供自动修复（正确改法取决于意图）。可用行级抑制。
+- **新增 `PLAIN_E1203`（no-function-value-interpolation）**：JSX 里把函数型 prop 当值插值
+  （`{props.children}`、`{props.render}`、`{props.renderItem}`、`{props.onSave}`、`{props.xFn}`）。
+  只查子节点位置的直接 props 链；`{props.children()}`、属性透传、`{cond && …}` 不报。
 - **新增 0.3 → 0.4 迁移 codemod**：`scripts/migrate-0.3-to-0.4.mjs`（TypeScript AST，幂等）。
   自动删除 `resolve`、收缩 `MaybeGetter` / `Renderable | (() => Renderable)`、改写原生元素与
   已知值 prop 的零参箭头属性、清理失效的 `PLAIN_E1108` 抑制；函数型 prop 判断、组件体快照与
   手写 props 不自动改，会输出「需人工确认」清单。用法见
   [迁移指南](docs/migrate-0.3-to-0.4.md#自动迁移codemod)；新增回归测试 `test/migrate-0.4.test.mjs`。
+
+### 文档
+
+- 修正 `docs/from-other-frameworks.md` 中「组件体里读 `props.x` 会订阅」的错误描述：
+  只有 JSX `{expr}` / `effect` / `computed` 里的读才订阅，组件体里的读是一次性快照。
+- 新增 [`docs/mental-burdens.md`](docs/mental-burdens.md)：0.4 之后的心智负担清单与改进影响评估。
+- `AGENTS.md` 反模式目录新增第 24、25 条，错误码表补充 `E1202` / `E1203`。
 
 ## [0.4.0] - 2026-11-08
 

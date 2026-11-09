@@ -34,7 +34,7 @@ const zh = defineCopy({
     github: 'GitHub',
   },
   hero: {
-    badge: 'v0.4.0 · MIT · 运行时零依赖',
+    badge: 'v0.5.0 · MIT · 运行时零依赖',
     title: '编译到 DOM 的前端框架',
     titleAccent: '为「AI 写、人来维护」而设计',
     desc:
@@ -306,7 +306,7 @@ const en: Copy = {
     github: 'GitHub',
   },
   hero: {
-    badge: 'v0.4.0 · MIT · zero-dependency runtime',
+    badge: 'v0.5.0 · MIT · zero-dependency runtime',
     title: 'A frontend framework that compiles to the DOM',
     titleAccent: 'Designed for "AI writes it, humans maintain it"',
     desc:

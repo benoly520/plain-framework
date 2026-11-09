@@ -4,7 +4,7 @@
 >
 > 设计缘起见 [`docs/ai_frontend_framework_discussion.md`](docs/ai_frontend_framework_discussion.md)。
 >
-> **本文描述「规范」，[`src/`](src/) 是它的正式实现（当前 0.4.0）。** 规范与实现不一致时以本文件为准，
+> **本文描述「规范」，[`src/`](src/) 是它的正式实现（当前 0.5.0）。** 规范与实现不一致时以本文件为准，
 > 并应提 issue；本文档末尾 [§9](#9-实现状态对照) 给出逐条落地对照。
 >
 > 历史：早期曾有一个 ~200 行的运行时原型（`html` 标签模板 + 运行时 diff），
