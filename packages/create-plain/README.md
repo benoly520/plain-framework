@@ -68,8 +68,37 @@ npm run dev
 > `import plain from "plain/vite"` 与 `import { signal } from "plain"` 都能正常解析，
 > **无需改动 `vite.config.ts`**。
 >
-> 框架源码改动后，回到框架目录重跑 `pnpm run build` 即可（模板产物依赖 `dist/`；
-> 框架仓库根的 `dist/` 通常已构建好，只有改了 `src/` 才需要重新 build）。
+> 框架源码改动后，`link:` 不会自动编译 `src/`。推荐开一个终端持续生成最新的
+> `dist/`，另一个终端运行应用：
+>
+> ```bash
+> # 终端 1：首次会构建一次，之后随 src/ 改动重建
+> cd /abs/path/plain-framework && pnpm run build:watch
+>
+> # 终端 2
+> cd my-app && pnpm run dev
+> ```
+>
+> 只需要构建一次时，也可以运行 `pnpm run build`。
 >
 > 不想用软链、只想要一份固定副本时，可改用 `"plain": "file:/abs/path/plain-framework"`，
 > 但 `file:` 默认是复制，框架改动后需重新 `pnpm install` 才能同步。
+
+### 本地版本快照
+
+`pnpm link` / `link:` 是路径链接，不按 semver 选择版本；使用项目读到的是链接目录
+`package.json` 里的版本和该目录当时的 `dist/`。修改版本号不会触发构建，也不会更新
+`dist/`。
+
+如果要测试一个固定版本，而不是跟随源码，可以在框架仓库执行：
+
+```bash
+pnpm pack
+cd /abs/path/my-app
+pnpm add /abs/path/plain-0.6.0.tgz
+```
+
+`pnpm pack` 会先自动构建一次，确保快照里的 `dist/` 是最新的。
+
+不要给 `dist` 文件名加版本号：`exports`、类型入口和 sourcemap 都依赖固定的
+`dist/...` 路径，版本化目录只会增加发布和解析分支，不能解决本地构建产物过期。

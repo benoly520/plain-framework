@@ -830,8 +830,9 @@ node dist/cli/index.js dev examples/todo
 | `pnpm run dev:example` | 8100 | 是（含 `serverEntry` / `root` 配置） | 与示例配置完全一致，推荐 |
 | `node dist/cli/index.js dev examples/todo` | 5173 | 否（`configFile: false`，用插件默认配置） | 适合体验 plaindev CLI 自身 |
 
-> 改了源码后需重新 `pnpm run build` 再刷新（框架自身源码的构建；示例应用的组件改动
-> 在 dev 下走 HMR，无需整页刷新）。
+> 调试框架自身源码时，可以把 `pnpm run build:watch` 放在单独终端持续生成 `dist/`，
+> 再启动示例；只构建一次时再运行 `pnpm run build`。示例应用的组件改动在 dev 下走
+> HMR，无需整页刷新。
 
 ### 从零新建项目：create-plain
 

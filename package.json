@@ -55,6 +55,8 @@
   ],
   "scripts": {
     "build": "tsc",
+    "build:watch": "tsc --watch --preserveWatchOutput",
+    "prepack": "pnpm run build",
     "test": "tsc && npm run test:kernel && npm run test:unit",
     "test:kernel": "node test/run.mjs",
     "test:unit": "node --test \"test/**/*.test.mjs\"",
