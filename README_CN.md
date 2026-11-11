@@ -308,6 +308,7 @@ function Card(props) {
 | `PLAIN_E1009` | `ref` 用在组件上（组件没有稳定根节点） |
 | `PLAIN_E1010` | `ref` 的值不是函数（应为 `ref={(el) => …}`） |
 | `PLAIN_E1011` | `ref` 回调不能是 `async`（清理与异步不兼容） |
+| `PLAIN_E1012` | `server()` 的参数不是内联函数（传引用无法物理剥离） |
 | `PLAIN_E2001` | 契约检查未通过（由构建链路抛出，`plaindev check --fix` 可自动修） |
 
 **契约检查默认接在构建链路里**（`plainPlugin({ lint: "warn" | false })` 可调），
@@ -652,7 +653,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
   `plaindev mcp` 把 `check` / `schema` 暴露给 AI IDE；`plaindev lsp` 把**同一条规则链**做成
   **编辑器实时诊断**（写时就报，不必等 dev / build）；确认误报可用行级抑制指令
 - ✅ AI 正确率评测骨架 `eval/`（任务 + 验收断言 + 指标口径）
-- ✅ 单测 264 项（内核 19 + 单元 245）+ 真实 Chromium 端到端 23 项
+- ✅ 单测 366 项（内核 19 + 单元 347）+ 真实 Chromium 端到端 23 项
 - ✅ 覆盖率度量与门槛（c8：行 90% / 分支 82% / 函数 85%），CI 强制不倒退
 
 ### 尚未实现（不假装有）
@@ -683,7 +684,7 @@ Plain 的每条设计都对应一个「AI 常犯的错」：
 ## 测试与质量
 
 ```bash
-pnpm test              # 构建 + 内核 19 项 + 单元 245 项
+pnpm test              # 构建 + 内核 19 项 + 单元 347 项
 pnpm run coverage      # 覆盖率（c8）；低于门槛直接失败
 pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构建示例）
 ```
@@ -691,7 +692,7 @@ pnpm run test:browser  # 23 项：真实 Chromium 走完整个应用（需先构
 分层：
 
 - `test/run.mjs`（19 项）：响应式内核 / 列表 / 作用域回收 / 路由 / RPC / SSR / XSS 的集成验证。
-- `test/*.test.mjs`（245 项，`node:test`）：
+- `test/*.test.mjs`（347 项，`node:test`）：
   `lint` 规则与自动修复（含 deep-path 就地把 / 参数解构 / effect 卫生的不误报）、
   `errors` 统一错误码目录（唯一性 / lint 产出码都在表里 / 新旧抑制名都命中）、
   `schema` 契约提取、`compiler` 报错兜底与 sourcemap、
@@ -789,7 +790,7 @@ node eval/compare/run.mjs --prompt  # 打印对比用例的提示词
 ```bash
 $ pnpm test
 通过 19 / 19          # 内核
-# pass 245 / fail 0   # 单元
+# pass 347 / fail 0   # 单元
 
 $ pnpm run test:browser
 通过 23 / 23

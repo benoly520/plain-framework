@@ -313,6 +313,7 @@ Numbering is self-categorizing: `E10xx` compiler internal · `E11xx` lint (suppr
 | `PLAIN_E1009` | `ref` used on a component (a component has no stable root node) |
 | `PLAIN_E1010` | `ref`'s value isn't a function (should be `ref={(el) => …}`) |
 | `PLAIN_E1011` | `ref` callback is `async` (cleanup is incompatible with async) |
+| `PLAIN_E1012` | `server()` argument isn't an inline function (cannot be physically stripped) |
 | `PLAIN_E2001` | contract check failed (thrown by the build pipeline, `plaindev check --fix` can auto-fix) |
 
 **Contract checks are wired into the build pipeline by default** (`plainPlugin({ lint: "warn" | false })` to adjust),
@@ -655,7 +656,7 @@ Every design decision in Plain corresponds to "a mistake AI commonly makes":
   `plaindev mcp` exposes `check` / `schema` to AI IDE; `plaindev lsp` turns the **same rule chain** into
   **real-time editor diagnostics** (report on write, no need to wait for dev / build); confirmed false positives use line-level suppression directives
 - ✅ AI correctness eval skeleton `eval/` (tasks + acceptance assertions + metric definitions)
-- ✅ 264 unit tests (19 kernel + 245 unit) + 23 real Chromium end-to-end
+- ✅ 366 unit tests (19 kernel + 347 unit) + 23 real Chromium end-to-end
 - ✅ coverage metrics and gates (c8: line 90% / branch 82% / function 85%), CI enforced no regression
 
 ### Not yet implemented (no pretending)
@@ -688,7 +689,7 @@ Staged plan and acceptance criteria in [`ROADMAP.md`](ROADMAP.md). Current state
 ## Testing & Quality
 
 ```bash
-pnpm test              # build + 19 kernel + 245 unit
+pnpm test              # build + 19 kernel + 347 unit
 pnpm run coverage      # coverage (c8); fails below threshold
 pnpm run test:browser  # 23 items: real Chromium running the whole app end-to-end (build examples first)
 ```
@@ -696,7 +697,7 @@ pnpm run test:browser  # 23 items: real Chromium running the whole app end-to-en
 Layered:
 
 - `test/run.mjs` (19 items): reactivity kernel / lists / scope reclamation / routing / RPC / SSR / XSS integration verification.
-- `test/*.test.mjs` (245 items, `node:test`):
+- `test/*.test.mjs` (347 items, `node:test`):
   `lint` rules and auto-fix (incl. deep-path in-place / parameter destructuring / effect hygiene no false positives),
   `errors` unified error code catalog (uniqueness / lint-produced codes all in table / old and new suppression names both hit),
   `schema` contract extraction, `compiler` error fallback and sourcemap,
@@ -793,7 +794,7 @@ Coverage is measured by c8 and enforced by CI (config in `.c8rc.json`):
 ```bash
 $ pnpm test
 passed 19 / 19          # kernel
-# pass 245 / fail 0     # unit
+# pass 347 / fail 0     # unit
 
 $ pnpm run test:browser
 passed 23 / 23

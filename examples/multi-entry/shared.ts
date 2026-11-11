@@ -10,5 +10,5 @@ export function SiteFooter() {
 // 站点元信息：编译后客户端只剩 RPC 桩，函数体物理搬到 .plain/server.mjs
 export const getSiteMeta = server(() => ({
   name: "Plain Demo",
-  version: "0.5.0",
+  version: "0.6.0",
 }));

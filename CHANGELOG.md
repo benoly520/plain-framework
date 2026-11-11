@@ -5,6 +5,37 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-11
+
+### 修复（安全与正确性）
+
+- **`server()` 剥离改为按 import 绑定识别**：`import { server as backend }` 与
+  `import * as P from "plain"; P.server(...)` 都会被物理剥离；不再只看标识符文本
+  `"server"`，别名导入不会再把服务端函数（及其中的敏感字面量）留在客户端产物里。
+  schema 提取与剥离同口径；非 `plain` 的 `xxx.server(...)` 不会被误判。
+- **新增 `PLAIN_E1012`**：`server(handler)` 这种传函数引用的写法无法物理剥离，
+  改为构建期报错（此前会静默把服务端函数留在客户端产物里）。
+- **响应式调度按波推进**：`computed` 派生 effect 先于普通 effect 运行并去重，
+  菱形依赖不再让消费者看到「一 new 一 old」的中间态（`[4,3]`）。
+- **effect 重跑恢复创建时 owner**：重跑期间新建的子 effect 仍归入原作用域，
+  `dispose` 外层 scope 后不会再继续响应。
+- **`resource.refetch` 与自动请求共用 seq**：迟到的旧响应不会覆盖新数据；
+  失败时 `loading` 归 `false`、错误落到 `error` 状态。
+- **`serve()` 识别批量 RPC 端点** `/_plain/rpc/batch`，不再被 SPA 兜底吞成 404。
+- **批量 RPC 只在确定未执行时退化重放**：404 / 405 / 501 退化成逐条请求；
+  网络错误 / 5xx 直接失败，避免写操作被重复执行。
+- **SSR 缓存 / 并发去重按完整 URL（含 query）**；路由匹配仍用 pathname，
+  带 query 的页面既不串数据，也不会匹配不到路由。
+- **`renderPage` 改用函数形式 replacement**：应用 HTML 里的 `$&` / `` $` `` / `$'`
+  不再被 `String.replace` 当成替换指令。
+- **修正 `PLAIN_E1001` 的修复提示**：不再建议 `const node = cond || <a/>` 这种
+  自身无法编译的写法；提示里的示例由回归测试守住。
+
+### 文档
+
+- `SECURITY.md` 支持范围更新为 `0.6.x`，并补充 `server()` 别名 / 命名空间导入的剥离口径。
+- README / README_CN 的测试计数与当前套件对齐（19 内核 + 347 单元）。
+
 ## [0.5.0] - 2026-11-09
 
 ### 工具（仅 lint，无运行时变更）

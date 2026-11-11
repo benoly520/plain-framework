@@ -4,7 +4,7 @@
 >
 > 设计缘起见 [`docs/ai_frontend_framework_discussion.md`](docs/ai_frontend_framework_discussion.md)。
 >
-> **本文描述「规范」，[`src/`](src/) 是它的正式实现（当前 0.5.0）。** 规范与实现不一致时以本文件为准，
+> **本文描述「规范」，[`src/`](src/) 是它的正式实现（当前 0.6.0）。** 规范与实现不一致时以本文件为准，
 > 并应提 issue；本文档末尾 [§9](#9-实现状态对照) 给出逐条落地对照。
 >
 > 历史：早期曾有一个 ~200 行的运行时原型（`html` 标签模板 + 运行时 diff），
@@ -131,7 +131,8 @@ function Counter() {
     这里刻意不做静默降级：静默的语义降级是本规范最想消灭的失败模式。
   - **JSX 位置只支持上表四种形状**；`||` / `??` 短路、`filter().map()` 链式、
     `try/catch` 包裹 JSX、`switch` 返回 JSX 等属于「其它表达式」，会走 `insert` 兜底。
-    需要响应式或 keyed 复用时要**先赋值给变量再插值**，写法见 [`AGENTS.md`](AGENTS.md)。
+    需要响应式或 keyed 复用时要改成三元 / `&&` / `.map()`，或抽成返回 JSX 的组件函数，
+    写法见 [`AGENTS.md`](AGENTS.md)。
 - 事件：`onClick={fn}` 等，编译期转 `addEventListener`（字符串事件名会被拒，避免静默失效）。
 - 布尔属性（`checked`/`disabled`/...）按属性语义处理，不依赖字符串 `"false"` 的歧义。
 - **属性名与类型受类型系统约束**：未知属性名 / 类型写错（`scr` / `checked="yes"` / `onClikc`）

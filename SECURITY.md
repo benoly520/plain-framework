@@ -13,7 +13,7 @@ Plain 的安全模型建立在一条主轴上：**「这段代码跑在哪」是
 请附：复现步骤、影响范围、Plain 版本（`npx plaindev --version` 或 `package.json`）、
 Node 与构建工具版本。我们会在确认后于 CHANGELOG 记一条 `security:` 说明。
 
-**支持范围**：只覆盖最新的 minor 版本（当前 `0.3.x`）。Plain 尚在 0.x，不承诺长期支持。
+**支持范围**：只覆盖最新的 minor 版本（当前 `0.6.x`）。Plain 尚在 0.x，不承诺长期支持。
 
 ---
 
@@ -26,6 +26,9 @@ Node 与构建工具版本。我们会在确认后于 CHANGELOG 记一条 `secur
 
 - 密钥 / 数据库连接 / 内部 API —— 写进 `server()` 函数体，就**不可能**出现在浏览器 bundle 里。
   这不是「你别写错」，而是「写错了产物里也没有」。
+- 编译器按 **import 绑定**识别 `server()`，不只认标识符文本：`import { server as backend }`
+  与 `import * as P from "plain"; P.server(...)` 同样会被物理剥离；非 `plain` 的
+  `xxx.server(...)` 不会被误判。schema 提取与剥离同口径。
 - 有 `test/run.mjs` 的「server() 物理剥离 + RPC 往返」用例守着这条不变量。
 
 **边界**：`server()` 的**参数与返回值**会走 JSON-RPC，客户端能看到。别把密钥当返回值传回来。

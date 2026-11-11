@@ -3,6 +3,8 @@
 > 状态：**分析文档**（不含实现）。
 > 基线：`0.4.0` —— props 已改为真 getter，`resolve` 已删除。
 > 更新：`0.5.0` 已落地 R1（`PLAIN_E1202`）、R2（`PLAIN_E1203`）与 R3（文档修正）；
+> `0.6.0` 修复了外部审查中复现的 8 类缺陷（server 别名剥离、响应式中间态、effect 作用域逃逸、
+> refetch 竞态、批量 RPC 路由/重放、SSR query/缓存、模板 `$&`、诊断提示不可编译）。
 > R4 / R5 按本文评估不做。下文保留当时的分析与影响评估，命中规则以当前实现为准。
 > 关联：[`AGENTS.md`](../AGENTS.md) §3、[`props-live-getters.md`](rfcs/props-live-getters.md)、
 > [`migrate-0.3-to-0.4.md`](migrate-0.3-to-0.4.md)。
