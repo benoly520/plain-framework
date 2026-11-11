@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { renderToString, renderToStringSync } from "../dist/server/render.js";
 import { installServerDOM, serializeNode } from "../dist/server/dom-shim.js";
-import { rpcMiddleware, staticMiddleware, serve } from "../dist/server/index.js";
+import { rpcMiddleware, staticMiddleware, serve, renderPage } from "../dist/server/index.js";
 import { renderServerManifest, updateServerManifest } from "../dist/compiler/manifest.js";
 
 const tmpDir = (prefix = "plain-srv-") =>
@@ -416,4 +416,36 @@ test("serve：一行起服，静态托管 + RPC 走通", async () => {
   } finally {
     await new Promise((r) => server.close(r));
   }
+});
+
+test("[回归] serve：批量 RPC 端点不会被 SPA 兜底吞成 404", async () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "index.html"), "<html>SERVED</html>");
+  const manifest = path.join(dir, "server.mjs");
+  fs.writeFileSync(manifest, renderServerManifest([{ name: "v", body: "() => 42" }]));
+
+  const server = await serve({ dist: dir, manifest, port: 0 });
+  const { port } = server.address();
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/_plain/rpc/batch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ calls: [{ name: "v", args: [] }] }),
+    });
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.equal(body.results[0].result, 42);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test("[回归] renderPage：应用 HTML 里的 $& / $` / $' 不被当成替换指令", () => {
+  const tpl = "<body><!--plain-ssr--><!--plain-data--></body>";
+  const html = "<p>$&</p><p>$`</p><p>$'</p>";
+  const out = renderPage(tpl, html, []);
+  assert.ok(out.includes("<p>$&</p>"), "$& 应原样保留");
+  assert.ok(out.includes("<p>$`</p>"), "$` 应原样保留");
+  assert.ok(out.includes("<p>$'</p>"), "$' 应原样保留");
+  assert.ok(!out.includes("<!--plain-ssr-->"), "占位符应被替换掉");
 });

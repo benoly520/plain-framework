@@ -758,6 +758,27 @@ test("ssrMiddleware 缓存：并发同 URL 只渲染一次（防惊群）", asyn
   assert.equal(rendersOf(y.res.body), 1, "并发应复用同一次渲染");
 });
 
+test("[回归] ssrMiddleware 缓存：完整 URL（含 query）作为身份，不串数据", async () => {
+  const mw = await makeCounterSsr({ ttl: 60_000 });
+  assert.equal(rendersOf((await callSsr(mw, "/?q=a")).res.body), 1);
+  assert.equal(
+    rendersOf((await callSsr(mw, "/?q=b")).res.body),
+    2,
+    "query 不同应独立渲染"
+  );
+  assert.equal(
+    rendersOf((await callSsr(mw, "/?q=a")).res.body),
+    1,
+    "同一完整 URL 命中缓存"
+  );
+});
+
+test("[回归] SSR：带 query 的页面按 pathname 匹配路由", async () => {
+  const mw = await makeCounterSsr(undefined);
+  const body = (await callSsr(mw, "/?q=a")).res.body;
+  assert.match(body, /home/, "带 query 也应命中 / 路由（上下文仍保存完整 URL）");
+});
+
 test("ssrMiddleware 缓存：TTL 过期后重新渲染", async () => {
   const mw = await makeCounterSsr({ ttl: 20 });
   assert.equal(rendersOf((await callSsr(mw, "/")).res.body), 1);

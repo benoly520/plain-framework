@@ -211,7 +211,8 @@ export async function serve(options: {
     //   2. SSR 其次 —— 要在 SPA 兜底之前，页面导航才会走服务端渲染；
     //   3. 静态托管最后（含 SPA 兜底，兜住没被 SSR 处理的路径）。
     const url = (req.url || "/").split("?")[0];
-    if (url === endpoint) return rpc(req, res);
+    // 批量端点同样是 RPC 请求：漏掉它会让 batch 落到 SSR / 静态兜底变成 404
+    if (url === endpoint || url === endpoint + "/batch") return rpc(req, res);
     if (ssr) return ssr(req, res, () => statics(req, res));
     statics(req, res);
   });
@@ -314,13 +315,16 @@ export function ssrMiddleware(options: {
   };
 
   return async function plainSsr(req: any, res: any, next?: () => void) {
-    const url = (req.url || "/").split("?")[0];
-    const looksLikePage = req.method === "GET" && !/\.[a-zA-Z0-9]+$/.test(url);
+    // 路由判断只看 pathname；缓存 / 并发去重 / 渲染身份必须用**完整 URL（含 query）**。
+    // 只用 pathname 会让 /search?q=a 与 /search?q=b 命中同一份缓存并共享同一次渲染。
+    const requestUrl = req.url || "/";
+    const pathname = requestUrl.split("?")[0];
+    const looksLikePage = req.method === "GET" && !/\.[a-zA-Z0-9]+$/.test(pathname);
     if (!looksLikePage) return next ? next() : undefined;
 
     // 命中缓存：直接回 HTML，省掉整页重渲染（流不流式都一样，命中即瞬时）
     if (cache) {
-      const hit = cache.get(url);
+      const hit = cache.get(requestUrl);
       if (hit && (ttlMs <= 0 || Date.now() - hit.at < ttlMs)) {
         res.setHeader("content-type", "text/html; charset=utf-8");
         res.end(hit.html);
@@ -331,17 +335,17 @@ export function ssrMiddleware(options: {
     try {
       const { tpl, App, handlers } = await prepare();
       // 并发同 URL 去重：同一时刻只渲染一次，其余请求复用这次结果（防惊群）
-      let p = inflight?.get(url);
+      let p = inflight?.get(requestUrl);
       if (!p) {
         p = (async () => {
           const { html, data } = await renderToStringWithData(App, {
             container: false,
             handlers,
-            url,
+            url: requestUrl,
           });
           return renderPage(tpl, html, data);
         })();
-        inflight?.set(url, p);
+        inflight?.set(requestUrl, p);
       }
 
       // 流式：先把「第一个占位符之前」的确定性壳立刻 flush，抢首字节（TTFB）；
@@ -359,7 +363,7 @@ export function ssrMiddleware(options: {
       const out = await p;
       // 只在渲染成功（已产出整页 HTML）后写缓存；500 等错误不会进缓存
       if (cache) {
-        cache.set(url, { html: out, at: Date.now() });
+        cache.set(requestUrl, { html: out, at: Date.now() });
         // 超过上限就淘汰最旧的一条（Map 保持插入序，keys 第一项即最旧）
         if (cache.size > maxEntries) cache.delete(cache.keys().next().value as string);
       }
@@ -377,7 +381,7 @@ export function ssrMiddleware(options: {
       res.setHeader("content-type", "text/plain; charset=utf-8");
       res.end(`[plain ssr] ${(e && e.message) || e}`);
     } finally {
-      inflight?.delete(url);
+      inflight?.delete(requestUrl);
     }
   };
 }
@@ -395,7 +399,11 @@ function payloadTag(data: unknown[]): string {
 export function renderPage(tpl: string, html: string, data: unknown[]): string {
   assertSlot(tpl, SSR_SLOT);
   assertSlot(tpl, DATA_SLOT);
-  return tpl.replace(SSR_SLOT, html).replace(DATA_SLOT, payloadTag(data));
+  // 用函数形式的 replacement：字符串形式会把应用 HTML 里的 $& / $` / $' 当成
+  // 替换指令解释，用户文本被悄悄改写（例如 <p>$&</p> 变成占位符本身）。
+  return tpl
+    .replace(SSR_SLOT, () => html)
+    .replace(DATA_SLOT, () => payloadTag(data));
 }
 
 /**
