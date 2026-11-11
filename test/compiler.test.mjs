@@ -49,6 +49,66 @@ test("server() 物理剥离：客户端只剩 rpc 桩，函数体与闭包不外
   assert.ok(!code.includes("不该出现"));
 });
 
+test("[回归] server() 别名导入：同样物理剥离，不把服务端函数留在客户端", () => {
+  const { code, serverFunctions } = compile(
+    jsx(
+      "import { server as backend } from 'plain';",
+      "export const load = backend(async () => {",
+      "  const key = 'PRIVATE_MARKER';",
+      "  return key.length;",
+      "});"
+    ),
+    "alias.jsx"
+  );
+  assert.equal(serverFunctions.length, 1);
+  assert.equal(serverFunctions[0].name, "load");
+  assert.ok(code.includes('__rpc("load"'));
+  assert.ok(!code.includes("PRIVATE_MARKER"));
+});
+
+test("[回归] server() 命名空间导入：P.server(...) 同样物理剥离", () => {
+  const { code, serverFunctions } = compile(
+    jsx(
+      "import * as P from 'plain';",
+      "export const load = P.server(async () => 'NS_MARKER');"
+    ),
+    "ns.jsx"
+  );
+  assert.equal(serverFunctions.length, 1);
+  assert.equal(serverFunctions[0].name, "load");
+  assert.ok(!code.includes("NS_MARKER"));
+});
+
+test("[回归] 非 plain 的 xxx.server(...) 不会被误判成服务端函数", () => {
+  const { serverFunctions } = compile(
+    jsx(
+      "import * as utils from './utils.js';",
+      "export const load = utils.server(async () => 1);"
+    ),
+    "other.jsx"
+  );
+  assert.equal(serverFunctions.length, 0);
+});
+
+test("[回归] server(handler) 传引用：构建期报 PLAIN_E1012，不静默漏剥离", () => {
+  let err = null;
+  try {
+    compile(
+      jsx(
+        "import { server } from 'plain';",
+        "const handler = async () => 'HANDLER_MARKER';",
+        "export const load = server(handler);"
+      ),
+      "ref.jsx"
+    );
+  } catch (e) {
+    err = e;
+  }
+  assert.ok(err, "传函数引用必须构建期失败");
+  assert.equal(err.code, "PLAIN_E1012");
+  assert.equal(err.line, 3);
+});
+
 test("条件表达式（三元）-> when，含 else 分支", () => {
   const { code } = compile(
     "export function App(){ return <div>{ok ? <b>y</b> : <i>n</i>}</div>; }",

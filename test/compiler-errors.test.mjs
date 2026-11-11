@@ -29,6 +29,21 @@ test("PLAIN_E1001：不认识的 JSX 位置，带位置与修正提示", () => {
   assert.match(err.message, /提示：/);
 });
 
+test("[回归] PLAIN_E1001 的修复提示自身可编译（不能建议 JSX 当变量初值）", () => {
+  const err = catchCompile(
+    ["const x = cond || <p>a</p>;", "export function App(){ return <i/>; }"].join("\n"),
+    "hint.jsx"
+  );
+  assert.equal(err.code, "PLAIN_E1001");
+  assert.doesNotMatch(
+    err.hint,
+    /const node = cond \|\| <a\/>/,
+    "不能给出一个自己就会报 PLAIN_E1001 的示例"
+  );
+  // 提示里推荐的写法必须真的能编译
+  compile("export function App(){ return <div>{ok ? <a/> : null}</div>; }", "ok.jsx");
+});
+
 test("PLAIN_E1002：产物无法解析时给出诊断与输入要求", () => {
   const err = catchCompile(
     ["const z: = 1;", "export function App(){ return <p>{z}</p>; }"].join("\n"),

@@ -59,11 +59,12 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | 18 | `ref={async (el) => …}` | 把 `await` 提到回调外 | ✅ `PLAIN_E1011` | — |
 | 19 | 在**模块作用域**创建 `resource(...)`（import 时立即执行、SSR 导入即发请求、无人回收） | 放进组件函数体，或 `createScope(() => …)` 里 | ✅ `PLAIN_E1113` | — |
 | 20 | 对 `useContext(Ctx)` 的返回值直接取属性（`t.name` / `useContext(Ctx).name`） | 先调用再取：`useContext(Ctx)().name` | ✅ `PLAIN_E1114` | — |
-| 21 | 在不支持的位置写 JSX：`{cond \|\| <a/>}`、`{cond ?? <a/>}`（含裸 `return cond \|\| <a/>`）、数组字面量 `{[<a/>]}`、IIFE、IIFE 内 `try/catch` 的 `return <a/>`、链式后置 `.map().filter()` | 先赋值给变量再插值，或抽成组件函数（详见第 3.1 节） | ✅ `PLAIN_E1001` | — |
+| 21 | 在不支持的位置写 JSX：`{cond \|\| <a/>}`、`{cond ?? <a/>}`（含裸 `return cond \|\| <a/>`）、数组字面量 `{[<a/>]}`、IIFE、IIFE 内 `try/catch` 的 `return <a/>`、链式后置 `.map().filter()` | 条件改三元 `{cond ? <a/> : <b/>}`、`&&`、`.map()`；IIFE / 数组字面量抽成组件函数（详见第 3.1 节） | ✅ `PLAIN_E1001` | — |
 | 22 | 在**内建元素**上写 React 拼写的属性名（`className` / `htmlFor`） | 用原生 HTML 名 `class` / `for`（两者等价，编译器会归一；组件上的 prop 名不受影响） | ✅ `PLAIN_E1115`（可自动修，**只告警**） | — |
 | 23 | 模块顶层的 `computed` / `effect` 回调引用**后面才声明**的 const / let / class（`const a = computed(() => b())` 在 `const b` 之前） | 把被引用的声明挪到这个调用之前 —— computed 创建即求值（import 时就跑回调），后置声明还在 TDZ，运行时必抛 `Cannot access 'x' before initialization` | ✅ `PLAIN_E1201` | — |
 | 24 | 组件体里「先算再插值」：`const full = props.a + props.b`、`` const label = `${props.a}` ``、`const rows = items().map(...)` | 把读取放进 JSX；派生值用 `computed(() => …)`；要传出去写成 thunk。组件体只执行一次，复合读取同样是快照 | ✅ `PLAIN_E1202`（signal 种子 / `computed()` / thunk 放行） | — |
 | 25 | 把函数型 prop 当值插值：`{props.children}` / `{props.render}` / `{props.onSave}` | 调用：`{props.children()}` / `{props.render(x)}`；属性位置的透传（`children={props.children}`）不报 | ✅ `PLAIN_E1203`（只查直接 props 链） | — |
+| 26 | `server(handler)`：把函数引用传进去（含别名调用 `backend(handler)`） | 内联写：`server(async () => …)`；先定义再传引用无法物理剥离 | ✅ `PLAIN_E1012` | — |
 
 > 「评测任务」列是 `eval/tasks/` 里针对这条反模式的任务编号 —— 它衡量的是
 > **代理实际会不会犯这个错**，和「自动拦截」是两件事（一个任务可能既没被拦截、
@@ -115,10 +116,10 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 
 | 不允许 ❌（都报 `PLAIN_E1001`） | 改成 |
 | --- | --- |
-| `{cond \|\| <a/>}` / `{cond ?? <a/>}`（含裸 `return cond \|\| <a/>`） | `const node = cond \|\| <a/>;` 然后 `{node}` |
-| 数组字面量 `{[<a/>,<b/>]}` | 先赋值：`const list = [<a/>,<b/>];` 然后 `{list}` |
+| `{cond \|\| <a/>}` / `{cond ?? <a/>}`（含裸 `return cond \|\| <a/>`） | 改用三元 `{cond ? <a/> : <b/>}`，或抽成返回 JSX 的组件函数 |
+| 数组字面量 `{[<a/>,<b/>]}` | 拆成同一个父元素 / Fragment 下的多个直接子节点 |
 | IIFE `{(() => <a/>)()}` / `return (() => <a/>)()` | 抽成组件函数：`function A(){ return <a/>; }` 然后 `<A/>` |
-| IIFE 内 `try/catch` 里 `return <a/>` | 抽成组件函数，或把结果赋值给变量再插值 |
+| IIFE 内 `try/catch` 里 `return <a/>` | 抽成组件函数（在函数体里 `try/catch` 后 `return` JSX） |
 | 链式后置 `.map(...).filter(...)` | 换成前置换算：`.filter(...).map(x => <li/>)` |
 | JSX 当值用：`const el = <a/>;`、`open(() => <a/>)` | 挪进 `return`，或抽成 `const Row = () => <a/>;` 再调用 |
 
@@ -149,6 +150,7 @@ SSR 下模块作用域是同进程共享的，会把 A 请求的数据渲染进 
 | `PLAIN_E1009` | `ref` 用在组件上 | 把 `ref` 放到组件内部的元素上 |
 | `PLAIN_E1010` | `ref` 的值不是函数 | 写成 `ref={(el) => { … }}`（可返回清理函数） |
 | `PLAIN_E1011` | `ref` 回调是 `async` | 把 `await` 提到回调外（清理与异步不兼容） |
+| `PLAIN_E1012` | `server()` 的参数不是内联函数 | 把函数体直接写在 `server(...)` 里（传引用无法物理剥离） |
 | `PLAIN_E1101` | 直接给 signal 变量赋值 | 改成 `.set(…)`（可自动修） |
 | `PLAIN_E1102` | JSX 里把 signal 当值用 | 补上调用 `()`（可自动修） |
 | `PLAIN_E1103` | React 肌肉记忆（`useState` 等） | 换 `signal` / `effect` / `computed` |

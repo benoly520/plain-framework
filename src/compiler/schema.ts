@@ -6,6 +6,7 @@
 import ts from "typescript";
 import fs from "node:fs";
 import path from "node:path";
+import { collectServerBindings, isServerFactoryCall } from "./index.js";
 
 export interface ExtractedSchema {
   file: string;
@@ -124,6 +125,8 @@ function resolveTypeMembers(
 
 export function extractSchema(source: string, fileName = "module.tsx"): ExtractedSchema {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind(fileName));
+  // server 的本地绑定（含别名 / 命名空间）—— 与编译器剥离口径一致
+  const serverBindings = collectServerBindings(sf);
   // 本文件的 interface / type 声明 —— props 的「声明式」事实来源（见 resolveTypeMembers）
   const typeDecls = collectTypeDecls(sf);
   const out: ExtractedSchema = {
@@ -279,9 +282,7 @@ export function extractSchema(source: string, fileName = "module.tsx"): Extracte
 
     // server(fn)
     if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "server" &&
+      isServerFactoryCall(node, serverBindings) &&
       node.arguments.length &&
       (ts.isArrowFunction(node.arguments[0]) ||
         ts.isFunctionExpression(node.arguments[0]))

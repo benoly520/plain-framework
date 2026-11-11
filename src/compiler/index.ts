@@ -196,34 +196,47 @@ export function compile(
 
   const edits: any[] = [];
   const serverFunctions: ServerFunction[] = [];
+  // server() 的本地绑定：必须解析 import（含别名 / 命名空间），
+  // 不能只看标识符文本是不是 "server" —— 别名导入会绕过物理剥离，
+  // 把服务端函数留在客户端产物里（见 test/compiler 的别名回归用例）。
+  const serverBindings = collectServerBindings(sf);
   // server() 的物理剥离要先知道「文件里存在哪些名字」——只有这些名字
   // 才可能在服务端变成 ReferenceError（见 assertServerSelfContained）
-  const ambient = serverAmbientNames(sf);
-  const serverNames = collectServerBoundNames(sf);
+  const ambient = serverAmbientNames(sf, serverBindings);
+  const serverNames = collectServerBoundNames(sf, serverBindings);
   const nonJsonNames = collectNonJsonBoundNames(sf);
   for (const n of serverNames) nonJsonNames.add(n);
 
   const walk = (node: any) => {
     // 1) server(fn) -> RPC 桩 + 物理剥离
-    if (
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "server" &&
-      node.arguments.length > 0
-    ) {
-      const arg = node.arguments[0];
-      if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) {
-        const name = serverVarName(node);
-        assertServerSelfContained(arg, ambient, fileName);
-        // 返回值也要走 JSON：RPC 序列化时函数 / Stream 会悄悄变成 {} —— 静默失败
-        assertServerReturnsSerializable(arg, nonJsonNames, fileName);
-        serverFunctions.push({ name, body: arg.getText(sf) });
-        edits.push({
-          start: node.getStart(sf),
-          end: node.getEnd(),
-          text: `((...__args) => ${RPC}(${JSON.stringify(name)}, __args))`,
+    if (isServerFactoryCall(node, serverBindings)) {
+      const raw = node.arguments[0];
+      const arg = raw ? unparen(raw) : raw;
+      // 只认内联函数：先定义再传引用（server(handler)）无法把函数体搬到服务端，
+      // 客户端会拿到完整实现。这种写法必须**构建期失败**，不能静默漏剥离。
+      if (!arg || !(ts.isArrowFunction(arg) || ts.isFunctionExpression(arg))) {
+        const at = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+        throw new PlainCompileError({
+          code: "PLAIN_E1012",
+          file: fileName,
+          line: at.line + 1,
+          column: at.character + 1,
+          detail: "server() 的参数必须是内联的箭头函数 / 函数表达式",
+          hint:
+            "把函数体直接写在 server(...) 里；先定义再传引用会导致服务端代码无法物理剥离，" +
+            "客户端会拿到完整函数体。",
         });
       }
+      const name = serverVarName(node);
+      assertServerSelfContained(arg, ambient, fileName);
+      // 返回值也要走 JSON：RPC 序列化时函数 / Stream 会悄悄变成 {} —— 静默失败
+      assertServerReturnsSerializable(arg, nonJsonNames, fileName);
+      serverFunctions.push({ name, body: arg.getText(sf) });
+      edits.push({
+        start: node.getStart(sf),
+        end: node.getEnd(),
+        text: `((...__args) => ${RPC}(${JSON.stringify(name)}, __args))`,
+      });
     }
 
     // 1c) resource(fn) -> resource(fn, <owner 占位>, "调用点 key")
@@ -255,7 +268,7 @@ export function compile(
     //     只报 AST 上确知的函数 / 本文件的类实例 / 常见 Stream 类构造。
     //     标识符若看不出是什么，不猜 —— 误报会毁掉免疫系统的可信度。
     if (ts.isCallExpression(node)) {
-      if (isServerCallSite(node, serverNames)) {
+      if (isServerCallSite(node, serverNames, serverBindings)) {
         assertServerArgsSerializable(node, nonJsonNames, fileName);
       }
     }
@@ -602,13 +615,11 @@ function isNamePosition(n: any): boolean {
  *   - 其它 server() 函数名 —— 它们都会出现在同一份清单里，互相引用是合法的
  *   - 各 server() 函数体内的局部声明 —— 否则 A 的局部变量会误伤 B
  */
-function serverAmbientNames(sf: any): Set<string> {
+function serverAmbientNames(sf: any, bindings: ServerBindings): Set<string> {
   const serverFns: any[] = [];
   const scan = (n: any) => {
     if (
-      ts.isCallExpression(n) &&
-      ts.isIdentifier(n.expression) &&
-      n.expression.text === "server" &&
+      isServerFactoryCall(n, bindings) &&
       n.arguments.length &&
       (ts.isArrowFunction(n.arguments[0]) || ts.isFunctionExpression(n.arguments[0]))
     ) {
@@ -678,14 +689,10 @@ function assertServerSelfContained(
 }
 
 /** 本文件里绑定到 server() 的变量名 */
-function collectServerBoundNames(sf: any): Set<string> {
+function collectServerBoundNames(sf: any, bindings: ServerBindings): Set<string> {
   const names = new Set<string>();
   const scan = (n: any) => {
-    if (
-      ts.isCallExpression(n) &&
-      ts.isIdentifier(n.expression) &&
-      n.expression.text === "server"
-    ) {
+    if (isServerFactoryCall(n, bindings)) {
       let cur = n.parent;
       while (cur) {
         if (ts.isVariableDeclaration(cur) && ts.isIdentifier(cur.name)) {
@@ -729,21 +736,102 @@ function collectNonJsonBoundNames(sf: any): Set<string> {
   return names;
 }
 
-function isServerFactoryCall(n: any): boolean {
-  return (
-    ts.isCallExpression(n) &&
-    ts.isIdentifier(n.expression) &&
-    n.expression.text === "server"
-  );
+/**
+ * `server` 在本文件里的本地绑定。
+ *
+ * 编译器必须按**绑定**判定，而不是按标识符文本：`import { server as backend } from "plain"`
+ * 之后调用 `backend(...)`，旧实现只认文本 "server"，于是既不剥离、lint 也不报 ——
+ * 服务端函数（含其中的敏感字面量）被原样打进客户端产物。
+ */
+export interface ServerBindings {
+  /** 命名导入的本地名（含别名）；没有显式 server 导入时回退为 "server" */
+  names: Set<string>;
+  /** `import * as P from "plain"` 的命名空间名，用于识别 `P.server(...)` */
+  namespaces: Set<string>;
+}
+
+/**
+ * 解析文件里的 `server` 绑定：
+ *   - `import { server } from "plain"` / `import { server as backend } from "plain"`
+ *   - `import * as P from "plain"` → `P.server(...)`
+ *
+ * 命名导入不限定模块来源（中间模块再导出也要能剥离）；命名空间只认 "plain"，
+ * 避免把 `utils.server(...)` 这类无关调用误判成框架的 server()。
+ */
+export function collectServerBindings(sf: any): ServerBindings {
+  const names = new Set<string>();
+  const namespaces = new Set<string>();
+  for (const stmt of sf.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue;
+    const spec = stmt.moduleSpecifier;
+    if (!ts.isStringLiteral(spec)) continue;
+    const clause = stmt.importClause;
+    const nb = clause?.namedBindings;
+    if (!nb) continue;
+    if (ts.isNamespaceImport(nb)) {
+      if (spec.text === "plain") namespaces.add(nb.name.text);
+      continue;
+    }
+    if (!ts.isNamedImports(nb)) continue;
+    for (const el of nb.elements) {
+      const imported = el.propertyName ? el.propertyName.text : el.name.text;
+      if (imported === "server") names.add(el.name.text);
+    }
+  }
+  // 没有任何显式 server 导入时，保留对裸标识符 "server" 的识别：
+  // 兼容「通过中间模块导出」等静态看不穿、但过去能正确剥离的写法。
+  // 但本文件自己声明了 server（同名函数 / 变量）时不要回退 —— 那不是框架的 server()。
+  if (names.size === 0 && !declaresTopLevelName(sf, "server")) names.add("server");
+  return { names, namespaces };
+}
+
+/** 顶层是否声明了某个名字（函数 / 类 / 变量），用于避免把用户自己的 server 当成框架 API */
+function declaresTopLevelName(sf: any, text: string): boolean {
+  for (const stmt of sf.statements) {
+    if (
+      (ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt)) &&
+      stmt.name?.text === text
+    ) {
+      return true;
+    }
+    if (ts.isVariableStatement(stmt)) {
+      for (const d of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(d.name) && d.name.text === text) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * 判断一个节点是不是 `server(fn)` 工厂调用（含别名 / 命名空间形式）。
+ * 只看 AST 形状；`fn` 是否为函数表达式由调用方再判。
+ */
+export function isServerFactoryCall(
+  n: any,
+  bindings: ServerBindings = { names: new Set(["server"]), namespaces: new Set() }
+): boolean {
+  if (!ts.isCallExpression(n)) return false;
+  const callee = n.expression;
+  if (ts.isIdentifier(callee)) return bindings.names.has(callee.text);
+  if (ts.isPropertyAccessExpression(callee) && callee.name.text === "server") {
+    const obj = callee.expression;
+    return ts.isIdentifier(obj) && bindings.namespaces.has(obj.text);
+  }
+  return false;
 }
 
 /** 是「调用已经剥离的 server 函数」，不是 `server(fn)` 工厂本身 */
-function isServerCallSite(node: any, serverNames: Set<string>): boolean {
-  if (!ts.isCallExpression(node) || isServerFactoryCall(node)) return false;
+function isServerCallSite(
+  node: any,
+  serverNames: Set<string>,
+  bindings: ServerBindings
+): boolean {
+  if (!ts.isCallExpression(node) || isServerFactoryCall(node, bindings)) return false;
   const callee = node.expression;
   if (ts.isIdentifier(callee) && serverNames.has(callee.text)) return true;
   // server(fn)(args) 立即调用
-  if (isServerFactoryCall(callee)) return true;
+  if (isServerFactoryCall(callee, bindings)) return true;
   return false;
 }
 
@@ -1230,8 +1318,8 @@ function throwStmtJsxUncovered(stmt: any, at?: any): never {
     hint:
       "渲染函数 / 列表回调里能直接写 JSX 的位置是 `return`（含 if / try / 循环 / switch / 块），" +
       "以及 `const Row = () => <jsx/>;` 这种函数初始化。" +
-      "其它写法请把 JSX 挪进 `return`，或抽成一个返回 JSX 的组件函数；" +
-      "确要当值使用就先赋值给变量再插值。",
+      "其它写法请把 JSX 挪进 `return`，或抽成一个返回 JSX 的组件函数再调用；" +
+      "JSX 不能当普通值赋给变量（`const el = <a/>` 同样会报这个错）。",
   });
 }
 
@@ -1872,9 +1960,11 @@ function assertJsxCovered(sf: any, fileName: string): void {
         "'return (<jsx/>)'、'return cond ? <a/> : <b/>'、'return cond && <a/>'、" +
         "'return xs.map(x => <li/>)'；列表用 'arr.map(x => <jsx/>)'；" +
         "条件用 '{cond ? <a/> : <b/>}' 或 '{cond && <a/>}'。" +
-        "不支持的形状（'||' / '??' 短路的 JSX、数组字面量、IIFE、链式后置 .filter()）" +
-        "请先赋值给变量再插值：const node = cond || <a/>; 然后 {node}；" +
-        "或把该分支抽成一个返回 JSX 的组件函数。",
+        "不支持的形状（'||' / '??' 短路的 JSX、数组字面量、IIFE、链式后置 .filter()）请这样改：" +
+        "'||' / '??' 改用三元 '{cond ? <a/> : null}'；" +
+        "多个 JSX 直接并排写在同一个父元素 / Fragment 里；" +
+        "IIFE 抽成返回 JSX 的组件函数（function A(){ return <a/>; } 然后 <A/>）；" +
+        "'.filter(...).map(...)' 改成先 filter 再 map。",
     });
   }
 }

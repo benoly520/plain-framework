@@ -145,7 +145,7 @@ compile(source, fileName, { mapSource, keyBase, sourceMap }) -> { code, serverFu
    - `server(fn)` → RPC 桩 + 把函数体收进 `serverFunctions`（§6.1）
    - `resource(fn)` → 补上「调用点 key」（§7.4）
    - 组件箭头简洁体 / 渲染函数里的 `return` → 换成 `{ …建 fragment… }` 块
-   - `PLAIN_E1005/E1006/E1007/E1008/E1009–E1011` 的检查
+   - `PLAIN_E1005/E1006/E1007/E1008/E1009–E1012` 的检查
 3. `assertJsxCovered()`：**每一个 JSX 都必须落在一个「编译器会 emit 它」的位置**（§2.4），否则 `PLAIN_E1001`。
 4. `applyEdits()`：按区间切片拼接，同时记录 `EditSegment`（产物区间 ↔ 源码区间）。
 5. 前置一行 `HELPER_IMPORT`（全用别名，避免和用户 import 撞名）。

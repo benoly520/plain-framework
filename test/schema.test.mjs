@@ -29,6 +29,18 @@ test("函数声明组件：props / 渲染标签 / 行号", () => {
   assert.ok(s.exports.includes("Card"));
 });
 
+test("[回归] server 函数：别名导入同样识别（与编译器剥离同口径）", () => {
+  const s = extractSchema(
+    [
+      'import { server as backend } from "plain";',
+      "export const load = backend(async (id) => ({ id }));",
+    ].join("\n"),
+    "alias.tsx"
+  );
+  assert.equal(s.serverFunctions.length, 1);
+  assert.equal(s.serverFunctions[0].name, "load");
+});
+
 test("箭头函数组件 + children：children 不进 props 但 hasChildren 为真", () => {
   const s = extractSchema(
     [

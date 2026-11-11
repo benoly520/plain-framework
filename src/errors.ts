@@ -28,6 +28,7 @@ export type PlainErrorCode =
   | "PLAIN_E1009"
   | "PLAIN_E1010"
   | "PLAIN_E1011"
+  | "PLAIN_E1012"
   | "PLAIN_E1101"
   | "PLAIN_E1102"
   | "PLAIN_E1103"
@@ -137,6 +138,11 @@ export const ERROR_CATALOG: Record<PlainErrorCode, ErrorEntry> = {
     code: "PLAIN_E1011",
     suppressible: false,
     summary: "`ref` 回调不能是 `async`（清理与异步不兼容）",
+  },
+  PLAIN_E1012: {
+    code: "PLAIN_E1012",
+    suppressible: false,
+    summary: "`server()` 的参数必须是内联函数（否则无法物理剥离）",
   },
 
   // --- E11xx lint：可自动修 ----------------------------------------------
