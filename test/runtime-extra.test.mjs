@@ -20,7 +20,7 @@ const { signal, computed, effect, createScope, onCleanup, getOwner, rowProxy } =
 const { mount, createSlot, place, stringifySafe, nodesOf } = await import(
   "../dist/runtime/dom.js"
 );
-const { resource, server } = await import("../dist/runtime/async.js");
+const { resource, server, rpc, setRpcBatching } = await import("../dist/runtime/async.js");
 const { ErrorBoundary } = await import("../dist/runtime/error.js");
 const { createRouter } = await import("../dist/runtime/router.js");
 
@@ -58,6 +58,23 @@ test("computed 随依赖更新，且读法与 signal 一致", () => {
   assert.equal(doubled(), 10);
 });
 
+test("[回归] 菱形依赖：消费者不会看到一 new 一 old 的中间态", () => {
+  const source = signal(1);
+  const a = computed(() => source() * 2);
+  const b = computed(() => source() * 3);
+  const seen = [];
+  effect(() => {
+    seen.push([a(), b()]);
+  });
+  assert.deepEqual(seen, [[2, 3]]);
+  source.set(2);
+  assert.deepEqual(
+    seen,
+    [[2, 3], [4, 6]],
+    "computed 应先于消费者更新，不能出现 [4,3] 这种中间态"
+  );
+});
+
 test("getOwner / onCleanup / createScope 回收", () => {
   assert.equal(getOwner(), null);
 
@@ -74,6 +91,28 @@ test("getOwner / onCleanup / createScope 回收", () => {
   scope.dispose();
   assert.equal(cleaned, 1);
   assert.equal(scope.value, undefined);
+});
+
+test("[回归] effect 重跑期新建的子 effect 仍归入创建时的 scope", () => {
+  const trigger = signal(0);
+  const dep = signal(0);
+  let childRuns = 0;
+  const scope = createScope(() => {
+    effect(() => {
+      trigger();
+      effect(() => {
+        dep();
+        childRuns++;
+      });
+    });
+  });
+  assert.equal(childRuns, 1, "父 effect 首跑会建一个子 effect");
+  trigger.set(1); // 父 effect 重跑，期间新建子 effect
+  assert.equal(childRuns, 2);
+  scope.dispose();
+  dep.set(1); // 所有子 effect 都应随 scope 回收
+  trigger.set(2); // 父 effect 也已回收，不应再重跑
+  assert.equal(childRuns, 2, "dispose 后不应再有子 effect 响应");
 });
 
 test("rowProxy：读 / 写 / in / keys / 描述符 / toPrimitive / 空行", () => {
@@ -173,6 +212,65 @@ test("resource：refetch 强制重取并返回新值", async () => {
   assert.equal(next, 2);
   assert.equal(r.data(), 2);
   assert.equal(r.loading(), false);
+});
+
+test("[回归] refetch：后发先完成时，先发的旧结果不覆盖新数据", async () => {
+  const resolvers = [];
+  const r = resource(
+    () => new Promise((resolve) => resolvers.push(resolve))
+  );
+  await tick(); // 自动请求（#1）
+  const p1 = r.refetch(); // #2
+  await tick();
+  const p2 = r.refetch(); // #3
+  await tick();
+  resolvers[2]("new");
+  await p2;
+  resolvers[1]("old"); // 迟到的旧响应
+  await p1;
+  await tick();
+  assert.equal(r.data(), "new", "旧请求的迟到结果不应覆盖新数据");
+  assert.equal(r.loading(), false);
+});
+
+test("[回归] refetch：失败后 loading 归 false、error 落到状态", async () => {
+  let fail = false;
+  const r = resource(() =>
+    fail ? Promise.reject(new Error("refetch boom")) : Promise.resolve(1)
+  );
+  await tick();
+  await tick();
+  fail = true;
+  await assert.rejects(() => r.refetch(), /refetch boom/);
+  assert.equal(r.loading(), false, "失败后 loading 必须归位");
+  assert.equal(r.error().message, "refetch boom", "失败必须落到 error 状态");
+});
+
+test("[回归] 批量 RPC 5xx：直接失败，不重放单条请求（避免写操作重复执行）", async () => {
+  const seen = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    seen.push(String(url));
+    if (String(url).endsWith("/batch")) {
+      return { ok: false, status: 500, statusText: "boom", json: async () => ({}) };
+    }
+    return { ok: true, status: 200, json: async () => ({ result: null }) };
+  };
+  setRpcBatching(true);
+  try {
+    await assert.rejects(
+      () => Promise.all([rpc("write", [1]), rpc("write", [2])]),
+      /500/
+    );
+    assert.equal(
+      seen.filter((u) => u === "/_plain/rpc").length,
+      0,
+      "5xx 无法确定服务端是否已执行，不能重放"
+    );
+  } finally {
+    setRpcBatching(false);
+    globalThis.fetch = origFetch;
+  }
 });
 
 test("server()：运行时透传原函数并打标记", () => {

@@ -97,20 +97,40 @@ export function resource<T>(
   out.loading = loading;
   out.error = error;
   out.refetch = () => {
-    // 强制重跑（暂用于手动刷新）
+    // 与自动请求共用同一个 seq：依赖变化 / 再次刷新都会让旧请求过期，
+    // 避免「后发的先完成、先发的后完成」把新数据覆盖成旧数据。
+    const ticket = ++seq;
     batch(() => {
       loading.set(true);
       error.set(undefined);
     });
     return Promise.resolve()
       .then(() => promiseFn())
-      .then((v: T) => {
-        batch(() => {
-          data.set(v);
-          loading.set(false);
-        });
-        return v;
-      });
+      .then(
+        (v: T) => {
+          if (ticket === seq) {
+            if (slot) {
+              slot.settled = true;
+              slot.value = v;
+            }
+            batch(() => {
+              data.set(v);
+              loading.set(false);
+            });
+          }
+          return v;
+        },
+        (e: unknown) => {
+          // 失败也必须落状态：否则 loading 永远为 true、error 永远为空
+          if (ticket === seq) {
+            batch(() => {
+              error.set(e as Error);
+              loading.set(false);
+            });
+          }
+          throw e;
+        }
+      );
   };
   return out as Resource<T>;
 }
@@ -174,7 +194,11 @@ async function flushQueue(): Promise<void> {
         calls: batch.map((c) => ({ name: c.name, args: c.args || [] })),
       }),
     });
-    if (!res.ok) throw new Error(`RPC batch 失败: ${res.status} ${res.statusText}`);
+    if (!res.ok) {
+      const err: any = new Error(`RPC batch 失败: ${res.status} ${res.statusText}`);
+      err.status = res.status;
+      throw err;
+    }
     const body = await res.json();
     const results = (body && body.results) || [];
     batch.forEach((c, i) => {
@@ -184,8 +208,17 @@ async function flushQueue(): Promise<void> {
       else c.resolve(r.result);
     });
   } catch (e) {
-    // 批量端点不可用 / 网络错误：退化成逐条请求，保证调用不失败
-    for (const c of batch) singleFetch(c.name, c.args).then(c.resolve, c.reject);
+    // 只有「批量请求确定没有被业务逻辑执行」时才允许退化成逐条重放：
+    //   - 404 / 405 / 501：端点不存在或不支持，请求没进入业务逻辑 —— 安全；
+    //   - 网络错误 / 5xx / 响应解析失败：无法确定服务端是否已经执行，
+    //     直接失败。否则写操作会被重复执行（响应丢失时尤其危险）。
+    const status = (e as any)?.status;
+    if (status === 404 || status === 405 || status === 501) {
+      for (const c of batch) singleFetch(c.name, c.args).then(c.resolve, c.reject);
+      return;
+    }
+    const err = e instanceof Error ? e : new Error(String(e));
+    for (const c of batch) c.reject(err);
   }
 }
 

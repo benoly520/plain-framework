@@ -12,7 +12,10 @@ import { getSSRStore } from "./ssr-context.js";
  * 否则 SSR 永远只渲染 `/`，多路由的 SEO 就白做了。
  */
 function currentPath(mode: string, ssrUrl?: string | null): string {
-  if (typeof window === "undefined") return ssrUrl || "/";
+  // 路由只认 pathname：服务端上下文里存的是完整请求 URL（含 query），
+  // 客户端 location.pathname 本来就不含 query —— 两边保持一致，
+  // 否则 `/search?q=a` 会在服务端匹配不到 `/search` 路由。
+  if (typeof window === "undefined") return (ssrUrl || "/").split("?")[0].split("#")[0] || "/";
   if (mode === "hash") return window.location.hash.slice(1) || "/";
   return window.location.pathname || "/";
 }
