@@ -17,6 +17,18 @@ import {
 // React 拼写的兼容面（className / htmlFor）—— 与编译器用的是**同一张表**，
 // 于是「收下兼容拼写」与「提示改回规范名」不会各写各的（见 src/attrs.ts）。
 import { REACT_COMPAT_ALIASES } from "./attrs.js";
+import {
+  formatLocalizedIssues,
+  renderLintMessage,
+  resolveLocale,
+  type LintMessage,
+  type LintMessageId,
+} from './diagnostics.js';
+
+/** 契约检查的可选诊断配置。 */
+export interface CheckOptions {
+  locale?: string;
+}
 
 export interface LintIssue {
   line: number;
@@ -25,6 +37,8 @@ export interface LintIssue {
   /** 统一错误码，如 `PLAIN_E1107`；与编译器 / 构建期码同一套编号 */
   code: PlainErrorCode;
   message: string;
+  messageId?: LintMessageId;
+  params?: Record<string, string>;
   fix?: { start: number; end: number; text: string };
 }
 
@@ -33,7 +47,7 @@ type AddIssue = (
   node: ts.Node,
   level: "error" | "warn",
   code: PlainErrorCode,
-  message: string,
+  message: LintMessage,
   fix?: { start: number; end: number; text: string }
 ) => void;
 
@@ -105,8 +119,12 @@ export function suppressionCount(source: string): number {
 export function check(
   source: string,
   fileName = "module.tsx",
-  kind: ts.ScriptKind = isTsx(fileName)
+  kindOrOptions: ts.ScriptKind | CheckOptions = isTsx(fileName),
+  options: CheckOptions = {}
 ): LintIssue[] {
+  const kind = typeof kindOrOptions === 'number' ? kindOrOptions : isTsx(fileName);
+  const config = typeof kindOrOptions === 'number' ? options : kindOrOptions;
+  const locale = resolveLocale(config.locale || 'zh-CN');
   const sf = ts.createSourceFile(
     fileName,
     source,
@@ -121,7 +139,8 @@ export function check(
   // 反模式 20：const x = useContext(Ctx) —— x 是 getter，直接取属性会静默取到函数成员
   const ctxGetters = collectContextGetters(sf);
   const ignores = collectIgnores(source);
-  const add = (node: ts.Node, level: "error" | "warn", code: PlainErrorCode, message: string, fix?: { start: number; end: number; text: string }) => {
+  /** 登记规则诊断，抑制匹配使用稳定错误码。 */
+  const add: AddIssue = (node, level, code, message, fix) => {
     const { line, character } = sf.getLineAndCharacterOfPosition(
       node.getStart(sf)
     );
@@ -133,7 +152,8 @@ export function check(
       column: character + 1,
       level,
       code,
-      message,
+      message: renderLintMessage(message, locale),
+      ...message,
       fix,
     });
   };
@@ -152,7 +172,7 @@ export function check(
         node,
         "error",
         "PLAIN_E1101",
-        `不能直接给 signal 变量 "${node.left.text}" 赋值，要用 "${node.left.text}.set(...)"`,
+        { messageId: 'signalAssignment', params: { name: node.left.text } },
         {
           start: node.getStart(sf),
           end: node.getEnd(),
@@ -177,7 +197,7 @@ export function check(
         node,
         "error",
         "PLAIN_E1102",
-        `signal 要调用取值："{${node.expression.text}()}"`,
+        { messageId: 'signalValue', params: { name: node.expression.text } },
         {
           start: node.expression.getStart(sf),
           end: node.expression.getEnd(),
@@ -201,7 +221,7 @@ export function check(
         node,
         "error",
         "PLAIN_E1102",
-        `属性里的 signal 要调用取值："{${id.text}()}"`,
+        { messageId: 'signalAttribute', params: { name: id.text } },
         {
           start: id.getStart(sf),
           end: id.getEnd(),
@@ -223,8 +243,7 @@ export function check(
           node,
           "warn",
           "PLAIN_E1115",
-          `属性名 "${name}" 是 React 拼写；规范写法是原生 HTML 名 "${renamed}"` +
-            `（两者等价，check 会自动改写）`,
+          { messageId: 'reactAttribute', params: { name, renamed } },
           {
             start: node.name.getStart(sf),
             end: node.name.getEnd(),
@@ -242,7 +261,7 @@ export function check(
           node,
           "error",
           "PLAIN_E1103",
-          `Plain 没有 ${n}：状态用 signal()，副作用用 effect()，派生值用 computed()`
+          { messageId: 'reactHook', params: { name: n } }
         );
       }
     }
@@ -259,7 +278,7 @@ export function check(
         node,
         "error",
         "PLAIN_E1104",
-        "禁止 innerHTML / insertAdjacentHTML：用 createTextNode / {expr} 插值"
+        { messageId: 'unsafeHtml' }
       );
     }
 
@@ -283,8 +302,10 @@ export function check(
         node,
         "error",
         "PLAIN_E1106",
-        `不要就地修改 signal 的值（"${node.getText(sf)}"，signal 是 ${name}）：` +
-          `请生成新值再 set，例如 ${name}.set([...${name}(), x])`
+        { messageId: 'mutateSignal', params: {
+          expr: node.getText(sf),
+          name,
+        } }
       );
     }
 
@@ -421,8 +442,11 @@ export function check(
           node,
           "error",
           "PLAIN_E1114",
-          `useContext 的返回值是 getter，要先调用再取属性（"${node.getText(sf)}" 会取到函数自身的成员）。` +
-            `改成 ${target.getText(sf)}()${suffix}`
+          { messageId: 'contextGetter', params: {
+            expr: node.getText(sf),
+            target: target.getText(sf),
+            suffix,
+          } }
         );
       }
     }
@@ -434,8 +458,7 @@ export function check(
         node,
         "error",
         "PLAIN_E1109",
-        "不要在 effect 里用 async：依赖收集在第一个 await 之后就失效了（后续读到的 signal 不会订阅）。" +
-          "把 await 提到 effect 外，或用 resource(() => …) 承载异步"
+        { messageId: 'asyncEffect' }
       );
     }
 
@@ -447,8 +470,7 @@ export function check(
           node,
           "error",
           "PLAIN_E1110",
-          `effect 里把 "${loop}()" 读出来又写回 "${loop}"，会自触发死循环：` +
-            `派生值用 computed(() => …)，或在 effect 里只写「没读过」的 signal`
+          { messageId: 'effectLoop', params: { name: loop } }
         );
       }
     }
@@ -462,7 +484,7 @@ export function check(
           node,
           "error",
           "PLAIN_E1111",
-          `computed 里不要写 signal（"${written}.set(…)"）：派生值必须是纯函数，副作用放 effect 里`
+          { messageId: 'computedWrite', params: { name: written } }
         );
       }
     }
@@ -495,14 +517,22 @@ export function autofix(source: string, issues: LintIssue[]): string {
   return out;
 }
 
-export function formatIssues(issues: LintIssue[], fileName: string): string {
-  const icon = { error: "x", warn: "!" };
+/** 格式化诊断；省略语言时保持现有消息不变。 */
+export function formatIssues(
+  issues: LintIssue[],
+  fileName: string,
+  locale?: string
+): string {
+  if (locale) {
+    return formatLocalizedIssues(issues, fileName, resolveLocale(locale));
+  }
+  const icon = { error: 'x', warn: '!' };
   return issues
     .map(
       (i) =>
-        `  ${icon[i.level] || "!"} ${fileName}:${i.line}:${i.column}  [${i.code}] ${i.message}`
+        `  ${icon[i.level] || '!'} ${fileName}:${i.line}:${i.column}  [${i.code}] ${i.message}`
     )
-    .join("\n");
+    .join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -588,12 +618,8 @@ function propsAccessText(n: ts.Node): string {
 }
 
 /** 把 props 取值快照进变量时的统一提示（声明形态 / 赋值形态共用） */
-function snapshotMessage(name: string, access: string): string {
-  return (
-    `不要把 props 取值快照进变量（"${name} = ${access}"）：` +
-    `props 是实时值，存进变量只是此刻的值，signal 变化后不会更新。` +
-    `在 JSX / effect 里直接读 ${access}，或写成 thunk：const ${name} = () => ${access}`
-  );
+function snapshotMessage(name: string, access: string): LintMessage {
+  return { messageId: 'propsSnapshot', params: { name, access } };
 }
 
 /**
@@ -700,21 +726,17 @@ function looksLikeFunctionPropName(name: string): boolean {
   );
 }
 
-function derivedSnapshotMessage(name: string, expr: string): string {
-  return (
-    `不要把 props / signal 的复合读取存进变量（"${name} = ${expr}"）：` +
-    `组件体只执行一次，这里得到的是挂载时的快照，依赖变化后不会更新。` +
-    `把读取放进 JSX / effect，派生值用 computed(() => …)，或写成 thunk：` +
-    `const ${name} = () => (${expr})`
-  );
+/** 创建复合读取快照的结构化提示。 */
+function derivedSnapshotMessage(name: string, expr: string): LintMessage {
+  return { messageId: 'derivedSnapshot', params: { name, expr } };
 }
 
-function functionValueMessage(expr: string, name: string): string {
-  const fix =
-    name === "children"
-      ? `children 是 lazy subtree，写成 {${expr}()}`
-      : `按函数调用：{${expr}(…)}`;
-  return `不要把函数型 prop 当值插值（"${expr}" 会渲染函数源码）：${fix}`;
+/** 根据函数型 prop 的类别创建调用建议。 */
+function functionValueMessage(expr: string, name: string): LintMessage {
+  return {
+    messageId: name === 'children' ? 'childrenValue' : 'functionValue',
+    params: { expr, name },
+  };
 }
 
 const MUTATING_METHODS = new Set([
@@ -1030,20 +1052,21 @@ function isComponentPropsBinding(
 /** 反模式 5 的提示：参数解构、props 链解构、裸 props 解构的改法各不相同 */
 function propsDestructureMessage(
   node: ts.VariableDeclaration | ts.ParameterDeclaration
-): string {
-  const head = "不要解构 props：解构拿到的是此刻的值，signal 变化后不会更新。";
+): LintMessage {
   if (ts.isParameter(node)) {
-    return head + `改成 function Card(props)，再在 JSX / effect 里直接读 props.x`;
+    return { messageId: 'destructureParameter' };
   }
   const init = unwrapExpr(node.initializer!);
   if (isPropsChain(init)) {
-    return head + `不要在组件体里先取 ${init.getText()}，直接在 JSX / effect 里读它的属性`;
+    return {
+      messageId: 'destructureChain',
+      params: { access: init.getText() },
+    };
   }
-  const p = init.getText();
-  return (
-    head +
-    `直接在 JSX / effect 里读 ${p}.x，或写成 thunk：const x = () => ${p}.x`
-  );
+  return {
+    messageId: 'destructureProps',
+    params: { access: init.getText() },
+  };
 }
 
 /** 与编译器口径一致：这个函数会不会被当成组件（排除 map/resource 之类的回调参数） */
@@ -1149,9 +1172,7 @@ function checkModuleScopeResource(sf: ts.SourceFile, add: AddIssue): void {
         node,
         "error",
         "PLAIN_E1113",
-        "不要在模块作用域创建 resource()：它内部是 effect，会在模块被 import 时立刻执行" +
-          "（App 还没挂载、SSR 导入模块时就会发请求），而且没有 owner 可回收。" +
-          "把 resource() 放进组件函数体，或放进 createScope(() => …) 里"
+        { messageId: 'moduleResource' }
       );
     }
     const next = inFunction || ts.isFunctionLike(node);
@@ -1233,9 +1254,10 @@ function checkEagerForwardRef(sf: ts.SourceFile, add: AddIssue): void {
             node,
             "error",
             "PLAIN_E1201",
-            `顶层 ${node.expression.text} 创建即求值，但引用了后面才声明的 ${shown}。` +
-              `把 ${shown} 的声明挪到这个调用之前（const 有暂时性死区，import 时就会抛 ` +
-              `ReferenceError: Cannot access '…' before initialization）`
+            { messageId: 'forwardReference', params: {
+              name: node.expression.text,
+              shown,
+            } }
           );
         }
       }

@@ -14,6 +14,7 @@ import {
   writeServerManifest,
 } from "../compiler/manifest.js";
 import { check, formatIssues } from "../lint.js";
+import { resolveLocale } from '../diagnostics.js';
 import { transformWithEsbuild } from "vite";
 import path from "node:path";
 import fs from "node:fs";
@@ -39,6 +40,8 @@ export default function plainPlugin(options: {
    * - false：关闭
    */
   lint?: "error" | "warn" | false;
+  /** 诊断输出语言；未指定时按 PLAIN_LOCALE 和系统环境解析。 */
+  locale?: string;
   /**
    * **dev 下的 SSR**（可选）。给**源码**入口就行 —— 不必先构建：
    *
@@ -59,6 +62,7 @@ export default function plainPlugin(options: {
     hmr = true,
     ssr,
   } = options;
+  const locale = resolveLocale(options.locale);
   const registry = new Map<string, any>(); // name -> 可执行的 server 函数（仅 dev 需要）
   /** name -> 函数体源码。清单只要文本，build 不解析函数体（见下方 transform 注释） */
   const registryByBody = new Map<string, string>();
@@ -141,9 +145,9 @@ export default function plainPlugin(options: {
           // 如 PLAIN_E1115 React 拼写属性名）只提示，绝不阻断构建。
           const blocking = issues.filter((i: any) => i.level === "error");
           if (blocking.length && lint === "error") {
-            throw toLintError(issues, fileName);
+            throw toLintError(issues, fileName, locale);
           }
-          reportWarn(this, formatIssues(issues, fileName));
+          reportWarn(this, formatIssues(issues, fileName, locale));
         }
       }
 
@@ -163,6 +167,7 @@ export default function plainPlugin(options: {
       //    可读、不泄漏构建机绝对路径，且 SSR 构建与客户端构建对同一份源码得到同一个 key。
       const result = compile(stripped.code, id.split("/").pop() || "module.jsx", {
         mapSource: id,
+        locale,
         keyBase: path.relative(root, fileName),
       });
 
@@ -263,18 +268,31 @@ if (import.meta.hot) {
 }
 
 /** 把 lint 问题包装成结构化编译错误，构建失败的输出里带规则码与位置 */
-function toLintError(issues: any[], fileName: string): PlainCompileError {
+function toLintError(
+  issues: ReturnType<typeof check>,
+  fileName: string,
+  locale: ReturnType<typeof resolveLocale>
+): PlainCompileError {
   const first = issues[0];
-  const fixable = issues.filter((i: any) => i.fix).length;
+  const fixable = issues.filter((issue) => issue.fix).length;
+  const heading = locale === 'en'
+    ? `Contract checks failed (${issues.length} ${issues.length === 1 ? 'issue' : 'issues'}):`
+    : `契约检查未通过（${issues.length} 处）：`;
+  const hint = locale === 'en'
+    ? (fixable
+      ? `${fixable} can be fixed automatically: run \`plaindev check --fix\``
+      : 'Fix the issues using the rule codes above, then rebuild')
+    : (fixable
+      ? `其中 ${fixable} 处可自动修：运行 \`plaindev check --fix\``
+      : '按上面的规则码修正写法后重新构建');
   return new PlainCompileError({
-    code: "PLAIN_E2001",
+    code: 'PLAIN_E2001',
     file: fileName,
     line: first.line,
     column: first.column,
-    detail: `契约检查未通过（${issues.length} 处）：\n${formatIssues(issues, fileName)}`,
-    hint: fixable
-      ? `其中 ${fixable} 处可自动修：运行 \`plaindev check --fix\``
-      : "按上面的规则码修正写法后重新构建",
+    locale,
+    detail: `${heading}\n${formatIssues(issues, fileName, locale)}`,
+    hint,
   });
 }
 

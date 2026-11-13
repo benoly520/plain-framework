@@ -13,6 +13,8 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { check } from "../lint.js";
 import type { LintIssue } from "../lint.js";
+import { localizeIssue, resolveLocale } from '../diagnostics.js';
+import type { PlainLocale } from '../diagnostics.js';
 
 const pkg = (() => {
   try {
@@ -41,7 +43,7 @@ function fileNameOf(uri: unknown): string | null {
  * LintIssue 只有「起点的行 / 列」，没有终点 —— 这里把范围延伸到**行尾**，
  * 语义上等价于「这一行这里有问题」，且客户端高亮可读。
  */
-function toDiagnostics(text: string, fileName: string): any[] {
+function toDiagnostics(text: string, fileName: string, locale: PlainLocale): any[] {
   if (!SOURCE_EXT.test(fileName)) return [];
   const lines = text.split("\n");
   return check(text, fileName).map((i: LintIssue) => {
@@ -56,9 +58,11 @@ function toDiagnostics(text: string, fileName: string): any[] {
       severity: i.level === "warn" ? 2 : 1,
       code: i.code,
       source: "plain",
-      message: i.fix
-        ? `${i.message}\n（可自动修：plaindev check --fix）`
-        : i.message,
+      message: `${localizeIssue(i, locale)}${i.fix
+        ? locale === 'zh-CN'
+          ? '\n（可自动修：plaindev check --fix）'
+          : '\n(Auto-fix: plaindev check --fix)'
+        : ''}`,
     };
   });
 }
@@ -70,8 +74,11 @@ function toDiagnostics(text: string, fileName: string): any[] {
  */
 export function serveLsp(
   input: NodeJS.ReadableStream = process.stdin,
-  output: NodeJS.WriteStream = process.stdout
+  output: NodeJS.WriteStream = process.stdout,
+  options: { locale?: string } = {}
 ): Promise<void> {
+  const explicit = options.locale === 'auto' ? undefined : options.locale;
+  let locale = resolveLocale(explicit);
   return new Promise((resolve) => {
     let buf = Buffer.alloc(0);
     const docs = new Map<string, string>();
@@ -101,13 +108,21 @@ export function serveLsp(
       const text = docs.get(uri);
       const file = fileNameOf(uri);
       const diagnostics =
-        text === undefined || !file ? [] : toDiagnostics(text, file);
+        text === undefined || !file ? [] : toDiagnostics(text, file, locale);
       notify("textDocument/publishDiagnostics", { uri, diagnostics });
     };
 
     const handle = (msg: any): void => {
       const { id, method, params } = msg || {};
       if (method === "initialize") {
+        const clientLocale = typeof params?.locale === 'string' &&
+          /^(?:zh(?:-CN)?|en)(?:[-_].*)?$/i.test(params.locale)
+          ? params.locale
+          : undefined;
+        const envLocale = process.env.PLAIN_LOCALE === 'auto'
+          ? undefined
+          : process.env.PLAIN_LOCALE;
+        locale = resolveLocale(explicit || envLocale || clientLocale);
         reply(id, {
           capabilities: { textDocumentSync: 1 }, // 1 = Full
           serverInfo: { name: "plaindev", version: pkg.version },

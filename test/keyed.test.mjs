@@ -10,6 +10,8 @@ import { JSDOM } from "jsdom";
 import * as esbuild from "esbuild";
 import { compile, PlainCompileError } from "../dist/compiler/index.js";
 
+process.env.PLAIN_LOCALE = 'zh-CN';
+
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "http://localhost/",
 });

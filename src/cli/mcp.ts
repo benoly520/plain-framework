@@ -7,7 +7,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { formatLocalizedIssues, resolveLocale } from '../diagnostics.js';
+import type { PlainLocale } from '../diagnostics.js';
 
 const PROTOCOL_VERSION = "2024-11-05";
 const IGNORE = /node_modules|\.plain|dist|\.git|coverage/;
@@ -48,6 +49,29 @@ export const TOOLS = [
   },
 ];
 
+/** 按 locale 返回工具描述，避免改变导出的基础工具契约。 */
+function localizedTools(locale: PlainLocale): typeof TOOLS {
+  if (locale === 'zh-CN') return TOOLS;
+  return TOOLS.map((tool) => ({
+    ...tool,
+    description: tool.name === 'plain_check'
+      ? 'Run Plain contract checks and return rule codes, locations, and fixes.'
+      : 'Extract component, server, and route contracts as JSON.',
+    inputSchema: {
+      ...tool.inputSchema,
+      properties: {
+        ...tool.inputSchema.properties,
+        target: {
+          ...tool.inputSchema.properties.target,
+          description: tool.name === 'plain_check'
+            ? 'File or directory path, default src (relative to the working directory)'
+            : 'Directory path, default src',
+        },
+      },
+    },
+  }));
+}
+
 /** 递归收集源码文件（与 plaindev check 同口径） */
 function collectFiles(target: string): string[] {
   const exts = /\.(tsx|jsx|ts|js)$/;
@@ -66,11 +90,11 @@ function collectFiles(target: string): string[] {
 }
 
 /** 执行一个工具，返回给模型看的纯文本 */
-async function callTool(name: unknown, args: any): Promise<string> {
+async function callTool(name: unknown, args: any, locale: PlainLocale): Promise<string> {
   const target = path.resolve(args?.target || "src");
 
   if (name === "plain_check") {
-    const { check, formatIssues } = await import("../lint.js");
+    const { check } = await import('../lint.js');
     const files = collectFiles(target);
     const blocks: string[] = [];
     let total = 0;
@@ -80,11 +104,15 @@ async function callTool(name: unknown, args: any): Promise<string> {
       const issues = check(src, rel);
       if (!issues.length) continue;
       total += issues.length;
-      blocks.push(`${rel}\n${formatIssues(issues, rel)}`);
+      blocks.push(`${rel}\n${formatLocalizedIssues(issues, rel, locale)}`);
     }
     return total
-      ? `契约检查未通过：共 ${total} 处问题\n\n${blocks.join("\n\n")}`
-      : `契约检查通过（${files.length} 个文件）`;
+      ? locale === 'zh-CN'
+        ? `契约检查未通过：共 ${total} 处问题\n\n${blocks.join('\n\n')}`
+        : `Contract checks failed: ${total} issue(s)\n\n${blocks.join('\n\n')}`
+      : locale === 'zh-CN'
+        ? `契约检查通过（${files.length} 个文件）`
+        : `Contract checks passed (${files.length} files)`;
   }
 
   if (name === "plain_schema") {
@@ -92,11 +120,17 @@ async function callTool(name: unknown, args: any): Promise<string> {
     return JSON.stringify(scanProject(target), null, 2);
   }
 
-  throw new Error(`未知工具：${String(name)}`);
+  throw new Error(locale === 'zh-CN'
+    ? `未知工具：${String(name)}`
+    : `Unknown tool: ${String(name)}`);
 }
 
 /** 处理一行 JSON-RPC；通知不回复 */
-async function handleLine(line: string, output: NodeJS.WriteStream): Promise<void> {
+async function handleLine(
+  line: string,
+  output: NodeJS.WriteStream,
+  locale: PlainLocale
+): Promise<void> {
   let msg: any;
   try {
     msg = JSON.parse(line);
@@ -124,10 +158,10 @@ async function handleLine(line: string, output: NodeJS.WriteStream): Promise<voi
     } else if (method === "notifications/initialized" || method === "initialized") {
       return; // 通知，无 id，不回
     } else if (method === "tools/list") {
-      reply({ tools: TOOLS });
+      reply({ tools: localizedTools(locale) });
     } else if (method === "tools/call") {
       try {
-        const text = await callTool(params?.name, params?.arguments);
+        const text = await callTool(params?.name, params?.arguments, locale);
         reply({ content: [{ type: "text", text }] });
       } catch (e: any) {
         // 工具自身报错也要按协议回，让模型看到原因
@@ -152,8 +186,10 @@ async function handleLine(line: string, output: NodeJS.WriteStream): Promise<voi
  */
 export function serveStdio(
   input: NodeJS.ReadableStream = process.stdin,
-  output: NodeJS.WriteStream = process.stdout
+  output: NodeJS.WriteStream = process.stdout,
+  options: { locale?: string } = {}
 ): Promise<void> {
+  const locale = resolveLocale(options.locale === 'auto' ? undefined : options.locale);
   return new Promise((resolve) => {
     let buf = "";
     let chain: Promise<void> = Promise.resolve();
@@ -164,7 +200,7 @@ export function serveStdio(
       while ((i = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, i).trim();
         buf = buf.slice(i + 1);
-        if (line) chain = chain.then(() => handleLine(line, output));
+        if (line) chain = chain.then(() => handleLine(line, output, locale));
       }
     });
     input.on("end", () => {

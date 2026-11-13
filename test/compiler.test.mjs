@@ -3,6 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compile } from "../dist/compiler/index.js";
 
+process.env.PLAIN_LOCALE = 'zh-CN';
+
 const jsx = (...lines) => lines.join("\n");
 
 test("基础元素：生成建 DOM 代码、无 innerHTML、helper 走别名 import", () => {

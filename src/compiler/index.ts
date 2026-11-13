@@ -8,12 +8,27 @@
 //   2. 不生成 innerHTML / eval
 //   3. 遇到不支持的 JSX 形态必须报带行号的错误，而不是静默产出坏代码
 
-import ts from "typescript";
-import type { PlainErrorCode } from "../errors.js";
+import ts from 'typescript';
+import type { PlainErrorCode } from '../errors.js';
+import { resolveLocale } from '../diagnostics.js';
+import type { PlainLocale } from '../diagnostics.js';
 // 属性「拼写 -> 落地方式」的唯一归一化表（静态 / 动态 / SVG 判定都走它）
-import { canonicalAttrName, resolveAttr, REFLECTED_ATTRS } from "../attrs.js";
+import { canonicalAttrName, resolveAttr, REFLECTED_ATTRS } from '../attrs.js';
 
-export type { PlainErrorCode } from "../errors.js";
+export type { PlainErrorCode } from '../errors.js';
+
+/** 双语编译诊断，保留动态源码与完整修复说明。 */
+type CompilerMessage = string | { 'zh-CN': string; en: string };
+
+/** 构造双语消息，不解析或翻译已有中文字符串。 */
+function bilingual(zh: string, en: string): CompilerMessage {
+  return { 'zh-CN': zh, en };
+}
+
+/** 按实例语言选择消息；外部已本地化字符串保持原样。 */
+function renderMessage(message: CompilerMessage, locale: PlainLocale): string {
+  return typeof message === 'string' ? message : message[locale];
+}
 
 /** 编译器识别出的服务端函数：{ name, body } */
 export interface ServerFunction {
@@ -45,8 +60,10 @@ export interface PlainCompileErrorInit {
   line: number;
   /** 1-based */
   column: number;
-  detail: string;
-  hint: string;
+  detail: CompilerMessage;
+  hint: CompilerMessage;
+  /** 显式语言优先于环境配置。 */
+  locale?: string;
 }
 
 /**
@@ -61,19 +78,32 @@ export class PlainCompileError extends Error {
   readonly column: number;
   readonly detail: string;
   readonly hint: string;
+  readonly locale: PlainLocale;
+  private readonly localizedInit: PlainCompileErrorInit;
 
+  /** 构造完整诊断，已本地化的字符串不做二次翻译。 */
   constructor(init: PlainCompileErrorInit) {
+    const locale = resolveLocale(init.locale);
+    const detail = renderMessage(init.detail, locale);
+    const hint = renderMessage(init.hint, locale);
     super(
-      `[${init.code}] ${init.file}:${init.line}:${init.column} ${init.detail}\n` +
-        `  提示：${init.hint}`
+      `[${init.code}] ${init.file}:${init.line}:${init.column} ${detail}\n` +
+        `  ${locale === 'zh-CN' ? '提示：' : 'Hint: '}${hint}`
     );
-    this.name = "PlainCompileError";
+    this.name = 'PlainCompileError';
     this.code = init.code;
     this.file = init.file;
     this.line = init.line;
     this.column = init.column;
-    this.detail = init.detail;
-    this.hint = init.hint;
+    this.detail = detail;
+    this.hint = hint;
+    this.locale = locale;
+    this.localizedInit = { ...init };
+  }
+
+  /** 在编译边界应用当前编译实例的语言，包括深层 helper 产生的错误。 */
+  withLocale(locale?: string): PlainCompileError {
+    return new PlainCompileError({ ...this.localizedInit, locale });
   }
 
   /** 便于 JSON.stringify / 结构化日志 */
@@ -167,6 +197,8 @@ export interface CompileOptions {
   keyBase?: string;
   /** 是否生成 sourcemap，默认 true */
   sourceMap?: boolean;
+  /** 诊断语言；未传入时按环境解析。 */
+  locale?: string;
 }
 
 /**
@@ -176,7 +208,24 @@ export interface CompileOptions {
  */
 export function compile(
   source: string,
-  fileName = "module.jsx",
+  fileName = 'module.jsx',
+  options: CompileOptions = {}
+): { code: string; serverFunctions: ServerFunction[]; map: CompileSourceMap | null } {
+  const locale = resolveLocale(options.locale);
+  try {
+    return compileInternal(source, fileName, options);
+  } catch (error) {
+    if (error instanceof PlainCompileError && error.locale !== locale) {
+      throw error.withLocale(locale);
+    }
+    throw error;
+  }
+}
+
+/** 执行 AST 遍历、代码生成与产物校验；诊断语言由外层 compile 统一处理。 */
+function compileInternal(
+  source: string,
+  fileName = 'module.jsx',
   options: CompileOptions = {}
 ): { code: string; serverFunctions: ServerFunction[]; map: CompileSourceMap | null } {
   uid = 0;
@@ -221,10 +270,17 @@ export function compile(
           file: fileName,
           line: at.line + 1,
           column: at.character + 1,
-          detail: "server() 的参数必须是内联的箭头函数 / 函数表达式",
-          hint:
-            "把函数体直接写在 server(...) 里；先定义再传引用会导致服务端代码无法物理剥离，" +
-            "客户端会拿到完整函数体。",
+          detail: bilingual(
+            'server() 的参数必须是内联的箭头函数 / 函数表达式',
+            'The argument to server() must be an inline arrow function / function expression'
+          ),
+          hint: bilingual(
+            '把函数体直接写在 server(...) 里；先定义再传引用会导致服务端代码无法物理剥离，' +
+            '客户端会拿到完整函数体。',
+            'Write the function body directly inside server(...). Passing a previously defined ' +
+            'function reference prevents physical removal of server code; the client would receive ' +
+            'the entire function body.'
+          ),
         });
       }
       const name = serverVarName(node);
@@ -352,10 +408,17 @@ function assertClean(code: string, fileName: string): void {
       file: fileName,
       line: at.line + 1,
       column: at.character + 1,
-      detail: `编译产物无法解析：${ts.flattenDiagnosticMessageText(d.messageText, " ")}`,
-      hint:
-        "compile() 的输入必须是「已剥离 TS 类型」的合法 JSX" +
-        "（先用 esbuild 以 jsx: 'preserve' 处理）；若输入本身合法，请附最小复现提 issue",
+      detail: bilingual(
+        `编译产物无法解析：${ts.flattenDiagnosticMessageText(d.messageText, ' ')}`,
+        `Cannot parse compiled output: ${ts.flattenDiagnosticMessageText(d.messageText, ' ')}`
+      ),
+      hint: bilingual(
+        'compile() 的输入必须是「已剥离 TS 类型」的合法 JSX' +
+        '（先用 esbuild 以 jsx: \'preserve\' 处理）；若输入本身合法，请附最小复现提 issue',
+        'compile() requires valid JSX with TypeScript types already removed ' +
+        '(run esbuild with jsx: \'preserve\' first). If the input is valid, ' +
+        'please file an issue with a minimal reproduction.'
+      ),
     });
   }
   let leaked = -1;
@@ -371,8 +434,11 @@ function assertClean(code: string, fileName: string): void {
       file: fileName,
       line: at.line + 1,
       column: at.character + 1,
-      detail: "编译产物里残留了未处理的 JSX（这是编译器 bug）",
-      hint: "请附最小复现提 issue",
+      detail: bilingual(
+        '编译产物里残留了未处理的 JSX（这是编译器 bug）',
+        'Compiled output contains unprocessed JSX (this is a compiler bug)'
+      ),
+      hint: bilingual('请附最小复现提 issue', 'Please file an issue with a minimal reproduction.'),
     });
   }
 }
@@ -680,11 +746,18 @@ function assertServerSelfContained(
     file: fileName,
     line: at.line + 1,
     column: at.character + 1,
-    detail: `server() 的函数体引用了外部变量：${leaks.join(", ")}`,
-    hint:
-      "函数体会被物理搬到服务端，闭包不会跟过去。" +
-      "请在函数体内自己获取（如 process.env.DB_URL、await import(\"./db.js\")），" +
-      "或把值作为参数传进来",
+    detail: bilingual(
+      `server() 的函数体引用了外部变量：${leaks.join(', ')}`,
+      `The server() function body references external variables: ${leaks.join(', ')}`
+    ),
+    hint: bilingual(
+      '函数体会被物理搬到服务端，闭包不会跟过去。' +
+      '请在函数体内自己获取（如 process.env.DB_URL、await import("./db.js")），' +
+      '或把值作为参数传进来',
+      'The function body is physically moved to the server; its closure is not moved with it. ' +
+      'Obtain values inside the function (for example, process.env.DB_URL or ' +
+      'await import("./db.js")), or pass the values as arguments.'
+    ),
   });
 }
 
@@ -855,7 +928,7 @@ function ctorName(n: any): string | null {
 }
 
 /** 返回无法序列化的原因；能序列化或看不出来则返回 null（不猜） */
-function nonJsonReason(expr: any, nonJsonNames: Set<string>): string | null {
+function nonJsonReason(expr: any, nonJsonNames: Set<string>): CompilerMessage | null {
   if (!expr) return null;
   let e = expr;
   while (
@@ -873,31 +946,35 @@ function nonJsonReason(expr: any, nonJsonNames: Set<string>): string | null {
     ts.isFunctionExpression(e) ||
     ts.isFunctionDeclaration(e)
   ) {
-    return "函数";
+    return bilingual('函数', 'function');
   }
   if (ts.isClassExpression(e) || ts.isClassDeclaration(e)) {
-    return "类";
+    return bilingual('类', 'class');
   }
   if (ts.isNewExpression(e)) {
     const name = ctorName(e);
-    if (name && NON_JSON_CTORS.has(name)) return `Stream/二进制实例 "${name}"`;
-    if (name && nonJsonNames.has(name)) return `类实例 "${name}"`;
+    if (name && NON_JSON_CTORS.has(name)) {
+      return bilingual(`Stream/二进制实例 "${name}"`, `Stream/binary instance "${name}"`);
+    }
+    if (name && nonJsonNames.has(name)) {
+      return bilingual(`类实例 "${name}"`, `class instance "${name}"`);
+    }
     return null;
   }
   if (ts.isIdentifier(e) && nonJsonNames.has(e.text)) {
-    return `函数/类 "${e.text}"`;
+    return bilingual(`函数/类 "${e.text}"`, `function/class "${e.text}"`);
   }
   if (ts.isObjectLiteralExpression(e)) {
     for (const p of e.properties) {
       if (ts.isMethodDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)) {
-        return "带方法的对象";
+        return bilingual('带方法的对象', 'object with methods');
       }
       if (ts.isPropertyAssignment(p)) {
         const why = nonJsonReason(p.initializer, nonJsonNames);
         if (why) return why;
       }
       if (ts.isShorthandPropertyAssignment(p) && nonJsonNames.has(p.name.text)) {
-        return `函数/类 "${p.name.text}"`;
+        return bilingual(`函数/类 "${p.name.text}"`, `function/class "${p.name.text}"`);
       }
       if (ts.isSpreadAssignment(p)) {
         const why = nonJsonReason(p.expression, nonJsonNames);
@@ -931,7 +1008,10 @@ function assertServerArgsSerializable(
     if (!why) continue;
     throwSerializationError(
       arg,
-      `server() 的调用参数无法 JSON 序列化（${why}）`,
+      bilingual(
+        `server() 的调用参数无法 JSON 序列化（${renderMessage(why, 'zh-CN')}）`,
+        `server() call argument is not JSON-serializable (${renderMessage(why, 'en')})`
+      ),
       fileName
     );
   }
@@ -956,7 +1036,10 @@ function assertServerReturnsSerializable(
     if (why) {
       throwSerializationError(
         body,
-        `server() 的返回值无法 JSON 序列化（${why}）`,
+        bilingual(
+          `server() 的返回值无法 JSON 序列化（${renderMessage(why, 'zh-CN')}）`,
+          `server() return value is not JSON-serializable (${renderMessage(why, 'en')})`
+        ),
         fileName
       );
     }
@@ -969,7 +1052,10 @@ function assertServerReturnsSerializable(
       if (why) {
         throwSerializationError(
           n,
-          `server() 的返回值无法 JSON 序列化（${why}）`,
+          bilingual(
+            `server() 的返回值无法 JSON 序列化（${renderMessage(why, 'zh-CN')}）`,
+            `server() return value is not JSON-serializable (${renderMessage(why, 'en')})`
+          ),
           fileName
         );
       }
@@ -982,7 +1068,7 @@ function assertServerReturnsSerializable(
 /** 抛出 PLAIN_E1007（调用参数与返回值共用同一错误码） */
 function throwSerializationError(
   node: any,
-  detail: string,
+  detail: CompilerMessage,
   fileName: string
 ): never {
   const sf = node.getSourceFile();
@@ -993,9 +1079,13 @@ function throwSerializationError(
     line: at.line + 1,
     column: at.character + 1,
     detail,
-    hint:
-      "参数与返回值都走 JSON：不要传 / 返回函数、类实例、Stream。" +
-      "把逻辑写进 server() 函数体，只让可序列化的数据过边界",
+    hint: bilingual(
+      '参数与返回值都走 JSON：不要传 / 返回函数、类实例、Stream。' +
+      '把逻辑写进 server() 函数体，只让可序列化的数据过边界',
+      'Arguments and return values both use JSON: do not pass / return functions, class ' +
+      'instances, or Streams. Put logic inside the server() function body and only pass ' +
+      'serializable data across the boundary.'
+    ),
   });
 }
 
@@ -1314,12 +1404,21 @@ function throwStmtJsxUncovered(stmt: any, at?: any): never {
     file: sf.fileName,
     line: loc.line + 1,
     column: loc.character + 1,
-    detail: `这条语句里的 JSX 编译器还不认识：${sf.fileName}:${loc.line + 1}`,
-    hint:
-      "渲染函数 / 列表回调里能直接写 JSX 的位置是 `return`（含 if / try / 循环 / switch / 块），" +
-      "以及 `const Row = () => <jsx/>;` 这种函数初始化。" +
-      "其它写法请把 JSX 挪进 `return`，或抽成一个返回 JSX 的组件函数再调用；" +
-      "JSX 不能当普通值赋给变量（`const el = <a/>` 同样会报这个错）。",
+    detail: bilingual(
+      `这条语句里的 JSX 编译器还不认识：${sf.fileName}:${loc.line + 1}`,
+      `The compiler does not recognize JSX in this statement: ${sf.fileName}:${loc.line + 1}`
+    ),
+    hint: bilingual(
+      '渲染函数 / 列表回调里能直接写 JSX 的位置是 `return`（含 if / try / 循环 / switch / 块），' +
+      '以及 `const Row = () => <jsx/>;` 这种函数初始化。' +
+      '其它写法请把 JSX 挪进 `return`，或抽成一个返回 JSX 的组件函数再调用；' +
+      'JSX 不能当普通值赋给变量（`const el = <a/>` 同样会报这个错）。',
+      'In render functions / list callbacks, JSX can appear directly in `return` ' +
+      '(including if / try / loops / switch / blocks), or in function initializers such as ' +
+      '`const Row = () => <jsx/>;`. Otherwise move JSX into `return`, or extract and call ' +
+      'a component function that returns JSX. JSX cannot be assigned to a variable as an ' +
+      'ordinary value (`const el = <a/>` also produces this error).'
+    ),
   });
 }
 
@@ -1416,12 +1515,19 @@ function assertNoSpreadAttrs(attrs: any, sf: any): void {
     file: sf.fileName,
     line: at.line + 1,
     column: at.character + 1,
-    detail:
-      "JSX 属性展开 {...} 不支持：展开只在创建时求值一次，不会进入响应式更新，" +
-      "也绕过了 class / style / value 的正确处理 —— 会静默跑错。",
-    hint:
-      "改成显式属性，例如 <Card title={t()} onSave={save} />；" +
-      "确实要透传一组属性时，请逐个列出。",
+    detail: bilingual(
+      'JSX 属性展开 {...} 不支持：展开只在创建时求值一次，不会进入响应式更新，' +
+      '也绕过了 class / style / value 的正确处理 —— 会静默跑错。',
+      'JSX attribute spread {...} is not supported: it is evaluated only once at creation, ' +
+      'does not participate in reactive updates, and bypasses correct class / style / value ' +
+      'handling, causing silent incorrect behavior.'
+    ),
+    hint: bilingual(
+      '改成显式属性，例如 <Card title={t()} onSave={save} />；' +
+      '确实要透传一组属性时，请逐个列出。',
+      'Use explicit attributes, for example <Card title={t()} onSave={save} />. ' +
+      'If you need to forward a group of attributes, list them individually.'
+    ),
   });
 }
 
@@ -1437,8 +1543,8 @@ function isAsyncFunction(fn: any): boolean {
 function throwRefError(
   code: PlainErrorCode,
   node: any,
-  detail: string,
-  hint: string
+  detail: CompilerMessage,
+  hint: CompilerMessage
 ): never {
   const sf = node.getSourceFile();
   const at = sf.getLineAndCharacterOfPosition(node.getStart(sf));
@@ -1462,13 +1568,20 @@ function throwRefError(
  */
 function emitRefAttr(el: string, attr: any, out: string[]): void {
   const init = attr.initializer;
-  const hint =
-    "写成 ref={(el) => { … }}；元素连入文档后会用它调用一次，可返回清理函数";
+  const hint = bilingual(
+    '写成 ref={(el) => { … }}；元素连入文档后会用它调用一次，可返回清理函数',
+    'Use ref={(el) => { … }}. It is called once after the element is connected to the ' +
+    'document, and may return a cleanup function.'
+  );
   if (!init || ts.isStringLiteral(init) || ts.isNumericLiteral(init)) {
-    throwRefError("PLAIN_E1010", attr, "ref 需要一个函数：ref={(el) => …}", hint);
+    throwRefError('PLAIN_E1010', attr, bilingual(
+      'ref 需要一个函数：ref={(el) => …}', 'ref requires a function: ref={(el) => …}'
+    ), hint);
   }
   if (!ts.isJsxExpression(init) || !init.expression) {
-    throwRefError("PLAIN_E1010", attr, "ref 需要一个函数：ref={(el) => …}", hint);
+    throwRefError('PLAIN_E1010', attr, bilingual(
+      'ref 需要一个函数：ref={(el) => …}', 'ref requires a function: ref={(el) => …}'
+    ), hint);
   }
   const expr = unparen(init.expression);
   // 明确的非函数字面量：直接报错。标识符 / 调用 / 成员表达式看不出类型，交给运行期兜底。
@@ -1483,23 +1596,34 @@ function emitRefAttr(el: string, attr: any, out: string[]): void {
     expr.kind === ts.SyntaxKind.FalseKeyword ||
     expr.kind === ts.SyntaxKind.NullKeyword
   ) {
-    throwRefError("PLAIN_E1010", attr, "ref 的值必须是函数", hint);
+    throwRefError('PLAIN_E1010', attr, bilingual(
+      'ref 的值必须是函数', 'The value of ref must be a function'
+    ), hint);
   }
   if (ts.isArrowFunction(expr) || ts.isFunctionExpression(expr)) {
     if (isAsyncFunction(expr)) {
       throwRefError(
         "PLAIN_E1011",
         expr,
-        "ref 回调不能是 async",
-        "清理与异步不兼容：把 await 提到回调外，或在回调里自己 catch"
+        bilingual('ref 回调不能是 async', 'A ref callback cannot be async'),
+        bilingual(
+          '清理与异步不兼容：把 await 提到回调外，或在回调里自己 catch',
+          'Cleanup is incompatible with async callbacks: move await outside the callback, or catch errors inside it'
+        )
       );
     }
     if (isJsxLike(unparen(expr.body))) {
       throwRefError(
         "PLAIN_E1010",
         expr,
-        "ref 回调不能返回 JSX（它返回的应是清理函数）",
-        "JSX 请放到组件里；ref 回调只做命令式操作，可返回一个清理函数"
+        bilingual(
+          'ref 回调不能返回 JSX（它返回的应是清理函数）',
+          'A ref callback cannot return JSX (it should return a cleanup function)'
+        ),
+        bilingual(
+          'JSX 请放到组件里；ref 回调只做命令式操作，可返回一个清理函数',
+          'Put JSX in a component; a ref callback should perform imperative work and may return a cleanup function'
+        )
       );
     }
   }
@@ -1521,8 +1645,11 @@ function emitNode(node: any, parentVar: string, out: string[]): void {
       file: sf.fileName,
       line: at.line + 1,
       column: at.character + 1,
-      detail: `遇到不支持的语法节点 ${ts.SyntaxKind[node.kind]}（这是编译器 bug）`,
-      hint: "请附最小复现提 issue",
+      detail: bilingual(
+        `遇到不支持的语法节点 ${ts.SyntaxKind[node.kind]}（这是编译器 bug）`,
+        `Unsupported syntax node ${ts.SyntaxKind[node.kind]} (this is a compiler bug)`
+      ),
+      hint: bilingual('请附最小复现提 issue', 'Please file an issue with a minimal reproduction.'),
     });
   }
   const [tagText, attrs, children] = parts;
@@ -1621,8 +1748,12 @@ function emitComponent(
     throwRefError(
       "PLAIN_E1009",
       refAttr,
-      `组件 <${tagText}> 上不支持 ref`,
-      "ref 只能放在内建元素上：把 ref 放到组件内部的元素上，或改用 props 把节点回调传进组件"
+      bilingual(`组件 <${tagText}> 上不支持 ref`, `ref is not supported on component <${tagText}>`),
+      bilingual(
+        'ref 只能放在内建元素上：把 ref 放到组件内部的元素上，或改用 props 把节点回调传进组件',
+        'ref is only supported on built-in elements: move ref to an element inside the ' +
+        'component, or pass the node callback into the component through props.'
+      )
     );
   }
   const propsVar = fresh("props");
@@ -1817,12 +1948,17 @@ function detectMap(node: any): any {
             file: sf.fileName,
             line: at.line + 1,
             column: at.character + 1,
-            detail:
-              `列表元素的 key 与 index 参数不能同时使用` +
-              `（key=${keyAttr.text}，index 参数 "${index}"）`,
-            hint:
+            detail: bilingual(
+              `列表元素的 key 与 index 参数不能同时使用（key=${keyAttr.text}，index 参数 "${index}"）`,
+              `A list item cannot use both a key and the index parameter ` +
+                `(key=${keyAttr.text}, index parameter "${index}")`
+            ),
+            hint: bilingual(
               `二者选一：想让节点跟着数据走，就删掉 index 参数、保留 key=${keyAttr.text}；` +
-              `想用 index，就删掉 key`,
+                `想用 index，就删掉 key`,
+              `Choose one: to keep nodes associated with data, remove the index parameter and ` +
+                `keep key=${keyAttr.text}; to use index, remove key.`
+            ),
           });
         }
         return { array, param, index, body, cbBody, key: keyAttr ? keyAttr.text : null };
@@ -1952,19 +2088,33 @@ function assertJsxCovered(sf: any, fileName: string): void {
       file: fileName,
       line: first.line,
       column: first.column,
-      detail:
-        "这些位置的 JSX 编译器还不认识：" +
-        missing.map((m) => `${fileName}:${m.line}`).join(", "),
-      hint:
+      detail: bilingual(
+        '这些位置的 JSX 编译器还不认识：' +
+          missing.map((m) => `${fileName}:${m.line}`).join(', '),
+        'The compiler does not recognize JSX at these locations: ' +
+          missing.map((m) => `${fileName}:${m.line}`).join(', ')
+      ),
+      hint: bilingual(
         "组件渲染函数的 'return' 里可以写任意含 JSX 的表达式：" +
         "'return (<jsx/>)'、'return cond ? <a/> : <b/>'、'return cond && <a/>'、" +
         "'return xs.map(x => <li/>)'；列表用 'arr.map(x => <jsx/>)'；" +
         "条件用 '{cond ? <a/> : <b/>}' 或 '{cond && <a/>}'。" +
         "不支持的形状（'||' / '??' 短路的 JSX、数组字面量、IIFE、链式后置 .filter()）请这样改：" +
         "'||' / '??' 改用三元 '{cond ? <a/> : null}'；" +
-        "多个 JSX 直接并排写在同一个父元素 / Fragment 里；" +
-        "IIFE 抽成返回 JSX 的组件函数（function A(){ return <a/>; } 然后 <A/>）；" +
+        '多个 JSX 直接并排写在同一个父元素 / Fragment 里；' +
+        'IIFE 抽成返回 JSX 的组件函数（function A(){ return <a/>; } 然后 <A/>）；' +
         "'.filter(...).map(...)' 改成先 filter 再 map。",
+        'A component render function can return any expression containing JSX: ' +
+        '`return (<jsx/>)`, `return cond ? <a/> : <b/>`, `return cond && <a/>`, ' +
+        'or `return xs.map(x => <li/>)`. Use `arr.map(x => <jsx/>)` for lists, and ' +
+        '`{cond ? <a/> : <b/>}` or `{cond && <a/>}` for conditions. Rewrite unsupported ' +
+        'forms (JSX with || / ?? short-circuiting, array literals, IIFEs, or a trailing ' +
+        'chained .filter()) as follows: replace || / ?? with the ternary ' +
+        '`{cond ? <a/> : null}`; put multiple JSX nodes next to each other inside the same ' +
+        'parent element / Fragment; extract IIFEs into component functions returning JSX ' +
+        '(function A(){ return <a/>; } then <A/>); replace the trailing filter pattern ' +
+        'with `.filter(...).map(...)`, filtering before mapping.'
+      ),
     });
   }
 }

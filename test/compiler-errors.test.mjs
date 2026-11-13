@@ -3,6 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compile, PlainCompileError } from "../dist/compiler/index.js";
 
+process.env.PLAIN_LOCALE = 'zh-CN';
+
 /** 捕获 compile 抛出的错误 */
 function catchCompile(source, fileName) {
   try {
