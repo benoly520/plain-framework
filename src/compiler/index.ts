@@ -145,11 +145,12 @@ const CREATE_EL = "__createEl";
 
 /** 命令式 DOM 逃逸口（ref={fn}）的运行时入口；内部符号，见 docs/rfcs/ref-escape-hatch.md */
 const REF = "__ref";
+const COMPONENT = "__component";
 
 const HELPER_IMPORT =
   `import { effect as ${E}, stringify as ${S}, insert as ${INS}, ` +
   `each as ${EACH}, when as ${WHEN}, rpc as ${RPC}, place as ${PLACE}, ` +
-  `createEl as ${CREATE_EL}, ${REF} } from "plain";`;
+  `createEl as ${CREATE_EL}, ${REF}, ${COMPONENT} } from "plain";`;
 
 function isComponentTag(name: string): boolean {
   return /^[A-Z]/.test(name) || name.includes(".");
@@ -1765,7 +1766,7 @@ function emitComponent(
     parts.push(`children: () => { ${genChildrenBody(meaningful)} }`);
   }
   out.push(`const ${propsVar} = { ${parts.join(", ")} };`);
-  out.push(`${PLACE}(${parentVar}, ${tagText}(${propsVar}));`);
+  out.push(`${PLACE}(${parentVar}, ${COMPONENT}(() => ${tagText}(${propsVar})));`);
 }
 
 function genChildrenBody(children: any): string {
