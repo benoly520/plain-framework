@@ -22,3 +22,6 @@ eval/compare/.tmp/
 
 # 日志
 *.log
+
+# pnpm 本地 store（不应进版本库）
+.pnpm-store/
