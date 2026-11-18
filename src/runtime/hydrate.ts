@@ -1,11 +1,13 @@
 // Plain SSR 注水：hydrate(container, App)
 //
-// 与 SSR 同源 —— 都靠「换掉 globalThis.document」让同一份编译产物跑起来：
-//   - SSR：认领式 document = 零依赖的服务端 DOM 垫片（产出 HTML）
-//   - hydrate：认领式 document = 从服务端已渲染的 DOM 里「按游标取节点」
+// 与 SSR 同源 —— 都靠「认领式 document」让同一份编译产物跑起来：
+//   - SSR：服务端 DOM 垫片（产出 HTML）
+//   - hydrate：从服务端已渲染的 DOM 里「按游标取节点」
 //
-// 结果：编译产物里的 createElement/createTextNode/createComment 拿到的都是
-// 服务端真实节点，**节点对象身份保持不变**（不整树重建）。
+// 浏览器 window.document 只读，**不能整体替换 globalThis.document**；
+// hydrate 只在真实 document 实例上临时覆盖创建方法、用完恢复（见 claim-document.ts），
+// 编译产物里的 createElement/createTextNode/createComment 拿到的都是服务端真实节点，
+// **节点对象身份保持不变**（不整树重建）。
 //
 // 未注水时 mount() 完全不碰这条路径，行为零变化。
 
@@ -17,7 +19,7 @@ import {
   assertConsumed,
   type HydrationWarning,
 } from "./hydration-context.js";
-import { makeClaimDocument } from "./claim-document.js";
+import { installClaimDocument } from "./claim-document.js";
 import { hmrRegister, getHmrModuleId } from "./hmr.js";
 import { syncRange, toNodes } from "./dom.js";
 import { flushRefs } from "./ref.js";
@@ -63,10 +65,6 @@ export function hydrate(
   // 以容器所属 document 为准（而非可能被 SSR 垫片污染的 globalThis.document）
   const realDoc: Document = (container.ownerDocument || (globalThis as any).document) as Document;
   const win: any = (realDoc as any).defaultView || (globalThis as any).window;
-  // 记录进入前的全局，认领结束后**恢复到容器所属文档**——
-  // 若此前 globalThis.document 是服务端垫片（SSR 未清理），还原成垫片会让
-  // 后续 hydration 之外的新建操作产出 shim 节点（节点挂父级时报只读错）。
-  const prevDoc = (globalThis as any).document;
 
   // 首屏数据：先种进 runtime，再跑 App —— resource 首帧就拿到服务端的值，
   // 于是**与 HTML 一致**（不闪 loading，也不必为对齐首屏先请求一次）。
@@ -88,7 +86,9 @@ export function hydrate(
    */
   const claim = (comp: () => Renderable): void => {
     beginHydrate(container, { recover });
-    (globalThis as any).document = makeClaimDocument(realDoc);
+    // 在真实 document 实例上临时安装认领方法；浏览器 window.document 只读，
+    // 不能像服务端那样整体替换 globalThis.document。
+    const restoreDocument = installClaimDocument(realDoc);
     let node: Renderable = null;
     try {
       withOwner(cleanups, () => {
@@ -96,18 +96,18 @@ export function hydrate(
       });
       assertConsumed(container);
     } finally {
+      // 先恢复 document 原始方法，再结束认领上下文。
+      restoreDocument();
       warnings = endHydrate();
-      // 恢复到「容器所属文档」，而不是进入前的值：进入前可能被 SSR 垫片占用
-      (globalThis as any).document = realDoc;
-      // 全局 Node/Element 等构造器同样指向容器所属 window（SSR 垫片会覆盖它们）
-      if (win) {
+      // 全局 Node/Element 等构造器同样指向容器所属 window（SSR 垫片会覆盖它们）。
+      // 浏览器里这些赋值是安全的：win 就是当前 window，值不变。
+      if (win && win !== globalThis) {
         (globalThis as any).Node = win.Node;
         (globalThis as any).Element = win.Element;
         (globalThis as any).HTMLElement = win.HTMLElement;
         (globalThis as any).Event = win.Event;
         (globalThis as any).window = win;
       }
-      void prevDoc;
     }
 
     // 把 App 产出的节点安放好：认领到的节点可能已被 append 进一个 fragment，

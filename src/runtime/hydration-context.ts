@@ -1,8 +1,8 @@
 // Plain hydration 上下文（零依赖）
 //
-// hydrate 的机制与 SSR 同源：SSR 靠「换掉 globalThis.document」让同一份编译产物
-// 在 Node 里跑；hydrate 靠「换掉 globalThis.document」让同一份产物在浏览器里
-// **认领**服务端已渲染好的真实节点，而不是新建。
+// hydrate 的机制与 SSR 同源：SSR 靠服务端 DOM 垫片让同一份编译产物在 Node 里跑；
+// hydrate 靠在真实 document 实例上临时覆盖创建方法（见 claim-document.ts），
+// 让同一份产物在浏览器里**认领**服务端已渲染好的真实节点，而不是新建。
 //
 // 本模块只维护「认领游标」这一件状态，不依赖 dom.ts / signal.ts，
 // 从而避免 dom.ts <-> hydrate.ts 的循环依赖。
@@ -232,11 +232,20 @@ export function claimPair(
   // 递归认领，不能在这里把它们也当作顶层 content 收走。
   const content: any[] = [];
   let close: any = null;
+  // 嵌套三元会产出多对同名锚点（plain-? / plain-/? 连续嵌套）：
+  // 必须配对到**最外层**的 close，否则内层 close 会被当成外层结束，游标错位、后续节点认领失败。
+  let depth = 1;
   let sib: any = start.nextSibling;
   while (sib) {
-    if (sib.nodeType === 8 && sib.nodeValue === closeLabel) {
-      close = sib;
-      break;
+    if (sib.nodeType === 8) {
+      if (sib.nodeValue === openLabel) depth++;
+      else if (sib.nodeValue === closeLabel) {
+        depth--;
+        if (depth === 0) {
+          close = sib;
+          break;
+        }
+      }
     }
     content.push(sib);
     sib = sib.nextSibling;

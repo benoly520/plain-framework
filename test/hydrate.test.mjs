@@ -79,6 +79,42 @@ async function renderSSR(mod) {
 // ---------------------------------------------------------------------------
 // 1. 节点身份：hydrate 必须复用服务端节点，而不是清空重建
 // ---------------------------------------------------------------------------
+test("globalThis.document 只读时 hydrate 仍复用服务端节点", async () => {
+  const { mod } = await compileModule(
+    `
+    import { signal } from "plain";
+    export const name = signal("Plain");
+    export function App() {
+      return <section class="page"><h1>{name()}</h1></section>;
+    }
+    `,
+    "readonly-doc"
+  );
+
+  const html = await renderSSR(mod);
+  await inDom(html, async (dom) => {
+    // 模拟浏览器：document 是只读访问器，不能整体赋值
+    const g = globalThis;
+    const saved = Object.getOwnPropertyDescriptor(g, "document");
+    Object.defineProperty(g, "document", {
+      configurable: true,
+      enumerable: true,
+      get: () => dom.window.document,
+      // 只有 getter：ESM 严格模式下赋值即抛错，等价于浏览器 window.document
+    });
+    try {
+      const container = dom.window.document.body;
+      const before = container.querySelector("h1");
+      const { dispose } = hydrate(container, mod.App, { warn: false });
+      assert.equal(container.querySelector("h1"), before, "只读 document 下 h1 仍应复用");
+      assert.equal(container.querySelector("h1").textContent, "Plain");
+      dispose();
+    } finally {
+      Object.defineProperty(g, "document", saved);
+    }
+  });
+});
+
 test("hydrate 复用服务端节点（节点身份不变）", async () => {
   const { mod } = await compileModule(
     `
@@ -235,7 +271,36 @@ test("hydrate 复用条件分支节点（when 认领）", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. 回归：未注水的 mount 行为完全不变
+// 6. 嵌套三元：同名 when 锚点必须正确配对，不产生 mismatch
+// ---------------------------------------------------------------------------
+test("hydrate 嵌套三元不产生锚点错位告警", async () => {
+  const { mod } = await compileModule(
+    `
+    export function App() {
+      const p = "chat";
+      return <div><span>工作空间 / {p==='a'?'A':p==='b'?'B':'C'}</span>
+        <h2>{p==='a'?'A':p==='b'?'B':'C'}</h2></div>;
+    }
+    `,
+    "nested-when"
+  );
+
+  const html = await renderSSR(mod);
+  await inDom(html, async (dom) => {
+    const container = dom.window.document.body;
+    const beforeH2 = container.querySelector("h2");
+    const beforeText = beforeH2.textContent;
+    const { dispose, warnings } = hydrate(container, mod.App, { warn: false });
+    assert.deepEqual(warnings, [], "嵌套 when 锚点配对不应产生告警");
+    const afterH2 = container.querySelector("h2");
+    assert.equal(afterH2, beforeH2, "h2 身份不变");
+    assert.equal(afterH2.textContent, beforeText, "h2 文本应保留");
+    dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. 回归：未注水的 mount 行为完全不变
 // ---------------------------------------------------------------------------
 test("mount 未注水行为不变（回归）", async () => {
   const { mod } = await compileModule(
