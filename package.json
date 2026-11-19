@@ -43,6 +43,10 @@
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
     },
+    "./runtime-info": {
+      "types": "./dist/runtime/runtime-info.d.ts",
+      "default": "./dist/runtime/runtime-info.js"
+    },
     "./types": "./dist/index.d.ts"
   },
   "files": [

@@ -24,7 +24,8 @@ import {
 } from "./signal.js";
 import { getHydrationCtx, claimPair, suspendHydrate } from "./hydration-context.js";
 import { hmrRegister } from "./hmr.js";
-import { flushRefs } from "./ref.js";
+import { flushRefs } from './ref.js';
+import { setRootState, clearRootState, withRenderPhase } from './runtime-state.js';
 
 export function stringifySafe(v: unknown): string {
   return stringify(v);
@@ -65,14 +66,19 @@ export function mount(
   let current: Node[] = [];
   // 组件渲染产生的一切 effect 归入 cleanups：HMR 热替换只需回收它们（不动 DOM）
   let cleanups = new Set<() => void>();
-  const render = () => {
+  const rootState = setRootState(el, {
+    origin: 'csr',
+    hydration: 'not-started',
+    warnings: 0,
+  });
+  const render = () => withRenderPhase('client-render', () => {
     const n = isComp
       ? withOwner(cleanups, () => (node as () => Renderable)())
       : node;
     const nodes = toNodes(n);
     syncRange(startMark, endMark, nodes);
     current = nodes; // 记录「已插入的实际节点」，卸载时按它们移除（fragment 已被抽干）
-  };
+  });
   render();
 
   const unmount = () => {
@@ -83,6 +89,7 @@ export function mount(
     current.forEach((x: any) => x.remove && x.remove());
     startMark.remove && startMark.remove();
     endMark.remove && endMark.remove();
+    clearRootState(el, rootState);
   };
 
   // HMR：仅对「组件形式」的挂载注册热替换（普通节点无可替换的 comp）

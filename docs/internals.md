@@ -563,6 +563,83 @@ beginHydrate(root) → flatten(root)          // 深度优先的「文档顺序�
 - 钩子挂在 `globalThis.__plainSSRContext` 共享槽上：SSR 构建若把运行时打了两份，
   模块局部变量跨不过去（应用那份会以为「不在 SSR」，`server()` 退回 HTTP），共享槽让两份副本认同一个上下文。
 
+### 7.7 SSR、CSR 与 hydration：页面生成和客户端接管是两件事
+
+SSR 与 hydration 不是互斥的运行模式，而是一次页面启动中可连续发生的两个阶段：
+
+1. **SSR（服务端渲染）**：服务端执行组件，通过垫片生成 HTML 字符串；浏览器解析响应后，
+   即使应用 JS 尚未执行，也能显示已输出的页面结构。
+2. **hydration（注水 / 接管）**：浏览器执行客户端组件逻辑，建立状态、响应式订阅和事件监听，
+   将它们关联到服务端 HTML 已形成的 DOM 上，尽量保持节点身份不变。
+3. **客户端更新**：接管后，交互和状态变化由浏览器运行时驱动，不是服务端继续操作浏览器 DOM。
+
+HTML 能传递标签、属性、文字和序列化数据，不能直接传递服务端内存中的函数与订阅关系。
+因此「服务器已经输出按钮」不等于「业务点击事件已经绑定」；链接、表单等浏览器原生行为
+仍可能在接管前可用。hydration 也不是把已有 HTML 简单显示出来，而是重建客户端运行关系。
+
+| 路径 | 首次页面结构 | 客户端启动行为 |
+| --- | --- | --- |
+| 纯 CSR | 浏览器执行 JS 后生成 | `mount()` 创建并插入 DOM |
+| SSR + hydration | 服务端生成 HTML，浏览器解析成 DOM | `hydrate()` 认领已有节点并绑定交互 |
+| SSR 后重新挂载 | 服务端先输出 HTML | 客户端丢弃或替换旧树；有 SSR，但不是成功的节点复用 |
+
+两端首次执行必须使用可匹配的结构和初始数据。时间、随机数、主题或条件分支不一致，
+都可能造成 hydration mismatch；Plain 的认领与恢复规则见 §7.5。
+服务端成功输出页面，不代表客户端接管一定成功，两者必须分别验收：
+
+- **SSR**：原始 Document 响应已经包含实际页面结构，而不只是空挂载容器。
+- **hydration**：关键 DOM 节点身份保持、事件与响应式生效，并检查 mismatch / 恢复记录。
+- **数据 SSR**：页面结构经过 SSR，不代表所有业务数据都参与了 SSR；浏览器后续 API 加载
+  的聊天或历史数据，不会因为外层页面经过 SSR 就自动成为首屏服务端数据。
+
+### 7.8 框架自主识别渲染状态：显式查询协议 v1
+
+Plain 通过独立子路径 `plain/runtime-info` 提供显式查询方法：
+
+```ts
+import { getRuntimeInfo, getRootInfo } from 'plain/runtime-info';
+
+const runtime = getRuntimeInfo();
+const root = getRootInfo(container);
+```
+
+查询模块不自动安装 `globalThis.__plain_runtime__`，也不扩充 `plain` 主入口的命名导出。
+包保持 `sideEffects: false`；未导入 `plain/runtime-info` 时，查询代码可以被打包器裁剪。
+实现位于 `src/runtime/runtime-state.ts` 与 `src/runtime/runtime-info.ts`，类型位于
+`src/types.ts`。
+
+`getRuntimeInfo()` 每次返回冻结快照：
+
+| 字段 | 取值 | 含义 |
+| --- | --- | --- |
+| `schemaVersion` | `1` | 查询结果的数据格式版本 |
+| `frameworkVersion` | `0.7.0` | Plain 框架版本 |
+| `environment` | `server` / `browser` | 当前执行环境 |
+| `phase` | `idle` / `server-render` / `hydrate` / `client-render` | 调用时的渲染阶段 |
+
+`getRootInfo(container)` 返回根的冻结快照，或在未挂载且没有 SSR 标记时返回 `undefined`：
+
+| 字段 | 取值 | 含义 |
+| --- | --- | --- |
+| `origin` | `ssr` / `csr` / `unknown` | SSR 来源证据、显式客户端挂载或未知来源 |
+| `hydration` | `not-started` / `hydrating` / `hydrated` / `failed` | 根接管生命周期 |
+| `warnings` | 数字 | 接管告警数量；完成接管不代表零 mismatch |
+
+快照的 `phase` 是调用瞬间读取的值；渲染阶段改变后，已有对象不会实时变化，必须重新调用
+`getRuntimeInfo()`。服务端阶段使用现有 SSR reader 查询请求级 `AsyncLocalStorage`，不保存进程级
+可变 SSR 标志；请求外返回 `idle`。客户端阶段使用同步作用域并在 `finally` 恢复。
+
+服务端同步、异步以及无外层容器的 HTML 输出统一携带 `<!--plain-ssr:v1-->` 注释。
+`getRootInfo()` 可在接管前识别根的直接子节点标记；`hydrate()` 消费标记再进行认领，
+避免影响游标。显式 `hydrate()` 缺少标记时记录 `unknown`，不凭子节点猜测来源。
+`mount()` 表示显式 CSR，HMR 保留根记录，卸载清理记录。项目仍需明确调用 `hydrate()` 或
+`mount()`，框架不会自动选择入口。诊断信息按根隔离不代表资源数据种子也已按多根隔离。
+
+内部共享槽通过版本化 Symbol 在同一执行环境的运行时副本之间共享，根记录使用 WeakMap；
+这不是公开全局 API。查询结果只暴露诊断信息，不暴露 handler、凭据或请求数据，也不是鉴权依据。
+Node 中的 JSDOM 仍为 `server` 环境；Node 与浏览器不共享内存。
+
+
 ---
 
 ## 8. HMR

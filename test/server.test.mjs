@@ -73,7 +73,7 @@ test("SSR 序列化：文本/属性转义、void 标签、样式、认领锚点�
 
   assert.equal(
     renderToStringSync(box),
-    '<div class="a&quot;b">&lt;b&gt;&amp;&lt;/b&gt;<input><br><!--plain-[--><img style="background-color:red"></div>'
+    '<!--plain-ssr:v1--><div class="a&quot;b">&lt;b&gt;&amp;&lt;/b&gt;<input><br><!--plain-[--><img style="background-color:red"></div>'
   );
 });
 
@@ -112,13 +112,14 @@ test("renderToString：container 包裹开关 + 异步 wait", async () => {
     section.appendChild(d.createTextNode("hi"));
     return section;
   };
-  assert.equal(await renderToString(build, { container: false }), "<section>hi</section>");
-  assert.equal(await renderToString(build), "<div><section>hi</section></div>");
+  assert.equal(await renderToString(build, { container: false }),
+    '<!--plain-ssr:v1--><section>hi</section>');
+  assert.equal(await renderToString(build), '<div><!--plain-ssr:v1--><section>hi</section></div>');
   assert.equal(
     await renderToString(build, { wait: 5, container: false }),
-    "<section>hi</section>"
+    '<!--plain-ssr:v1--><section>hi</section>'
   );
-  assert.equal(await renderToString(null, { container: false }), "");
+  assert.equal(await renderToString(null, { container: false }), '<!--plain-ssr:v1-->');
 });
 
 // ---------------------------------------------------------------------------

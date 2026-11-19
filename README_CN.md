@@ -175,6 +175,33 @@ export default defineConfig({
 | `hydrate(el, App, opts?)` | SSR 注水：复用服务端节点，自动读回首屏数据载荷，返回 `{ dispose, warnings }` |
 | `hmrApply(id, newMod)` | 热替换指定模块的挂载点（一般由 vite 插件调，无需手写） |
 
+### 运行时诊断（显式查询）
+
+从 `plain/runtime-info` 导入 `getRuntimeInfo`、`getRootInfo`；两端使用相同接口，
+不自动安装公开全局对象，也不扩充 `plain` 主入口的命名导出。包保持 `sideEffects: false`，
+未使用的查询代码可被裁剪。
+
+| 查询 | 说明 |
+| --- | --- |
+| `getRuntimeInfo().schemaVersion` | 数据格式版本，当前为 `1` |
+| `getRuntimeInfo().frameworkVersion` | Plain 框架版本字符串 |
+| `getRuntimeInfo().environment` | 当前执行环境：`server` / `browser` |
+| `getRuntimeInfo().phase` | 当前入口执行阶段：`idle` / `server-render` / `hydrate` / `client-render` |
+| `getRootInfo(container)` | 根容器状态的只读快照；未挂载且无 SSR 标记时返回 `undefined` |
+
+方法返回冻结快照，`phase` 在调用时读取；已有快照不会随渲染阶段实时变化，需再次查询。
+根快照包含 `origin`（`ssr` / `csr` / `unknown`）、`hydration`
+（`not-started` / `hydrating` / `hydrated` / `failed`）与 `warnings`（接管告警数量）。
+SSR 输出携带 `<!--plain-ssr:v1-->` 标记；框架在接管前读取并消费它。
+来源标记缺失时，显式 `hydrate()` 记录 `unknown`；显式 `mount()` 记录 `csr`。
+
+**判断页面来源用 `getRootInfo(container)?.origin`，不是 `environment` 或 `phase`。**
+接管完成后当前阶段返回 `idle`，但根的 SSR 来源仍保留；`hydrated` 不代表零 mismatch，
+还应检查 `warnings`。框架不会自动选择 `mount()` 或 `hydrate()`，项目仍显式调用对应入口。
+卸载清理根记录；诊断状态不是鉴权依据。Node 中的 JSDOM 仍属于 `server` 环境。
+
+实现与并发边界见 [内核说明 §7.8](docs/internals.md#78-框架自主识别渲染状态显式查询协议-v1)。
+
 ### 异步与跨端
 
 | API | 说明 |

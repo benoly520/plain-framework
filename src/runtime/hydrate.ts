@@ -23,7 +23,13 @@ import { installClaimDocument } from "./claim-document.js";
 import { hmrRegister, getHmrModuleId } from "./hmr.js";
 import { syncRange, toNodes } from "./dom.js";
 import { flushRefs } from "./ref.js";
-import { __loadSSRPayload, type SSREntry } from "./ssr-context.js";
+import { __loadSSRPayload, type SSREntry } from './ssr-context.js';
+import {
+  SSR_MARKER,
+  setRootState,
+  clearRootState,
+  withRenderPhase,
+} from './runtime-state.js';
 
 export interface HydrateOptions {
   /**
@@ -79,6 +85,11 @@ export function hydrate(
   let warnings: HydrationWarning[] = [];
   let cleanups = new Set<() => void>();
   let live: Node[] = [];
+  let rootState = setRootState(container, {
+    origin: hasSSRMarker(container) ? 'ssr' : 'unknown',
+    hydration: 'not-started',
+    warnings: 0,
+  });
 
   /**
    * 首次认领：进入认领模式 → 跑 App（其 createElement 等就地认领服务端节点）
@@ -149,7 +160,19 @@ export function hydrate(
     live = nodes;
   };
 
-  claim(App);
+  rootState = setRootState(container, { ...rootState, hydration: 'hydrating' });
+  try {
+    withRenderPhase('hydrate', () => claim(App));
+    rootState = setRootState(container, {
+      ...rootState, hydration: 'hydrated', warnings: warnings.length,
+    });
+  } catch (error) {
+    rootState = setRootState(container, {
+      ...rootState, hydration: 'failed', warnings: warnings.length,
+    });
+    cleanups.forEach((cleanup) => cleanup());
+    throw error;
+  }
 
   if (doWarn && warnings.length) {
     for (const w of warnings) {
@@ -164,17 +187,37 @@ export function hydrate(
     live.forEach((n) => (n as any).remove && (n as any).remove());
   };
 
-  hmrRegister({
+  const unregister = hmrRegister({
     // 显式 moduleId 优先；否则取当前模块作用域 id（vite 插件注入）；再兜底固定名
     id: moduleId ?? getHmrModuleId() ?? "__hydrate__",
     container,
     comp: App,
     // 热替换：只回收旧 effect 与旧节点（DOM 由 rebuild 的 syncRange 做最小重排）
     dispose: dispose,
-    rebuild,
-  });
+    rebuild: (comp) => withRenderPhase('client-render', () => rebuild(comp)),  });
 
-  return { dispose, warnings };
+  return {
+    dispose: () => {
+      unregister();
+      dispose();
+      startMark.remove();
+      endMark.remove();
+      clearRootState(container, rootState);
+    },
+    warnings,
+  };
+}
+
+/** 消费根级 SSR 来源标记，不让它参与 DOM 认领游标。 */
+function hasSSRMarker(container: Element): boolean {
+  let found = false;
+  for (const node of Array.from(container.childNodes)) {
+    if (node.nodeType === 8 && node.nodeValue === SSR_MARKER) {
+      node.remove();
+      found = true;
+    }
+  }
+  return found;
 }
 
 /**

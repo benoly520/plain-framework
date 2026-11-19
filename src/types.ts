@@ -106,6 +106,19 @@ export interface Router {
 // ---------------------------------------------------------------------------
 // JSX 类型：不做过度约束，重点是让「合法写法不报错」
 // ---------------------------------------------------------------------------
+export interface PlainRootState {
+  readonly origin: 'ssr' | 'csr' | 'unknown';
+  readonly hydration: 'not-started' | 'hydrating' | 'hydrated' | 'failed';
+  readonly warnings: number;
+}
+
+export interface PlainRuntime {
+  readonly schemaVersion: 1;
+  readonly frameworkVersion: string;
+  readonly environment: 'server' | 'browser';
+  readonly phase: 'idle' | 'server-render' | 'hydrate' | 'client-render';
+}
+
 declare global {
   namespace JSX {
     /** 合法返回值：普通 Node 或 Slot（Slot 用于「事后整体替换内容」的组件） */

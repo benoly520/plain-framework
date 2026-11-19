@@ -180,6 +180,36 @@ once and cheap to compute, a plain function is the better deal.
 | `hydrate(el, App, opts?)` | SSR hydration: reuse server nodes, auto-read the first-paint payload, returns `{ dispose, warnings }` |
 | `hmrApply(id, newMod)` | hot-swap the mount point of a module (usually called by the vite plugin, no need to write by hand) |
 
+### Runtime diagnostics (explicit queries)
+
+Import `getRuntimeInfo` and `getRootInfo` from `plain/runtime-info` in either environment.
+There is no automatically installed public global object and no new named export on the
+main `plain` entry. The package keeps `sideEffects: false`, allowing unused query code to be removed.
+
+| Query | Meaning |
+| --- | --- |
+| `getRuntimeInfo().schemaVersion` | Data schema version, currently `1` |
+| `getRuntimeInfo().frameworkVersion` | Plain framework version string |
+| `getRuntimeInfo().environment` | Execution environment: `server` / `browser` |
+| `getRuntimeInfo().phase` | Current entry execution phase: `idle` / `server-render` / `hydrate` / `client-render` |
+| `getRootInfo(container)` | Read-only root snapshot; `undefined` when unmounted and without an SSR marker |
+
+Queries return frozen snapshots: phase is read at call time, not updated live in an existing snapshot.
+Root snapshots contain `origin` (`ssr` / `csr` / `unknown`), `hydration`
+(`not-started` / `hydrating` / `hydrated` / `failed`), and `warnings` (hydration warning count).
+SSR output includes a `<!--plain-ssr:v1-->` marker, read and consumed before hydration.
+Explicit `hydrate()` without a marker records `unknown`; explicit `mount()` records `csr`.
+
+**Use `getRootInfo(container)?.origin` for page origin, not `environment` or `phase`.**
+After hydration, the current phase returns to `idle` while the root's SSR origin remains available.
+`hydrated` does not mean zero mismatches: also inspect `warnings`. The framework does not
+automatically choose between `mount()` and `hydrate()`; applications still call them explicitly.
+Unmounting removes root records. Diagnostics are not an authorization mechanism.
+JSDOM in Node still has environment `server`.
+
+See [internals §7.8](docs/internals.md#78-框架自主识别渲染状态显式查询协议-v1)
+for implementation and concurrency boundaries.
+
 ### Async & Cross-environment
 
 | API | Description |

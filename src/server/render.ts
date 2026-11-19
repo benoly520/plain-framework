@@ -9,6 +9,7 @@
 import { serializeNode } from "./dom-shim.js";
 import { createScope } from "../runtime/signal.js";
 import { runSSR, pendingCount, settlePending } from "./ssr-scope.js";
+import { SSR_MARKER } from '../runtime/runtime-state.js';
 import type { SSREntry } from "../runtime/ssr-context.js";
 
 export type RenderableNode = any;
@@ -82,7 +83,7 @@ export async function renderToStringWithData(
       try {
         await settleResources();
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-        const html = scope.value.childNodes.map(serializeNode).join("");
+        const html = `<!--${SSR_MARKER}-->` + scope.value.childNodes.map(serializeNode).join("");
         return {
           html: container ? `<div>${html}</div>` : html,
           // 「没拿到值」也要带上（ok:false）：客户端按创建序消费，
@@ -146,7 +147,7 @@ export function renderToStringSync(
         return node;
       });
       try {
-        return serializeNode(scope.value);
+        return `<!--${SSR_MARKER}-->` + serializeNode(scope.value);
       } finally {
         scope.dispose();
       }
